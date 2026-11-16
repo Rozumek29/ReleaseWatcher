@@ -1,13 +1,20 @@
+import { timingSafeEqual } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { ReleaseChecker } from './checker.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
+import { errorMessage, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
 import { Poller } from './poller.ts';
+import { containerRoutes, containerStatus } from './proxmox/routes.ts';
+import { ContainerScheduler } from './proxmox/scheduler.ts';
+import { ContainerService } from './proxmox/service.ts';
+import type { NodeShell } from './proxmox/ssh.ts';
+import { ContainerStore } from './proxmox/store.ts';
 import {
   MAX_POLL_INTERVAL_MINUTES,
   MIN_POLL_INTERVAL_MINUTES,
@@ -78,12 +85,24 @@ export interface AppDeps {
   embeddedUi?: ReadonlyMap<string, string>;
   /** Defaults to an `info` level logger. */
   log?: Logger;
+  /** Runs commands on the Proxmox node; defaults to an unconfigured shell (containers cannot be checked). */
+  shell?: NodeShell;
+  /** When set, the UI and API (except /health) require these HTTP Basic credentials. */
+  basicAuth?: { username: string; password: string } | null;
 }
+
+const unconfiguredShell: NodeShell = {
+  isConfigured: false,
+  run: () => Promise.reject(new Error('The Proxmox node is not configured.')),
+};
 
 export interface App {
   checker: ReleaseChecker;
   /** Created but not started – call `poller.start()`. */
   poller: Poller;
+  /** Created but not started – call `scheduler.start()`. */
+  scheduler: ContainerScheduler;
+  containers: ContainerService;
   log: Logger;
   /** Starts the HTTP server (`port: 0` picks a free port). */
   listen(options: { port: number; hostname: string }): Bun.Server<undefined>;
@@ -119,16 +138,6 @@ export const toDto = (r: WatchedRepository) => ({
     return diff === null ? null : diff > 0;
   })(),
 });
-
-/** RFC 7807-style error response, consumed by the UI. */
-function problem(status: number, title: string, extra: Record<string, unknown> = {}): Response {
-  return Response.json({ status, title, ...extra }, { status, headers: { 'content-type': 'application/problem+json' } });
-}
-
-const validationProblem = (field: string, message: string) =>
-  problem(400, 'One or more validation errors occurred.', { errors: { [field]: [message] } });
-
-const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 const addRepositorySchema: ObjectSchema = {
   type: 'object',
@@ -167,6 +176,11 @@ const settingsSchema: ObjectSchema = {
     discordUsername: { type: 'string', nullable: true },
     githubToken: { type: 'string', nullable: true },
     pollIntervalMinutes: { type: 'number', nullable: true },
+    proxmoxHost: { type: 'string', nullable: true, maxLength: 253 },
+    proxmoxPort: { type: 'number', nullable: true },
+    proxmoxUser: { type: 'string', nullable: true, maxLength: 32 },
+    proxmoxSshKey: { type: 'string', nullable: true, maxLength: 20_000 },
+    containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
   },
 };
 
@@ -231,6 +245,20 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, log);
   settings.onChange(() => poller.reschedule());
 
+  const shell = deps.shell ?? unconfiguredShell;
+  const containerStore = new ContainerStore(store.database);
+  const interrupted = containerStore.failInterruptedRuns();
+  if (interrupted > 0) {
+    log.warn({ count: interrupted }, 'Marked runs interrupted by a restart as failed');
+  }
+  const containers = new ContainerService({ containers: containerStore, repositories: store, shell, dispatcher, log });
+  const scheduler = new ContainerScheduler({
+    store: containerStore,
+    service: containers,
+    defaultCron: () => settings.current.containerCheckCron,
+    log,
+  });
+
   const settingsDto = () => {
     const current = settings.current;
     return {
@@ -252,6 +280,18 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         minIntervalMinutes: MIN_POLL_INTERVAL_MINUTES,
         maxIntervalMinutes: MAX_POLL_INTERVAL_MINUTES,
       },
+      proxmox: {
+        configured: shell.isConfigured,
+        host: current.proxmoxHost,
+        hostSource: settings.sourceOf('proxmoxHost'),
+        port: current.proxmoxPort,
+        user: current.proxmoxUser,
+        // The key itself is never returned.
+        sshKeyConfigured: !!current.proxmoxSshKey,
+        sshKeySource: settings.sourceOf('proxmoxSshKey'),
+        checkCron: current.containerCheckCron,
+        checkCronSource: settings.sourceOf('containerCheckCron'),
+      },
     };
   };
 
@@ -265,6 +305,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         withErrors: repositories.filter((r) => r.lastError).length,
         updatesAvailable: repositories.filter((r) => toDto(r).updateAvailable).length,
       },
+      containers: containerStatus(containerStore),
     };
   };
 
@@ -392,6 +433,44 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return Response.json(settingsDto());
   };
 
+  // Optional HTTP Basic auth: the API can run commands as root on the Proxmox node.
+  const expectedAuth = deps.basicAuth
+    ? Buffer.from(`Basic ${Buffer.from(`${deps.basicAuth.username}:${deps.basicAuth.password}`).toString('base64')}`)
+    : null;
+  const authorized = (req: Request): boolean => {
+    if (!expectedAuth) {
+      return true;
+    }
+    const given = Buffer.from(req.headers.get('authorization') ?? '');
+    return given.length === expectedAuth.length && timingSafeEqual(given, expectedAuth);
+  };
+  const unauthorized = () =>
+    new Response('Authentication required.', {
+      status: 401,
+      headers: { 'www-authenticate': 'Basic realm="ReleaseWatcher", charset="UTF-8"' },
+    });
+  /** Wraps every route handler with the auth check; /health stays public for container health checks. */
+  const protect = <R extends string>(routes: Bun.Serve.Routes<undefined, R>): Bun.Serve.Routes<undefined, R | '/health'> => {
+    type AnyHandler = (req: Request, server: Bun.Server<undefined>) => Response | Promise<Response>;
+    const guard =
+      (handler: AnyHandler): AnyHandler =>
+      (req, server) =>
+        authorized(req) ? handler(req, server) : unauthorized();
+    const wrapped: Record<string, unknown> = {};
+    for (const [path, value] of Object.entries(routes)) {
+      wrapped[path] =
+        typeof value === 'function'
+          ? guard(value as AnyHandler)
+          : value && typeof value === 'object' && !(value instanceof Response) && !('dir' in value)
+            ? Object.fromEntries(
+                Object.entries(value).map(([method, h]) => [method, typeof h === 'function' ? guard(h as AnyHandler) : h]),
+              )
+            : value;
+    }
+    wrapped['/health'] = { GET: () => Response.json({ status: 'ok' }) };
+    return wrapped as Bun.Serve.Routes<undefined, R | '/health'>;
+  };
+
   // Angular UI + SPA fallback; everything else (incl. unknown /api routes) is a 404 problem.
   const ui = await createUiResolver(deps);
   const fallback = async (req: Request) => {
@@ -408,8 +487,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     server = Bun.serve({
       port: options.port,
       hostname: options.hostname,
-      routes: {
-        '/health': { GET: () => Response.json({ status: 'ok' }) },
+      routes: protect({
+        ...containerRoutes({ containers: containerStore, repositories: store, service: containers, scheduler }),
 
         '/api/repositories': {
           GET: () => Response.json(store.list().map(toDto)),
@@ -484,8 +563,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
           },
         },
-      },
-      fetch: fallback,
+      }),
+      fetch: (req) => (authorized(req) ? fallback(req) : unauthorized()),
       error: (error) => {
         if (error instanceof RequestValidationError) {
           return validationProblem('request', error.message);
@@ -499,9 +578,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const close = async () => {
     poller.stop();
+    await scheduler.stop();
     await server?.stop();
     server = null;
+    await containers.idle();
   };
 
-  return { checker, poller, log, listen, close };
+  return { checker, poller, scheduler, containers, log, listen, close };
 }

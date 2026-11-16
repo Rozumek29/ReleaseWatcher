@@ -1,5 +1,6 @@
 import { ownerAvatarUrl } from '../domain.ts';
 import {
+  type ContainerUpdatesNotification,
   notificationFullName,
   notificationRepoUrl,
   type Notifier,
@@ -37,8 +38,17 @@ export class DiscordNotifier implements Notifier {
 
   async notify(notification: ReleaseNotification): Promise<void> {
     const options = this.getOptions();
+    await this.post(options, buildDiscordPayload(notification, options));
+  }
+
+  async notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void> {
+    const options = this.getOptions();
+    await this.post(options, buildContainerPayload(notification, options));
+  }
+
+  private async post(options: DiscordOptions, payload: unknown): Promise<void> {
     const fetchFn = options.fetch ?? globalThis.fetch;
-    const body = JSON.stringify(buildDiscordPayload(notification, options));
+    const body = JSON.stringify(payload);
 
     for (let attempt = 1; ; attempt++) {
       const response = await fetchFn(options.webhookUrl!, {
@@ -96,6 +106,44 @@ export function buildDiscordPayload(notification: ReleaseNotification, options: 
             ? [{ name: 'Installed', value: `${notification.installedVersion} → ${release.tag}`, inline: true }]
             : []),
         ],
+      },
+    ],
+  };
+}
+
+const CONTAINER_COLOR = 0x3498db; // blue
+const MAX_LISTED = 25;
+
+export function buildContainerPayload(
+  notification: ContainerUpdatesNotification,
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'maxBodyLength'>,
+) {
+  const lines: string[] = [];
+  for (const app of notification.apps) {
+    lines.push(`**${app.name}**: ${app.installedVersion ?? '?'} → ${app.latestVersion ?? '?'}`);
+  }
+  if (notification.aptPackages.length > 0) {
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push(`**apt** – ${notification.aptPackages.length} package(s):`);
+    for (const pkg of notification.aptPackages.slice(0, MAX_LISTED)) {
+      lines.push(`• ${pkg.name} ${pkg.currentVersion ? `${pkg.currentVersion} → ` : ''}${pkg.newVersion}`);
+    }
+    if (notification.aptPackages.length > MAX_LISTED) {
+      lines.push(`… and ${notification.aptPackages.length - MAX_LISTED} more`);
+    }
+  }
+  return {
+    ...(options.mention ? { content: options.mention } : {}),
+    ...(options.username ? { username: options.username } : {}),
+    ...(options.avatarUrl ? { avatar_url: options.avatarUrl } : {}),
+    embeds: [
+      {
+        title: truncate(`CT ${notification.vmid} (${notification.containerName}): updates available`, 256),
+        description: truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)),
+        color: CONTAINER_COLOR,
+        timestamp: new Date().toISOString(),
       },
     ],
   };

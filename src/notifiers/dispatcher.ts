@@ -1,5 +1,5 @@
 import type { Logger } from '../log.ts';
-import { notificationFullName, type Notifier, type ReleaseNotification } from './notifier.ts';
+import { notificationFullName, type ContainerUpdatesNotification, type Notifier, type ReleaseNotification } from './notifier.ts';
 
 /**
  * Fans a notification out to all enabled notifiers.
@@ -31,6 +31,23 @@ export class NotificationDispatcher {
       }
     }
 
+    return { sent, failed };
+  }
+
+  /** Like {@link dispatch}, for pending container updates. */
+  async dispatchContainerUpdates(notification: ContainerUpdatesNotification): Promise<{ sent: string[]; failed: string[] }> {
+    const sent: string[] = [];
+    const failed: string[] = [];
+    for (const notifier of this.notifiers.filter((n) => n.isEnabled)) {
+      try {
+        await notifier.notifyContainerUpdates(notification);
+        sent.push(notifier.name);
+        this.log.info({ vmid: notification.vmid, notifier: notifier.name }, 'Container notification sent');
+      } catch (error) {
+        failed.push(notifier.name);
+        this.log.error({ err: error, vmid: notification.vmid, notifier: notifier.name }, 'Notifier failed');
+      }
+    }
     return { sent, failed };
   }
 }

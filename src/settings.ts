@@ -1,4 +1,5 @@
 import type { Config } from './config.ts';
+import { validateCron } from './cron.ts';
 import type { RepositoryStore } from './db.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
@@ -8,6 +9,13 @@ export interface Settings {
   discordUsername: string | null;
   githubToken: string | null;
   pollIntervalMinutes: number;
+  proxmoxHost: string | null;
+  proxmoxPort: number;
+  proxmoxUser: string;
+  /** SSH private key used to log in to the Proxmox node. Secret. */
+  proxmoxSshKey: string | null;
+  /** Default cron schedule of container checks. */
+  containerCheckCron: string;
 }
 
 export type SettingKey = keyof Settings;
@@ -43,6 +51,11 @@ export class SettingsService {
       discordUsername: config.discord.username,
       githubToken: config.github.token,
       pollIntervalMinutes: config.pollIntervalMs / 60_000,
+      proxmoxHost: config.proxmox.host,
+      proxmoxPort: config.proxmox.port,
+      proxmoxUser: config.proxmox.user,
+      proxmoxSshKey: config.proxmox.privateKey,
+      containerCheckCron: config.proxmox.checkCron,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
@@ -55,6 +68,11 @@ export class SettingsService {
       discordUsername: o.discordUsername ?? this.defaults.discordUsername,
       githubToken: o.githubToken ?? this.defaults.githubToken,
       pollIntervalMinutes: o.pollIntervalMinutes !== undefined ? Number(o.pollIntervalMinutes) : this.defaults.pollIntervalMinutes,
+      proxmoxHost: o.proxmoxHost ?? this.defaults.proxmoxHost,
+      proxmoxPort: o.proxmoxPort !== undefined ? Number(o.proxmoxPort) : this.defaults.proxmoxPort,
+      proxmoxUser: o.proxmoxUser ?? this.defaults.proxmoxUser,
+      proxmoxSshKey: o.proxmoxSshKey ?? this.defaults.proxmoxSshKey,
+      containerCheckCron: o.containerCheckCron ?? this.defaults.containerCheckCron,
     };
   }
 
@@ -139,6 +157,38 @@ function validate(key: SettingKey, value: string): void {
       return;
     case 'githubToken':
       return;
+    case 'proxmoxHost':
+      if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(value) || value.length > 253) {
+        throw new SettingsValidationError(key, 'Enter a host name or IP address.');
+      }
+      return;
+    case 'proxmoxPort': {
+      const port = Number(value);
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new SettingsValidationError(key, 'Port must be between 1 and 65535.');
+      }
+      return;
+    }
+    case 'proxmoxUser':
+      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(value)) {
+        throw new SettingsValidationError(key, 'Enter a valid user name.');
+      }
+      return;
+    case 'proxmoxSshKey':
+      if (!/^-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----$/.test(value)) {
+        throw new SettingsValidationError(key, 'Paste the whole private key (-----BEGIN … PRIVATE KEY----- … -----END …).');
+      }
+      if (/Proc-Type:\s*4,ENCRYPTED/.test(value)) {
+        throw new SettingsValidationError(key, 'Keys protected with a passphrase are not supported.');
+      }
+      return;
+    case 'containerCheckCron': {
+      const error = validateCron(value);
+      if (error) {
+        throw new SettingsValidationError(key, error);
+      }
+      return;
+    }
   }
 }
 

@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+
 /** Application configuration read from environment variables (see .env.example). */
 export interface Config {
   port: number;
@@ -17,15 +20,30 @@ export interface Config {
     mention: string | null;
     maxBodyLength: number;
   };
+  proxmox: {
+    host: string | null;
+    port: number;
+    user: string;
+    /** Private key content, read from PROXMOX_SSH_KEY_FILE. */
+    privateKey: string | null;
+    knownHostsFile: string;
+    checkCron: string;
+  };
+  /** Optional HTTP Basic auth for the UI and API (both must be set). */
+  basicAuth: { username: string; password: string } | null;
 }
 
 type Env = Record<string, string | undefined>;
 
 export function loadConfig(env: Env = process.env): Config {
+  const databasePath = str(env, 'DATABASE_PATH') ?? 'releasewatcher.db';
+  const keyFile = str(env, 'PROXMOX_SSH_KEY_FILE');
+  const authUser = str(env, 'BASIC_AUTH_USERNAME');
+  const authPassword = str(env, 'BASIC_AUTH_PASSWORD');
   return {
     port: int(env, 'PORT', 8080),
     host: str(env, 'HOST') ?? '0.0.0.0',
-    databasePath: str(env, 'DATABASE_PATH') ?? 'releasewatcher.db',
+    databasePath,
     pollIntervalMs: int(env, 'POLL_INTERVAL_MINUTES', 15) * 60_000,
     initialDelayMs: int(env, 'POLL_INITIAL_DELAY_SECONDS', 10) * 1000,
     github: {
@@ -40,6 +58,17 @@ export function loadConfig(env: Env = process.env): Config {
       mention: str(env, 'DISCORD_MENTION'),
       maxBodyLength: int(env, 'DISCORD_MAX_BODY_LENGTH', 1500),
     },
+    proxmox: {
+      host: str(env, 'PROXMOX_HOST'),
+      port: int(env, 'PROXMOX_SSH_PORT', 22),
+      user: str(env, 'PROXMOX_SSH_USER') ?? 'root',
+      privateKey: keyFile ? readKeyFile(keyFile) : null,
+      knownHostsFile:
+        str(env, 'SSH_KNOWN_HOSTS_FILE') ??
+        join(databasePath === ':memory:' ? '.' : dirname(databasePath), 'known_hosts'),
+      checkCron: str(env, 'CONTAINER_CHECK_CRON') ?? '0 */6 * * *',
+    },
+    basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
   };
 }
 
@@ -58,4 +87,12 @@ function int(env: Env, key: string, fallback: number): number {
     throw new Error(`Environment variable ${key} must be a non-negative number, got "${raw}".`);
   }
   return value;
+}
+
+function readKeyFile(path: string): string {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error) {
+    throw new Error(`Cannot read PROXMOX_SSH_KEY_FILE "${path}": ${error instanceof Error ? error.message : String(error)}`);
+  }
 }

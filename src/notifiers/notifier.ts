@@ -9,6 +9,16 @@ export interface ReleaseNotification {
   installedVersion?: string | null;
 }
 
+/** Pending updates found in a Proxmox LXC container. */
+export interface ContainerUpdatesNotification {
+  vmid: number;
+  containerName: string;
+  /** Upgradable apt packages (all of them, not only new ones). */
+  aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];
+  /** Applications with a newer version available. */
+  apps: { name: string; installedVersion: string | null; latestVersion: string | null }[];
+}
+
 export const notificationFullName = (n: ReleaseNotification): string => `${n.owner}/${n.repository}`;
 export const notificationRepoUrl = (n: ReleaseNotification): string =>
   `https://github.com/${n.owner}/${n.repository}`;
@@ -23,4 +33,6 @@ export interface Notifier {
   /** False when the channel is not configured; it will be skipped. */
   readonly isEnabled: boolean;
   notify(notification: ReleaseNotification): Promise<void>;
+  /** Reports updates waiting in an LXC container. */
+  notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void>;
 }
