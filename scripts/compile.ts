@@ -10,13 +10,18 @@ const root = join(import.meta.dir, '..');
 
 /**
  * Writes a temporary entry point that embeds every file of `public/` (`with { type: 'file' }`), registers them
- * in `embeddedUi` and only then loads `src/main.ts` (dynamic import, so it runs after the map is filled).
+ * in `embeddedUi` and only then loads `src/main.ts` (dynamic import, so it runs after the map is filled and after
+ * the polyfills).
  */
 async function writeEntry(dir: string): Promise<string> {
   const files = (await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(root, 'public') })))
     .map((file) => file.replaceAll('\\', '/'))
     .sort();
   const lines = [
+    // Polyfill needed by @simplewebauthn/server → @peculiar/x509 → tsyringe. It is CommonJS, which the bundler
+    // initialises lazily at its import site – inside the library that comes too late (the ESM modules that need
+    // it are hoisted before it), so load it here, before main.ts.
+    "import 'reflect-metadata';",
     "import { embeddedUi } from '../src/embedded-ui.ts';",
     ...files.map((file, i) => `import f${i} from ${JSON.stringify(`../public/${file}`)} with { type: 'file' };`),
     ...files.map((file, i) => `embeddedUi.set(${JSON.stringify(`/${file}`)}, f${i});`),

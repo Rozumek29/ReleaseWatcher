@@ -1,6 +1,6 @@
 // Creates the two release artifacts:
-//   release/releasewatcher-<version>/            ready-to-run folder (server sources + production UI) for Bun;
-//                                                no `bun install` needed, the server has no runtime dependencies
+//   release/releasewatcher-<version>/            ready-to-run folder (server sources + production UI + the runtime
+//                                                dependencies in node_modules) for Bun; no `bun install` needed
 //   release/releasewatcher-<version>-linux-x64   single self-contained executable (Bun runtime + UI embedded)
 //
 // Usage: bun scripts/package.ts [version] [--skip-build]   (version defaults to package.json "version")
@@ -30,7 +30,7 @@ mkdirSync(out, { recursive: true });
 for (const entry of ['src', 'public', 'README.md', '.env.example', 'Dockerfile', 'docker-compose.yml']) {
   cpSync(join(root, entry), join(out, entry), { recursive: true });
 }
-// Runtime-only package.json: no workspaces, no dev tooling, no dependencies.
+// Runtime-only package.json: no workspaces, no dev tooling – only the runtime dependencies.
 const runtimePkg = {
   name: pkg.name,
   version,
@@ -39,8 +39,15 @@ const runtimePkg = {
   type: pkg.type,
   engines: pkg.engines,
   scripts: { start: 'bun src/main.ts', serve: 'bun src/main.ts' },
+  dependencies: pkg.dependencies,
 };
 await Bun.write(join(out, 'package.json'), JSON.stringify(runtimePkg, null, 2) + '\n');
+// Ship the dependencies with the folder (plain node_modules layout), so it runs without `bun install`.
+const install = Bun.spawnSync([process.execPath, 'install', '--production', '--linker=hoisted', '--no-save'], {
+  cwd: out,
+  stdio: ['inherit', 'inherit', 'inherit'],
+});
+if (install.exitCode !== 0) process.exit(install.exitCode ?? 1);
 
 // 2. Self-contained executable.
 rmSync(binary, { force: true });

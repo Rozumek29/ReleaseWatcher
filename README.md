@@ -8,8 +8,8 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
   built-in `bun:sqlite`
 - **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
 - **Notifications:** Discord webhook; new channels plug in through the `Notifier` interface
-- No runtime dependencies – everything the server needs is built into Bun; releases and the Docker image ship
-  it as a single self-contained executable (`bun build --compile`)
+- One runtime dependency (`@simplewebauthn/server` for passkeys) – everything else is built into Bun; releases and
+  the Docker image ship the app as a single self-contained executable (`bun build --compile`)
 
 ## How it works
 
@@ -70,9 +70,9 @@ bun run deploy -- --ct 251            # first install and every later update
 ```
 
 It builds the executable, uploads it through the node (`pct push`) and runs `deploy/install.sh` inside the container:
-system user, directories, systemd service and – on the first install – `/etc/releasewatcher/releasewatcher.env` with
-**Basic auth `admin` + a generated password, printed at the end**. Running it again updates the app (the previous
-executable stays as `releasewatcher.previous`) and keeps the configuration and data.
+system user, directories, systemd service and `/etc/releasewatcher/releasewatcher.env`. On the first install it
+prints the **setup code** to create your account in the UI (see Login). Running it again updates the app (the
+previous executable stays as `releasewatcher.previous`) and keeps the configuration, the account and the data.
 
 - The node host, SSH user, port and key default to what your local instance has in **Settings → Proxmox node**;
   override with `--node <host>`, `--user`, `--port`, `--identity <key file>`.
@@ -99,9 +99,9 @@ install -d -o root -g releasewatcher -m 750 /etc/releasewatcher                 
 #    -p 'releasewatcher-*-linux-x64'` or the release page) or built with `bun scripts/compile.ts --target=bun-linux-x64`
 install -m 755 releasewatcher-1.2.3-linux-x64 /opt/releasewatcher/releasewatcher
 
-# 4. Configuration (optional – everything except Basic auth can be set in the UI)
+# 4. Configuration (optional – everything can be set in the UI; behind a reverse proxy set PUBLIC_URL)
 install -m 640 -g releasewatcher .env.example /etc/releasewatcher/releasewatcher.env
-nano /etc/releasewatcher/releasewatcher.env          # at least BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD
+nano /etc/releasewatcher/releasewatcher.env
 # SSH key as a file instead of pasting it in the UI:
 #   install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key
 #   PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key   (in releasewatcher.env)
@@ -111,6 +111,7 @@ install -m 644 releasewatcher.service /etc/systemd/system/
 systemctl daemon-reload
 systemctl enable --now releasewatcher
 journalctl -u releasewatcher -f                      # logs (JSON lines)
+cat /var/lib/releasewatcher/setup-code               # one-time code to create the account in the UI
 ```
 
 Open `http://<container-ip>:8080`. `DATABASE_PATH` is set by the unit (`/var/lib/releasewatcher/releasewatcher.db`);
@@ -124,6 +125,31 @@ the pinned host key of the node is stored next to it.
   to `/var/lib/releasewatcher`). In an unprivileged LXC this needs *nesting* (Proxmox enables it by default); if the
   service fails with `status=226/NAMESPACE`, enable *Options → Features → Nesting* or remove the hardening lines.
 - **SSH key on the node:** restrict it to the container's IP (`from="<container-ip>"` in `authorized_keys`).
+
+## Login
+
+The UI and the API require a login – **one account** that can sign in with its **password** and/or **passkeys**.
+
+- **First start:** without an account the app logs a one-time **setup code** (also in `setup-code` next to the
+  database, and printed by `bun run deploy`). The UI shows the setup screen: enter the code, a user name and a
+  password (10+ characters). Without the code nobody else can claim a fresh installation.
+- **Upgrading from Basic auth:** if `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` are set and no account exists, the
+  account is created with them on the first start – just sign in with the same credentials.
+- **Passkeys** (Account page → *Add passkey*) need a secure context: **HTTPS with a host name** (or `localhost`).
+  Put the app behind a reverse proxy (Caddy, Nginx Proxy Manager, Traefik …) and set
+  `PUBLIC_URL=https://watcher.example.com` (pins the WebAuthn relying party) and `TRUST_PROXY=true`. A passkey is bound
+  to that host name. The password keeps working everywhere.
+- **Sessions:** HttpOnly, `SameSite=Strict` cookie (`Secure` over HTTPS), 30 days, extended while you use the app;
+  the Account page lists them and signs them out. Changing the password signs out all other sessions. Repeated
+  failed logins lock the client out with growing delays; state-changing requests from other sites are refused.
+- **Reset the login** (forgot the password, no passkey at hand) – removes the account, its passkeys and sessions,
+  nothing else:
+
+  ```bash
+  sudo -u releasewatcher env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db     /opt/releasewatcher/releasewatcher --reset-login
+  ```
+
+  Then open the UI and create the account again with the new setup code (`/var/lib/releasewatcher/setup-code`).
 
 ## Local development
 
@@ -169,8 +195,8 @@ it to `test/`).
 
 `bun run package` builds both release artifacts in `release/`:
 
-- `releasewatcher-<version>/` – server sources + production UI for Bun (no `bun install` needed, the server
-  has no runtime dependencies):
+- `releasewatcher-<version>/` – server sources + production UI + runtime dependencies for Bun (no `bun install`
+  needed):
 
   ```bash
   cp .env.example .env   # optional, settings can also be changed in the UI
@@ -244,7 +270,9 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | How many containers are checked at the same time (1–10). |
 | `PROXMOX_BACKUP_STORAGE` | – | Storage for backups (`vzdump`) made before updates. |
 | `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default (containers and single updates can change it). |
-| `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | When both are set, the UI and API (except `/health`) require HTTP Basic auth. |
+| `PUBLIC_URL` | – | Public address behind a reverse proxy, e.g. `https://watcher.example.com`; pins the origin and the passkey relying party. |
+| `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` (login lockout, session list) – only behind a proxy that sets it. |
+| `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from Basic auth: create the login account with these credentials when none exists. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
 > (fewer with ETag hits), so for more than ~10 repositories at a 15 min interval add a token.
@@ -282,6 +310,21 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
 | `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`) |
 | `GET` | `/health` | Liveness |
+
+Everything except `/health` and the public auth endpoints below needs a session cookie (401 otherwise).
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys }` (public) |
+| `POST` | `/api/auth/setup` | `{ "code", "username", "password" }` – first account, only while none exists (public) |
+| `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; 429 after repeated failures) |
+| `POST` | `/api/auth/passkey/options` / `/api/auth/passkey/login` | Passkey sign-in: options with a `challengeId`, then `{ challengeId, response }` (public) |
+| `POST` | `/api/auth/logout` | End the current session |
+| `PUT` | `/api/auth/account` | `{ "currentPassword", "username"?, "newPassword"? }` – a new password signs out other sessions |
+| `GET` / `POST` | `/api/auth/passkeys` | List passkeys / register one (`{ name, response }` after `POST /api/auth/passkeys/options`) |
+| `PATCH` / `DELETE` | `/api/auth/passkeys/:id` | Rename (`{ name }`) / remove a passkey |
+| `GET` / `DELETE` | `/api/auth/sessions` | List sessions / sign out all other sessions |
+| `DELETE` | `/api/auth/sessions/:id` | Sign out one session |
 
 ## Adding a new notifier (e.g. Slack, Teams, e-mail)
 
@@ -322,6 +365,7 @@ src/
   poller.ts          interval scheduler (interval can change at runtime)
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars
   version.ts         version parsing/comparison, reading the installed version of a self-hosted app
+  auth/              login: account + passkeys (@simplewebauthn/server) + sessions, setup code, routes
   cron.ts            5-field cron parser (container check schedule)
   http.ts            problem-details response helpers
   notifiers/         Notifier interface, dispatcher, Discord
@@ -341,14 +385,15 @@ web/                 Angular UI (builds into public/)
   src/app/pages/repositories watched repositories
   src/app/pages/containers   Proxmox LXC containers, applications, run log
   src/app/pages/settings     Discord, GitHub, polling, Proxmox node settings
+  src/app/pages/login, setup, account   sign-in, first-run setup, password / passkeys / sessions
 ```
 
 ## Security note
 
 The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
 Header values (API keys, tokens) are stored in plain text in the SQLite file – protect the data volume.
-**The UI can run commands as root on your Proxmox node.** Set `BASIC_AUTH_USERNAME`/`BASIC_AUTH_PASSWORD`
-(the server logs a warning without them), keep it on a private network and put it behind HTTPS (reverse proxy) –
-Basic auth over plain HTTP sends the password in clear text. The SSH private key is stored in the SQLite file
+**The UI can run commands as root on your Proxmox node.** It requires a login (see Login); keep it on a private
+network or behind HTTPS (reverse proxy) – over plain HTTP the password and the session cookie travel in clear text.
+Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens. The SSH private key is stored in the SQLite file
 when pasted in the UI (or read from `PROXMOX_SSH_KEY_FILE`); it is never returned by the API. Consider a dedicated
 key used only by ReleaseWatcher.

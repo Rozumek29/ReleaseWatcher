@@ -53,7 +53,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Type-only imports must use `import type` / `type` specifiers (`verbatimModuleSyntax`).
 - Prefer union types / `as const` objects over `enum`/`namespace`.
 - `noUncheckedIndexedAccess` is on – indexed access returns `T | undefined`.
-- The server has **no runtime dependencies**. Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
+- The server's only runtime dependency is `@simplewebauthn/server` (passkeys). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
 - The release executable and the Docker image run the server as a `bun build --compile` binary (ESM +
@@ -79,6 +79,11 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   never interpolate user input into shell strings without them. `ContainerService` allows one task per container
   and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
+- Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),
+  sessions in the `sessions` table (only a SHA-256 of the cookie token). `buildApp` guards every route except
+  `PUBLIC_ROUTES` (`src/auth/routes.ts`) and refuses cross-site writes (Origin check). New routes are protected
+  automatically; add a path to `PUBLIC_ROUTES` only if it must work signed out. Tests of other features pass
+  `auth: { requireAuth: false }`; `test/auth.test.ts` has a software passkey for real WebAuthn round trips.
 - Settings: values saved from the UI live in the `settings` table and override env vars; `null` in
   `PUT /api/settings` resets to the env value. Components read `settings.current` lazily (callbacks), so
   changes apply without a restart.
@@ -91,8 +96,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 ### Secrets
 
-- Installed-version header values, the Discord webhook URL, the GitHub token (global and per repository) and the
-  Proxmox SSH private key are secrets (the key is exposed only as `sshKeyConfigured`, a repository token as
+- Installed-version header values, the Discord webhook URL, the GitHub token (global and per repository), the
+  Proxmox SSH private key, password hashes, session tokens and the setup code are secrets (the key is exposed only as `sshKeyConfigured`, a repository token as
   `hasOwnToken` + masked value). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.

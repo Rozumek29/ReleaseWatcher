@@ -6,6 +6,7 @@
       "name": "releasewatcher",
       "dependencies": {
         "@simplewebauthn/server": "14.0.3",
+        "reflect-metadata": "0.2.2",
       },
       "devDependencies": {
         "@types/bun": "^1.4.4",
