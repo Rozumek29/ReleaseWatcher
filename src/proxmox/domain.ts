@@ -91,10 +91,21 @@ export const DEFAULT_APP_TIMEOUT_SECONDS = 30 * 60;
 export const MIN_APP_TIMEOUT_SECONDS = 10;
 export const MAX_APP_TIMEOUT_SECONDS = 6 * 60 * 60;
 
-/** True/false when both versions are known, otherwise null. Non-comparable versions differ → update. */
+/** A git commit hash (full or abbreviated, at least 7 hex digits). */
+const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * True/false when both versions are known, otherwise null. Non-comparable versions differ → update.
+ * Two commit hashes are compared as opaque values (an abbreviated hash matches the full one).
+ */
 export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 'latestVersion'>): boolean | null {
   if (!app.installedVersion || !app.latestVersion) {
     return null;
+  }
+  const installed = app.installedVersion.trim().toLowerCase();
+  const latest = app.latestVersion.trim().toLowerCase();
+  if (COMMIT_HASH_PATTERN.test(installed) && COMMIT_HASH_PATTERN.test(latest)) {
+    return !(installed.startsWith(latest) || latest.startsWith(installed));
   }
   const diff = compareVersions(app.latestVersion, app.installedVersion);
   return diff === null ? app.latestVersion.trim() !== app.installedVersion.trim() : diff > 0;
