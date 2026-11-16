@@ -92,6 +92,8 @@ export interface AppDeps {
   log?: Logger;
   /** Runs commands on the Proxmox node; defaults to an unconfigured shell (containers cannot be checked). */
   shell?: NodeShell;
+  /** Pause before reconnecting to an update on the node after the SSH connection dropped (tests use 0). */
+  reconnectDelayMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -282,7 +284,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   if (interrupted > 0) {
     log.warn({ count: interrupted }, 'Marked runs interrupted by a restart as failed');
   }
-  const containers = new ContainerService({ containers: containerStore, repositories: store, shell, dispatcher, log });
+  const containers = new ContainerService({
+    containers: containerStore,
+    repositories: store,
+    shell,
+    dispatcher,
+    log,
+    ...(deps.reconnectDelayMs === undefined ? {} : { reconnectDelayMs: deps.reconnectDelayMs }),
+  });
   const scheduler = new ContainerScheduler({
     store: containerStore,
     service: containers,

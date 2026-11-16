@@ -24,6 +24,12 @@ export interface Container {
   startWhenStopped: boolean;
   /** Cron expression overriding the global check schedule; null = use the global one. */
   checkCron: string | null;
+  /** CPU cores during updates (raised with `pct set`, restored afterwards); null = unchanged. */
+  updateCores: number | null;
+  /** Memory in MiB during updates (raised with `pct set`, restored afterwards); null = unchanged. */
+  updateMemoryMb: number | null;
+  /** Resources raised for an update that still have to be restored (survives a restart). */
+  resourcesToRestore: ResourceChange | null;
   /** Last status reported by `pct status` (running, stopped, …). */
   status: string | null;
   aptUpgradable: AptPackage[];
@@ -87,6 +93,15 @@ export interface Run {
   output: string;
 }
 
+/** A detached step of a run still executing on the node – lets a restarted ReleaseWatcher re-attach to it. */
+export interface RunResume {
+  unit: string;
+  step: DetachedStep;
+  timeoutSeconds: number;
+  /** The container was started for this run and has to be shut down again afterwards. */
+  startedContainer: boolean;
+}
+
 export const DEFAULT_APP_TIMEOUT_SECONDS = 30 * 60;
 export const MIN_APP_TIMEOUT_SECONDS = 10;
 export const MAX_APP_TIMEOUT_SECONDS = 6 * 60 * 60;
@@ -116,6 +131,154 @@ export const shQuote = (value: string): string => `'${value.replaceAll("'", `'\\
 
 /** Command run on the node that executes `script` inside a container. */
 export const pctExec = (vmid: number, script: string): string => `pct exec ${vmid} -- sh -lc ${shQuote(script)}`;
+
+/** Directory on the node holding the output and exit code of detached commands (removed after reading). */
+export const DETACHED_DIR = '/var/tmp/releasewatcher';
+
+/** Steps of an update that run detached on the node. */
+export type DetachedStep = 'backup' | 'update';
+
+/** Name of the transient systemd unit (and its directory) of one detached step. */
+export const detachedUnit = (runId: number, step: DetachedStep): string => `releasewatcher-run-${runId}-${step}`;
+
+const base64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64');
+
+/**
+ * Node command that starts `command` (a node command such as `pct exec …` or `vzdump …`) as a transient systemd unit,
+ * detached from the SSH session: it keeps running when the connection drops or ReleaseWatcher restarts, and
+ * {@link detachedFollowCommand} reads its output (again, after a reconnect). Output goes to `<dir>/log`, the exit
+ * code to `<dir>/rc`. With `tty` the command runs in a pseudo-terminal (`script` from util-linux) for interactive
+ * scripts that write to /dev/tty. systemd stops it after `timeoutSeconds`. Directories older than a week are pruned.
+ */
+export function detachedStartCommand(unit: string, command: string, options: { tty: boolean; timeoutSeconds: number }): string {
+  const dir = `${DETACHED_DIR}/${unit}`;
+  const run = options.tty ? `script -qefc 'sh ${dir}/command' /dev/null` : `sh ${dir}/command`;
+  const wrapper = [`${run} </dev/null >${dir}/log 2>&1`, `echo $? >${dir}/rc.tmp && mv ${dir}/rc.tmp ${dir}/rc`].join('\n');
+  return [
+    `# releasewatcher detached ${unit}`,
+    `find ${DETACHED_DIR} -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null`,
+    `mkdir -p ${dir} && : >${dir}/log && rm -f ${dir}/rc || exit $?`,
+    `printf %s '${base64(command)}' | base64 -d >${dir}/command || exit $?`,
+    `printf %s '${base64(wrapper)}' | base64 -d >${dir}/run || exit $?`,
+    `systemd-run --quiet --collect --unit=${unit} -p RuntimeMaxSec=${Math.max(1, Math.round(options.timeoutSeconds))} /bin/sh ${dir}/run`,
+  ].join('\n');
+}
+
+/**
+ * Node command printing the whole output of a detached unit – live until it finishes – followed by a
+ * `<token> exit <code>` line (`exit lost` when it ended without an exit code, e.g. stopped by its timeout;
+ * `<token> missing` when its directory does not exist).
+ */
+export function detachedFollowCommand(unit: string, token: string): string {
+  const dir = `${DETACHED_DIR}/${unit}`;
+  return [
+    `# releasewatcher follow ${unit}`,
+    `[ -d ${dir} ] || { printf '\\n%s missing\\n' '${token}'; exit 0; }`,
+    `pid=$(systemctl show -p MainPID --value ${unit} 2>/dev/null)`,
+    `if [ "\${pid:-0}" != 0 ]; then tail -c +1 -f --pid="$pid" ${dir}/log; else cat ${dir}/log; fi`,
+    `if [ -f ${dir}/rc ]; then printf '\\n%s exit %s\\n' '${token}' "$(cat ${dir}/rc)"; else printf '\\n%s exit lost\\n' '${token}'; fi`,
+  ].join('\n');
+}
+
+/** Node command removing the files of a finished detached unit. */
+export const detachedCleanupCommand = (unit: string): string =>
+  `# releasewatcher cleanup ${unit}\nrm -rf ${DETACHED_DIR}/${unit}`;
+
+export interface DetachedOutput {
+  /** `incomplete` = the connection ended before the end marker (reconnect and read again). */
+  state: 'finished' | 'lost' | 'missing' | 'incomplete';
+  exitCode: number | null;
+  /** Output of the command, without the end marker. */
+  output: string;
+}
+
+/** Splits the output of {@link detachedFollowCommand} into the command output and its result. */
+export function parseDetachedOutput(output: string, token: string): DetachedOutput {
+  const at = output.lastIndexOf(`\n${token} `);
+  if (at === -1) {
+    return { state: 'incomplete', exitCode: null, output };
+  }
+  const text = output.slice(0, at);
+  const marker = output.slice(at + token.length + 2).trim();
+  if (marker.startsWith('missing')) {
+    return { state: 'missing', exitCode: null, output: text };
+  }
+  const code = marker.match(/^exit (-?\d+)/)?.[1];
+  return code === undefined
+    ? { state: 'lost', exitCode: null, output: text }
+    : { state: 'finished', exitCode: Number(code), output: text };
+}
+
+/** CPU cores and memory of a container (`pct config`); null = not set (all host cores / Proxmox default). */
+export interface ContainerResources {
+  cores: number | null;
+  memoryMb: number | null;
+}
+
+/** Values to set with `pct set` – null removes the option (back to the Proxmox default). */
+export type ResourceChange = Partial<ContainerResources>;
+
+export const MIN_UPDATE_CORES = 1;
+export const MAX_UPDATE_CORES = 512;
+export const MIN_UPDATE_MEMORY_MB = 64;
+export const MAX_UPDATE_MEMORY_MB = 4 * 1024 * 1024;
+/** Memory of a container whose config has no `memory` line (Proxmox default). */
+const DEFAULT_MEMORY_MB = 512;
+
+/** Reads `cores` and `memory` from `pct config <vmid>`. */
+export function parsePctResources(config: string): ContainerResources {
+  const value = (key: string): number | null => {
+    const match = config.match(new RegExp(`^${key}:\\s*(\\d+)\\s*$`, 'm'));
+    return match ? Number(match[1]) : null;
+  };
+  return { cores: value('cores'), memoryMb: value('memory') };
+}
+
+/**
+ * What to change for an update and how to undo it. Resources are only raised, never lowered: a container without a
+ * core limit already uses all cores. Returns null when nothing has to change.
+ */
+export function planResourceRaise(
+  current: ContainerResources,
+  wanted: ContainerResources,
+): { raise: ResourceChange; restore: ResourceChange } | null {
+  const raise: ResourceChange = {};
+  const restore: ResourceChange = {};
+  if (wanted.cores !== null && current.cores !== null && current.cores < wanted.cores) {
+    raise.cores = wanted.cores;
+    restore.cores = current.cores;
+  }
+  if (wanted.memoryMb !== null && (current.memoryMb ?? DEFAULT_MEMORY_MB) < wanted.memoryMb) {
+    raise.memoryMb = wanted.memoryMb;
+    restore.memoryMb = current.memoryMb;
+  }
+  return Object.keys(raise).length > 0 ? { raise, restore } : null;
+}
+
+/** `pct set` command applying a {@link ResourceChange} (works while the container runs). */
+export function pctSetResourcesCommand(vmid: number, change: ResourceChange): string {
+  const args: string[] = [];
+  const remove: string[] = [];
+  const add = (option: string, value: number | null | undefined) => {
+    if (value === undefined) return;
+    if (value === null) remove.push(option);
+    else args.push(`--${option} ${Math.round(value)}`);
+  };
+  add('cores', change.cores);
+  add('memory', change.memoryMb);
+  if (remove.length > 0) {
+    args.push(`--delete ${remove.join(',')}`);
+  }
+  return `pct set ${vmid} ${args.join(' ')}`;
+}
+
+/** Human-readable description of a {@link ResourceChange} for run logs. */
+export function describeResources(change: ResourceChange): string {
+  const parts: string[] = [];
+  if (change.cores !== undefined) parts.push(change.cores === null ? 'cores: unlimited' : `${change.cores} cores`);
+  if (change.memoryMb !== undefined) parts.push(change.memoryMb === null ? 'memory: default' : `${change.memoryMb} MiB memory`);
+  return parts.join(', ');
+}
 
 /** Proxmox storage ID (`pvesm` naming rules). */
 export const STORAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;

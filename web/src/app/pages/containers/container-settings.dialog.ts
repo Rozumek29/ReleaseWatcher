@@ -80,6 +80,8 @@ export class ContainerSettingsDialog {
   /** 'default' = follow the global setting. */
   protected backupChoice: 'default' | 'yes' | 'no' = 'default';
   protected checkCron = '';
+  protected updateCores: number | null = null;
+  protected updateMemoryMb: number | null = null;
 
   protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
@@ -105,6 +107,8 @@ export class ContainerSettingsDialog {
           this.backupChoice =
             container.backupBeforeUpdate === null ? 'default' : container.backupBeforeUpdate ? 'yes' : 'no';
           this.checkCron = container.checkCron ?? '';
+          this.updateCores = container.updateCores;
+          this.updateMemoryMb = container.updateMemoryMb;
           this.apps.set(container.apps);
           this.appForm.set(null);
           this.confirmDeleteAppId.set(null);
@@ -137,6 +141,9 @@ export class ContainerSettingsDialog {
           startWhenStopped: this.startWhenStopped,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
+          ...(container.kind === 'node'
+            ? {}
+            : { updateCores: this.updateCores || null, updateMemoryMb: this.updateMemoryMb || null }),
         }),
       );
       this.saved.emit(updated);

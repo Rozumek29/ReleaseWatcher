@@ -220,6 +220,12 @@ export interface Container {
   startWhenStopped: boolean;
   /** Overrides the global schedule; null = global. */
   checkCron: string | null;
+  /** CPU cores during updates (restored afterwards); null = unchanged. */
+  updateCores: number | null;
+  /** Memory in MiB during updates (restored afterwards); null = unchanged. */
+  updateMemoryMb: number | null;
+  /** Resources are raised for an update right now (or could not be restored yet). */
+  resourcesRaised: boolean;
   nextCheckAt: string | null;
   status: string | null;
   aptUpgradable: AptPackage[];
@@ -240,6 +246,8 @@ export interface UpdateContainerRequest {
   backupBeforeUpdate: boolean | null;
   startWhenStopped: boolean;
   checkCron: string | null;
+  updateCores?: number | null;
+  updateMemoryMb?: number | null;
 }
 
 export interface ContainerAppRequest {

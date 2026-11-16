@@ -60,10 +60,28 @@ describe('ContainerSettingsDialog', () => {
       startWhenStopped: true,
       backupBeforeUpdate: false,
       checkCron: '30 4 * * *',
+      updateCores: null,
+      updateMemoryMb: null,
     });
     request.flush(container({ checkCron: '30 4 * * *' }));
     await settle(fixture);
     expect(saved[0]?.checkCron).toBe('30 4 * * *');
+  });
+
+  it('saves resources for updates and warns while they are raised', async () => {
+    const { fixture, el } = await open(container({ updateCores: 2, resourcesRaised: true }));
+    expect(el.querySelector<HTMLInputElement>('#ct-update-cores')!.value).toBe('2');
+    expect(el.textContent).toContain('Resources are raised right now');
+
+    type(el, '#ct-update-cores', '');
+    type(el, '#ct-update-memory', '4096');
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+
+    const request = http.expectOne('/api/containers/1');
+    expect(request.request.body).toMatchObject({ updateCores: null, updateMemoryMb: 4096 });
+    request.flush(container({ updateMemoryMb: 4096 }));
+    await settle(fixture);
   });
 
   it('shows only the settings that apply to the Proxmox host', async () => {
@@ -72,6 +90,7 @@ describe('ContainerSettingsDialog', () => {
     expect(el.querySelector('#ct-settings-title')?.textContent).toContain('Host settings');
     expect(el.querySelector('.head-text p')?.textContent).toContain('Proxmox host');
     expect(el.querySelector('#ct-backup')).toBeNull();
+    expect(el.querySelector('#ct-update-cores')).toBeNull();
     expect(el.querySelector('[aria-label="Start temporarily when stopped"]')).toBeNull();
     expect(el.querySelector('[aria-label="apt packages"]')).toBeNull();
     expect(el.textContent).not.toContain('Add application');

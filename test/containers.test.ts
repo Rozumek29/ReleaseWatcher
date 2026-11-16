@@ -5,6 +5,7 @@ import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
 import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
+import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
 import { FakeShell, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
@@ -43,7 +44,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, auth: { requireAuth: false } });
+    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, auth: { requireAuth: false } });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
@@ -243,6 +244,135 @@ describe('containers API', () => {
     const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
     assert.equal(runs[0].kind, 'app-update');
     assert.equal('output' in runs[0], false);
+  });
+
+  it('runs updates detached on the node, with a pseudo-terminal only when asked', async () => {
+    const container = await addContainer();
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Custom',
+      latestSource: 'none',
+      updateCommand: 'update',
+      useTty: true,
+    });
+    shell.on(/'update'$/, { output: 'Updated.\n' });
+    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    assert.equal((await app.containers.wait(container.id))?.status, 'succeeded');
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`);
+    await app.containers.wait(container.id);
+
+    assert.deepEqual(
+      shell.detached.map((d) => [d.command.replace(/'.*/s, ''), d.tty]),
+      [
+        ['pct exec 101 -- sh -lc ', true],
+        ['pct exec 101 -- sh -lc ', false],
+      ],
+    );
+    assert.equal(shell.units.size, 0, 'finished units are cleaned up on the node');
+  });
+
+  it('keeps an update running when the SSH connection drops and reads its output again', async () => {
+    const container = await addContainer();
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      latestSource: 'none',
+      updateCommand: 'update',
+    });
+    shell.on(/'update'$/, { output: 'Compiling vaultwarden\nUpdated to 1.32.0\n' });
+    shell.dropFollows = 2;
+
+    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded');
+    const output = run?.output ?? '';
+    // The partial copies read before each drop are replaced, so every line appears exactly once.
+    assert.equal(output.split('Compiling vaultwarden').length - 1, 1, output);
+    assert.equal(output.split('Updated to 1.32.0').length - 1, 1, output);
+    assert.doesNotMatch(output, /Broken pipe/);
+    assert.match(output, /dropped 2× – the command kept running/);
+    assert.equal(shell.detached.length, 1, 'the update itself was started once');
+  });
+
+  it('raises CPU and memory for updates and restores them afterwards, also after a failure', async () => {
+    const container = await addContainer();
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal((await request('PUT', `/api/containers/${container.id}`, { ...dto, updateCores: 0 })).status, 400);
+    assert.equal((await request('PUT', `/api/containers/${container.id}`, { ...dto, updateMemoryMb: 10 })).status, 400);
+    const saved = await request('PUT', `/api/containers/${container.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
+    assert.deepEqual([saved.json().updateCores, saved.json().updateMemoryMb, saved.json().resourcesRaised], [4, 4096, false]);
+    // Omitted = keep.
+    const { updateCores: _c, updateMemoryMb: _m, ...withoutResources } = saved.json();
+    assert.equal((await request('PUT', `/api/containers/${container.id}`, withoutResources)).json().updateCores, 4);
+
+    shell.on(/^pct config 101$/, { output: 'arch: amd64\ncores: 1\nmemory: 1024\n' });
+    shell.on(/^pct set 101 /, { output: '' });
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      latestSource: 'none',
+      updateCommand: 'cargo build',
+    });
+    let raisedDuringUpdate: boolean | null = null;
+    shell.on(/cargo build/, async () => {
+      raisedDuringUpdate = (await request('GET', `/api/containers/${container.id}`)).json().resourcesRaised;
+      return { exitCode: 101, output: 'error: could not compile\n' };
+    });
+    shell.commands.length = 0;
+
+    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'failed');
+    assert.equal(raisedDuringUpdate, true);
+    const relevant = shell.commands.filter((c) => /^pct (config|set)|cargo build/.test(c));
+    assert.deepEqual(relevant.map((c) => c.replace(/'.*/s, '')), [
+      'pct config 101',
+      'pct set 101 --cores 4 --memory 4096',
+      'pct exec 101 -- sh -lc ',
+      'pct set 101 --cores 1 --memory 1024',
+    ]);
+    assert.match(run?.output ?? '', /Raising resources for the update: 4 cores, 4096 MiB memory/);
+    assert.match(run?.output ?? '', /Restoring resources: 1 cores, 1024 MiB memory/);
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().resourcesRaised, false);
+  });
+
+  it('re-attaches to an update still running on the node after a restart and restores resources', async () => {
+    const container = await addContainer();
+    const containerStore = new ContainerStore(store.database);
+    const run = containerStore.startRun(container.id, null, 'apt-upgrade', 'manual');
+    containerStore.saveRunOutput(run.id, '» Updating…\n');
+    containerStore.setRunResume(run.id, { unit: `releasewatcher-run-${run.id}-update`, step: 'update', timeoutSeconds: 600, startedContainer: false });
+    containerStore.setResourcesToRestore(containerStore.get(container.id)!, { cores: 2 });
+    const stale = containerStore.startRun(container.id, null, 'check', 'manual'); // no detached step → failed
+    shell.units.set(`releasewatcher-run-${run.id}-update`, { exitCode: 0, output: 'Setting up curl (8.1) ...\n', timedOut: false });
+    shell.on(/^pct set 101 /, { output: '' });
+    shell.commands.length = 0;
+
+    const restarted = await buildApp({
+      store,
+      settings: new SettingsService(store, loadConfig({})),
+      source,
+      notifiers: [notifier],
+      log: silentLogger,
+      shell,
+      reconnectDelayMs: 0,
+      auth: { requireAuth: false },
+    });
+    try {
+      assert.equal(containerStore.getRun(stale.id)?.status, 'failed');
+      assert.equal(containerStore.getRun(run.id)?.status, 'running');
+      await restarted.containers.recover();
+      assert.equal(restarted.containers.isBusy(container.id), true);
+      const finished = await restarted.containers.wait(container.id);
+
+      assert.equal(finished?.status, 'succeeded');
+      assert.match(finished?.output ?? '', /^» Updating…\n» ReleaseWatcher was restarted – re-attaching/);
+      assert.match(finished?.output ?? '', /Setting up curl/);
+      assert.ok(shell.commands.includes('pct set 101 --cores 2'), shell.commands.join('\n'));
+      assert.equal(containerStore.get(container.id)?.resourcesToRestore, null);
+      assert.deepEqual(containerStore.listResumableRuns(), []);
+    } finally {
+      await restarted.close();
+    }
   });
 
   it('validates applications and container settings', async () => {

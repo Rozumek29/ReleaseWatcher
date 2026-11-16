@@ -87,6 +87,18 @@
   width: 140px;
 }
 
+.resources {
+  justify-content: flex-start;
+}
+
+.resource-field {
+  flex: 1 1 180px;
+}
+
+.hint.warning {
+  color: var(--warning);
+}
+
 .app-form-actions {
   display: flex;
   justify-content: flex-end;

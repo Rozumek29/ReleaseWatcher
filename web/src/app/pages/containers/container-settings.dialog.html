@@ -63,6 +63,49 @@
                 before apt upgrades and application updates. You can still change it for every single update.
               </span>
             </div>
+
+            <div class="field">
+              <div class="form-row resources">
+                <div class="field resource-field">
+                  <label for="ct-update-cores">CPU cores during updates</label>
+                  <input
+                    id="ct-update-cores"
+                    class="input"
+                    type="number"
+                    name="updateCores"
+                    min="1"
+                    max="512"
+                    step="1"
+                    [(ngModel)]="updateCores"
+                    placeholder="unchanged"
+                  />
+                </div>
+                <div class="field resource-field">
+                  <label for="ct-update-memory">Memory during updates <span class="optional">MiB</span></label>
+                  <input
+                    id="ct-update-memory"
+                    class="input"
+                    type="number"
+                    name="updateMemoryMb"
+                    min="64"
+                    step="256"
+                    [(ngModel)]="updateMemoryMb"
+                    placeholder="unchanged"
+                  />
+                </div>
+              </div>
+              <span class="hint">
+                Raised with <code>pct set</code> before apt upgrades and application updates – e.g. for an update that
+                compiles Rust – and set back to the previous values afterwards, also when the update fails. Values are
+                only raised, never lowered. Leave empty to keep the container's own values.
+              </span>
+              @if (c.resourcesRaised) {
+                <span class="hint warning">
+                  Resources are raised right now – they are restored when the update finishes (or on the next start of
+                  ReleaseWatcher if restoring failed).
+                </span>
+              }
+            </div>
           }
 
           <div class="field">

@@ -4,7 +4,14 @@ import {
   APT_LIST_MARKER,
   appUpdateAvailable,
   cleanOutput,
+  detachedFollowCommand,
+  detachedStartCommand,
+  detachedUnit,
   firstLine,
+  parseDetachedOutput,
+  parsePctResources,
+  pctSetResourcesCommand,
+  planResourceRaise,
   parseAptUpgradable,
   parsePctList,
   parsePctStatus,
@@ -57,6 +64,60 @@ describe('proxmox domain', () => {
     assert.equal(appUpdateAvailable({ installedVersion: '1.3.0', latestVersion: 'v1.3.0' }), false);
     assert.equal(appUpdateAvailable({ installedVersion: 'abc123', latestVersion: 'def456' }), true);
     assert.equal(appUpdateAvailable({ installedVersion: null, latestVersion: '1.0' }), null);
+  });
+
+  it('starts detached commands as transient systemd units with their own timeout', () => {
+    const unit = detachedUnit(42, 'update');
+    assert.equal(unit, 'releasewatcher-run-42-update');
+    const decode = (script: string) =>
+      [...script.matchAll(/printf %s '([A-Za-z0-9+/=]+)' \| base64 -d/g)].map((m) => Buffer.from(m[1]!, 'base64').toString());
+
+    const plain = detachedStartCommand(unit, "pct exec 101 -- sh -lc 'update'", { tty: false, timeoutSeconds: 1800 });
+    assert.match(plain, /systemd-run --quiet --collect --unit=releasewatcher-run-42-update -p RuntimeMaxSec=1800 /);
+    const [command, wrapper] = decode(plain);
+    assert.equal(command, "pct exec 101 -- sh -lc 'update'"); // travels base64-encoded – no extra quoting
+    assert.match(wrapper!, /^sh \/var\/tmp\/releasewatcher\/releasewatcher-run-42-update\/command <\/dev\/null >.*\/log 2>&1$/m);
+    assert.match(wrapper!, /echo \$\? >.*\/rc\.tmp && mv .*\/rc\.tmp .*\/rc$/m);
+
+    const tty = detachedStartCommand(unit, 'update', { tty: true, timeoutSeconds: 60 });
+    assert.match(decode(tty)[1]!, /^script -qefc 'sh \/var\/tmp\/releasewatcher\/releasewatcher-run-42-update\/command' \/dev\/null /);
+
+    const follow = detachedFollowCommand(unit, '@@RW-1@@');
+    assert.match(follow, /tail -c \+1 -f --pid="\$pid"/);
+    assert.match(follow, /printf '\\n%s exit %s\\n' '@@RW-1@@'/);
+  });
+
+  it('parses the output of a followed detached command', () => {
+    assert.deepEqual(parseDetachedOutput('line 1\nline 2\n\n@@T@@ exit 3\n', '@@T@@'), {
+      state: 'finished',
+      exitCode: 3,
+      output: 'line 1\nline 2\n',
+    });
+    assert.equal(parseDetachedOutput('partial out', '@@T@@').state, 'incomplete');
+    assert.deepEqual(parseDetachedOutput('killed\n\n@@T@@ exit lost\n', '@@T@@'), { state: 'lost', exitCode: null, output: 'killed\n' });
+    assert.equal(parseDetachedOutput('\n@@T@@ missing\n', '@@T@@').state, 'missing');
+    // Output that merely contains the token text in the middle of a line is not the end marker.
+    assert.equal(parseDetachedOutput('echo @@T@@ exit 0', '@@T@@').state, 'incomplete');
+  });
+
+  it('plans raising container resources for an update and undoing it', () => {
+    assert.deepEqual(parsePctResources('arch: amd64\ncores: 2\nmemory: 1024\nswap: 512\n'), { cores: 2, memoryMb: 1024 });
+    assert.deepEqual(parsePctResources('arch: amd64\n'), { cores: null, memoryMb: null });
+
+    assert.deepEqual(planResourceRaise({ cores: 2, memoryMb: 1024 }, { cores: 4, memoryMb: 4096 }), {
+      raise: { cores: 4, memoryMb: 4096 },
+      restore: { cores: 2, memoryMb: 1024 },
+    });
+    // Never lowered; no core limit means all cores already; only configured values change.
+    assert.equal(planResourceRaise({ cores: 8, memoryMb: 8192 }, { cores: 4, memoryMb: 4096 }), null);
+    assert.equal(planResourceRaise({ cores: null, memoryMb: 1024 }, { cores: 4, memoryMb: null }), null);
+    assert.deepEqual(planResourceRaise({ cores: 1, memoryMb: null }, { cores: null, memoryMb: 2048 }), {
+      raise: { memoryMb: 2048 },
+      restore: { memoryMb: null },
+    });
+
+    assert.equal(pctSetResourcesCommand(101, { cores: 4, memoryMb: 4096 }), 'pct set 101 --cores 4 --memory 4096');
+    assert.equal(pctSetResourcesCommand(101, { cores: 2, memoryMb: null }), 'pct set 101 --cores 2 --delete memory');
   });
 
   it('compares commit hashes as opaque values, not as version numbers', () => {

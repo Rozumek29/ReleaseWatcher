@@ -50,6 +50,12 @@ This file does not repeat those; it describes the **shape** of the system, the *
 - Long operations (container checks, apt upgrades, app updates) are **runs**: the endpoint starts them and
   returns `202 Accepted` with the run DTO and a `Location: /api/runs/:id` header; the UI polls the run.
   Reuse this pattern for anything that can take more than a couple of seconds.
+- Long commands on the node (backups, upgrades, updates) run **detached** as transient systemd units
+  (`detachedStartCommand` → `detachedFollowCommand` in `proxmox/domain.ts`): the SSH connection only streams their
+  output, reconnects re-read it, and the step is stored on the run (`resume`) so a restarted process re-attaches
+  (`ContainerService.recover()`). Use `execDetached()` for any new node command that can outlive a connection.
+- State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
+  cleared after undoing it, so a restart can finish the job.
 - At most one task per container at a time (`ContainerService`); schedulers only check, never update.
 - Release notifications advance the baseline after **each** dispatched release (no duplicates after a crash).
 

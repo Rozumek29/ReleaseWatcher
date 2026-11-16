@@ -79,6 +79,15 @@ export class FakeShell implements NodeShell {
   readonly commands: string[] = [];
   /** Number of `run()` calls – each one is an SSH connection in production. */
   connections = 0;
+  /**
+   * Detached commands (`systemd-run` units) started on the fake node: the inner command is answered (and recorded in
+   * {@link commands}) when the unit starts; following it returns that answer.
+   */
+  readonly units = new Map<string, CommandResult>();
+  /** Inner commands of detached units, with their options (tty). */
+  readonly detached: { unit: string; command: string; tty: boolean }[] = [];
+  /** The next N follow connections drop (exit 255) after printing part of the output. */
+  dropFollows = 0;
   private readonly handlers: [RegExp, Partial<CommandResult> | ((command: string) => Partial<CommandResult> | Promise<Partial<CommandResult>>)][] =
     [];
 
@@ -92,12 +101,50 @@ export class FakeShell implements NodeShell {
 
   async run(command: string, options: RunOptions): Promise<CommandResult> {
     this.connections++;
+    const detached = await this.runDetachedProtocol(command);
+    if (detached) {
+      if (detached.output) options.onOutput?.(detached.output);
+      return detached;
+    }
     const token = command.match(/@@RW-[0-9a-f]+@@/)?.[0];
     const result = token ? await this.runCheckBatch(command, token) : await this.answer(command);
     if (result.output) {
       options.onOutput?.(result.output);
     }
     return result;
+  }
+
+  /** Emulates `detachedStartCommand`, `detachedFollowCommand` and `detachedCleanupCommand`. */
+  private async runDetachedProtocol(command: string): Promise<CommandResult | null> {
+    const header = command.match(/^# releasewatcher (detached|follow|cleanup) (\S+)/);
+    if (!header) {
+      return null;
+    }
+    const [, action, unit] = header as unknown as [string, string, string];
+    const ok = (output = ''): CommandResult => ({ exitCode: 0, output, timedOut: false });
+    if (action === 'detached') {
+      const encoded = [...command.matchAll(/printf %s '([A-Za-z0-9+/=]+)' \| base64 -d/g)].map((m) => m[1]!);
+      const inner = Buffer.from(encoded[0]!, 'base64').toString('utf8');
+      const wrapper = Buffer.from(encoded[1]!, 'base64').toString('utf8');
+      this.detached.push({ unit, command: inner, tty: wrapper.startsWith('script ') });
+      this.units.set(unit, await this.answer(inner));
+      return ok();
+    }
+    if (action === 'cleanup') {
+      this.units.delete(unit);
+      return ok();
+    }
+    const token = command.match(/@@RW-[0-9a-f]+@@/)![0];
+    const result = this.units.get(unit);
+    if (!result) {
+      return ok(`\n${token} missing\n`);
+    }
+    if (this.dropFollows > 0) {
+      this.dropFollows--;
+      const partial = `${result.output.slice(0, 5)}\nclient_loop: send disconnect: Broken pipe\n`;
+      return { exitCode: 255, output: partial, timedOut: false };
+    }
+    return ok(`${result.output}\n${token} exit ${result.exitCode}\n`);
   }
 
   /** Answers one command; every answered command is recorded in {@link commands}. */

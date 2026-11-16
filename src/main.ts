@@ -77,6 +77,8 @@ process.once('SIGTERM', () => void shutdown('SIGTERM'));
 const server = app.listen({ port: config.port, hostname: config.host });
 app.poller.start(config.initialDelayMs);
 app.scheduler.start();
+// Updates keep running on the node while ReleaseWatcher restarts – re-attach to them and restore raised resources.
+app.containers.recover().catch((err: unknown) => log.error({ err }, 'Re-attaching to running updates failed'));
 if (!config.publicUrl && !config.trustProxy) {
   log.info({}, 'Passkeys need HTTPS with a host name – put the app behind a reverse proxy and set PUBLIC_URL to use them');
 }

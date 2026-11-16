@@ -5,8 +5,10 @@ import {
   type ContainerApp,
   type LatestSource,
   NODE_VMID,
+  type ResourceChange,
   type Run,
   type RunKind,
+  type RunResume,
   type RunStatus,
   type RunTrigger,
   type TargetKind,
@@ -22,6 +24,9 @@ interface ContainerRow {
   backup_before_update: number | null;
   start_when_stopped: number;
   check_cron: string | null;
+  update_cores: number | null;
+  update_memory_mb: number | null;
+  resources_to_restore: string | null;
   status: string | null;
   apt_upgradable: string | null;
   last_checked_at: string | null;
@@ -61,6 +66,17 @@ interface RunRow {
   output: string;
 }
 
+function parseJson<T>(json: string | null): T | null {
+  if (!json) {
+    return null;
+  }
+  try {
+    return JSON.parse(json) as T;
+  } catch {
+    return null;
+  }
+}
+
 function parsePackages(json: string | null): AptPackage[] {
   if (!json) {
     return [];
@@ -83,6 +99,9 @@ const toContainer = (r: ContainerRow): Container => ({
   backupBeforeUpdate: r.backup_before_update === null ? null : r.backup_before_update === 1,
   startWhenStopped: r.start_when_stopped === 1,
   checkCron: r.check_cron,
+  updateCores: r.update_cores,
+  updateMemoryMb: r.update_memory_mb,
+  resourcesToRestore: parseJson<ResourceChange>(r.resources_to_restore),
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
   lastCheckedAt: r.last_checked_at,
@@ -182,7 +201,7 @@ export class ContainerStore {
       .query(
         `UPDATE containers SET
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
-           status = ?,
+           update_cores = ?, update_memory_mb = ?, status = ?,
            apt_upgradable = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
@@ -193,6 +212,8 @@ export class ContainerStore {
         c.backupBeforeUpdate === null ? null : c.backupBeforeUpdate ? 1 : 0,
         c.startWhenStopped ? 1 : 0,
         c.checkCron,
+        c.updateCores,
+        c.updateMemoryMb,
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
         c.lastCheckedAt,
@@ -200,6 +221,17 @@ export class ContainerStore {
         c.notifiedSignature,
         c.id,
       );
+  }
+
+  /**
+   * Records (or clears) resources to restore after an update. Written separately from {@link save}, so saving
+   * a container object loaded before the update cannot overwrite it.
+   */
+  setResourcesToRestore(c: Container, change: ResourceChange | null): void {
+    c.resourcesToRestore = change;
+    this.db
+      .query('UPDATE containers SET resources_to_restore = ? WHERE id = ?')
+      .run(change ? JSON.stringify(change) : null, c.id);
   }
 
   delete(id: number): boolean {
@@ -273,9 +305,27 @@ export class ContainerStore {
     this.db.query('UPDATE container_runs SET output = ? WHERE id = ?').run(output, id);
   }
 
+  /** Records the detached step a run is waiting for (null when it is done). */
+  setRunResume(id: number, resume: RunResume | null): void {
+    this.db.query('UPDATE container_runs SET resume = ? WHERE id = ?').run(resume ? JSON.stringify(resume) : null, id);
+  }
+
+  /** Runs left "running" by a previous process while a detached step was executing on the node. */
+  listResumableRuns(): { run: Run; resume: RunResume }[] {
+    return this.db
+      .query<RunRow & { resume: string | null }, []>(
+        "SELECT * FROM container_runs WHERE status = 'running' AND resume IS NOT NULL ORDER BY id",
+      )
+      .all()
+      .flatMap((r) => {
+        const resume = parseJson<RunResume>(r.resume);
+        return resume ? [{ run: toRun(r), resume }] : [];
+      });
+  }
+
   finishRun(run: Run): void {
     this.db
-      .query('UPDATE container_runs SET status = ?, finished_at = ?, exit_code = ?, output = ? WHERE id = ?')
+      .query('UPDATE container_runs SET status = ?, finished_at = ?, exit_code = ?, output = ?, resume = NULL WHERE id = ?')
       .run(run.status, run.finishedAt, run.exitCode, run.output, run.id);
     // Keep only the newest runs of this container.
     this.db
@@ -305,12 +355,15 @@ export class ContainerStore {
       });
   }
 
-  /** Marks runs left in the "running" state by a previous process as failed. */
-  failInterruptedRuns(): number {
+  /**
+   * Marks runs left in the "running" state by a previous process as failed – except those waiting for a detached
+   * step on the node (see {@link listResumableRuns}), unless `includeResumable` is set.
+   */
+  failInterruptedRuns(includeResumable = false): number {
     return this.db
       .query(
-        `UPDATE container_runs SET status = 'failed', finished_at = ?, output = output || ?
-         WHERE status = 'running'`,
+        `UPDATE container_runs SET status = 'failed', finished_at = ?, output = output || ?, resume = NULL
+         WHERE status = 'running'${includeResumable ? '' : ' AND resume IS NULL'}`,
       )
       .run(new Date().toISOString(), '\n[ReleaseWatcher was restarted while this was running]').changes;
   }

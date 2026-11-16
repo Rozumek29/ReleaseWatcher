@@ -44,7 +44,8 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
    - *latest version* – the newest release of a watched GitHub repository, a command, or none,
    - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`.
-     Enable **TTY** for scripts that need a terminal; every update has a timeout (default 30 min).
+     Enable **TTY** for scripts that need a terminal (it runs in a pseudo-terminal via `script`); every update has a
+     timeout (default 30 min). For community-scripts use `PHS_SILENT=1 update` – menus pick their default option.
 5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
    notify Discord when something new is pending (each pending item is reported once). A check is a single SSH
    connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
@@ -56,6 +57,15 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    container runs again (the live status is read before the backup and the update). Enable **Start temporarily when
    stopped** in the container settings to have checks (scheduled ones too) and updates start it with `pct start`, wait
    up to a minute for its network and shut it down again afterwards (`pct shutdown`, forced after 2 minutes).
+6. **Updates survive a dropped connection.** Backups, apt upgrades and application updates run on the node as
+   transient systemd units (`systemd-run`, unit `releasewatcher-run-<run>-<step>`, output in
+   `/var/tmp/releasewatcher/`), not inside the SSH session. When the connection drops, ReleaseWatcher reconnects and
+   reads the output again; when ReleaseWatcher itself restarts, it re-attaches to the running update and finishes the
+   run. systemd stops an update at its timeout.
+7. **Resources during updates:** a container can get more **CPU cores** and **memory** for its updates (e.g. an
+   update that compiles Rust). They are raised with `pct set` right before the apt upgrade or application update
+   (never lowered) and set back to the previous values afterwards – also when the update fails. The previous values
+   are saved first, so they are restored on the next start if ReleaseWatcher stopped in between.
 
 > Interactive scripts (whiptail dialogs) cannot be answered from the UI – a script that waits for input ends with a
 > timeout. Prefer non-interactive update commands.
@@ -317,7 +327,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/proxmox/storages` | Storages that accept backups (`pvesm status --content backup`) |
 | `GET` | `/api/containers` | Added containers with their applications and pending updates |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null }` – `null` = global default |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null, "updateCores"?: 4 \| null, "updateMemoryMb"?: 4096 \| null }` – `null` = global default (resources: unchanged), omitted = keep |
 | `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`kind: "node"`, `vmid: 0`, named after `hostname`) and start a check → `201`; `409` when already added. apt-upgrade of the host runs `dist-upgrade` without a backup (`{ "backup": true }` → `409`) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |

@@ -37,6 +37,9 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
   checkCron: null,
+  updateCores: null,
+  updateMemoryMb: null,
+  resourcesRaised: false,
   nextCheckAt: '2030-01-01T06:00:00Z',
   status: 'running',
   aptUpgradable: [

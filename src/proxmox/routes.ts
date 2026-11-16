@@ -12,7 +12,11 @@ import {
   LATEST_SOURCES,
   type LatestSource,
   MAX_APP_TIMEOUT_SECONDS,
+  MAX_UPDATE_CORES,
+  MAX_UPDATE_MEMORY_MB,
   MIN_APP_TIMEOUT_SECONDS,
+  MIN_UPDATE_CORES,
+  MIN_UPDATE_MEMORY_MB,
   type Run,
 } from './domain.ts';
 import type { ContainerScheduler } from './scheduler.ts';
@@ -46,6 +50,8 @@ const updateContainerSchema: ObjectSchema = {
     backupBeforeUpdate: { type: 'boolean', nullable: true },
     startWhenStopped: { type: 'boolean' },
     checkCron: { type: 'string', nullable: true, maxLength: 200 },
+    updateCores: { type: 'integer', nullable: true },
+    updateMemoryMb: { type: 'integer', nullable: true },
   },
   required: ['name', 'isEnabled', 'aptEnabled'],
 };
@@ -154,6 +160,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       effectiveBackupBeforeUpdate: c.kind !== 'node' && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
       startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
+      updateCores: c.updateCores,
+      updateMemoryMb: c.updateMemoryMb,
+      /** Resources are raised for an update right now (or could not be restored yet). */
+      resourcesRaised: c.resourcesToRestore !== null,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
       aptUpgradable: c.aptUpgradable,
@@ -361,6 +371,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           backupBeforeUpdate?: boolean | null;
           startWhenStopped?: boolean;
           checkCron?: string | null;
+          updateCores?: number | null;
+          updateMemoryMb?: number | null;
         }>(req, updateContainerSchema);
         if (!container) {
           return problem(404, 'Container not found.');
@@ -374,6 +386,17 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (cronError) {
           return validationProblem('checkCron', cronError);
         }
+        const updateCores = body.updateCores === undefined ? container.updateCores : body.updateCores;
+        if (updateCores !== null && (updateCores < MIN_UPDATE_CORES || updateCores > MAX_UPDATE_CORES)) {
+          return validationProblem('updateCores', `CPU cores must be between ${MIN_UPDATE_CORES} and ${MAX_UPDATE_CORES}.`);
+        }
+        const updateMemoryMb = body.updateMemoryMb === undefined ? container.updateMemoryMb : body.updateMemoryMb;
+        if (updateMemoryMb !== null && (updateMemoryMb < MIN_UPDATE_MEMORY_MB || updateMemoryMb > MAX_UPDATE_MEMORY_MB)) {
+          return validationProblem(
+            'updateMemoryMb',
+            `Memory must be between ${MIN_UPDATE_MEMORY_MB} and ${MAX_UPDATE_MEMORY_MB} MiB.`,
+          );
+        }
         const isNode = container.kind === 'node';
         Object.assign(container, {
           name,
@@ -383,6 +406,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           backupBeforeUpdate: isNode ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
           startWhenStopped: !isNode && (body.startWhenStopped ?? container.startWhenStopped),
           checkCron,
+          // The host is never resized.
+          updateCores: isNode ? null : updateCores,
+          updateMemoryMb: isNode ? null : updateMemoryMb,
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];

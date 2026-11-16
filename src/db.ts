@@ -194,6 +194,11 @@ const MIGRATIONS: readonly string[] = [
      key   TEXT PRIMARY KEY,
      value TEXT NOT NULL
    );`,
+  // Resources raised during updates (restored afterwards) and detached updates that survive a restart.
+  `ALTER TABLE containers ADD COLUMN update_cores INTEGER;
+   ALTER TABLE containers ADD COLUMN update_memory_mb INTEGER;
+   ALTER TABLE containers ADD COLUMN resources_to_restore TEXT;
+   ALTER TABLE container_runs ADD COLUMN resume TEXT;`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
