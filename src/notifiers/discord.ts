@@ -48,12 +48,13 @@ export class DiscordNotifier implements Notifier {
     await this.post(options, buildContainerPayload(notification, options));
   }
 
-  private async post(options: DiscordOptions, payload: unknown): Promise<void> {
+  private async post(options: DiscordOptions, payload: object): Promise<void> {
     const fetchFn = options.fetch ?? globalThis.fetch;
     const body = JSON.stringify(payload);
+    const url = 'components' in payload ? withComponentsUrl(options.webhookUrl!) : options.webhookUrl!;
 
     for (let attempt = 1; ; attempt++) {
-      const response = await fetchFn(options.webhookUrl!, {
+      const response = await fetchFn(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'User-Agent': 'ReleaseWatcher/1.0' },
         body,
@@ -148,16 +149,31 @@ export function buildContainerPayload(
           `${notification.isNode ? 'Proxmox host' : `CT ${notification.vmid}`} (${notification.containerName}): updates available`,
           256,
         ),
-        // The title links to the Containers page; the description repeats the link visibly (kept after truncation).
         ...(containersUrl ? { url: containersUrl } : {}),
-        description:
-          truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)) +
-          (containersUrl ? `\n\n[Open containers in ReleaseWatcher](${containersUrl})` : ''),
+        description: truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)),
         color: CONTAINER_COLOR,
         timestamp: new Date().toISOString(),
       },
     ],
+    // A link button below the embed (message components); see `withComponentsUrl()`.
+    ...(containersUrl
+      ? { components: [{ type: ACTION_ROW, components: [{ type: BUTTON, style: LINK_STYLE, label: 'Open containers', url: containersUrl }] }] }
+      : {}),
   };
+}
+
+const ACTION_ROW = 1;
+const BUTTON = 2;
+const LINK_STYLE = 5;
+
+/**
+ * Webhooks not owned by an application may only send (non-interactive) components such as link buttons
+ * when `with_components=true` is set on the execute URL; otherwise Discord ignores them.
+ */
+export function withComponentsUrl(webhookUrl: string): string {
+  const url = new URL(webhookUrl);
+  url.searchParams.set('with_components', 'true');
+  return url.toString();
 }
 
 const truncate = (value: string, max: number): string =>

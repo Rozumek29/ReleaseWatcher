@@ -70,13 +70,31 @@ describe('DiscordNotifier', () => {
       aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
       apps: [{ name: 'Vaultwarden', installedVersion: '1.30.0', latestVersion: '1.32.0' }],
     };
-    const linked = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' }).embeds[0]!;
+    const payload = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' });
+    const linked = payload.embeds[0]!;
     assert.equal(linked.url, 'https://updater.example.com/containers');
-    assert.match(linked.description, /\[Open containers in ReleaseWatcher\]\(https:\/\/updater\.example\.com\/containers\)$/);
+    assert.equal(linked.description.includes('Open containers'), false);
+    assert.deepEqual(payload.components, [
+      { type: 1, components: [{ type: 2, style: 5, label: 'Open containers', url: 'https://updater.example.com/containers' }] },
+    ]);
 
     // Without a public URL there is nothing to link to.
-    const plain = buildContainerPayload(notification, options).embeds[0]!;
-    assert.equal('url' in plain, false);
-    assert.equal(plain.description.includes('Open containers'), false);
+    const plain = buildContainerPayload(notification, options);
+    assert.equal('url' in plain.embeds[0]!, false);
+    assert.equal('components' in plain, false);
+  });
+
+  it('asks Discord to accept components when the message has a link button', async () => {
+    const urls: string[] = [];
+    const fetch = (async (url: string) => {
+      urls.push(url);
+      return new Response(null, { status: 204 });
+    }) as unknown as typeof globalThis.fetch;
+    const notification = { vmid: 101, containerName: 'vaultwarden', aptPackages: [], apps: [] };
+
+    await new DiscordNotifier({ ...options, fetch, webhookUrl: `${options.webhookUrl}?thread_id=9` }).notifyContainerUpdates(notification);
+    await new DiscordNotifier({ ...options, fetch, publicUrl: 'https://updater.example.com' }).notifyContainerUpdates(notification);
+
+    assert.deepEqual(urls, [`${options.webhookUrl}?thread_id=9`, `${options.webhookUrl}?with_components=true`]);
   });
 });
