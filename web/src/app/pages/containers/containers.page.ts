@@ -62,6 +62,7 @@ export class ContainersPage {
   protected selectedVmid: number | null = null;
 
   protected readonly checkingAll = signal(false);
+  protected readonly updatingAll = signal(false);
   /** Ticks so relative times stay current. */
   protected readonly now = signal(Date.now());
 
@@ -73,6 +74,17 @@ export class ContainersPage {
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
   protected readonly hasNode = computed(() => this.containers().some((c) => c.kind === 'node'));
   protected readonly label = targetLabel;
+  /** Containers "Update all" would update (same rules as the server: no host, no disabled or blocked ones). */
+  protected readonly updatable = computed(() =>
+    this.containers().filter(
+      (c) =>
+        c.kind !== 'node' &&
+        c.isEnabled &&
+        !this.blockedWhileStopped(c) &&
+        ((c.aptEnabled && c.aptUpgradable.length > 0) ||
+          c.apps.some((a) => a.updateAvailable === true && !!a.updateCommand)),
+    ),
+  );
 
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -215,6 +227,37 @@ export class ContainersPage {
       this.toast.error(error);
     } finally {
       this.checkingAll.set(false);
+    }
+  }
+
+  /** Opens the "Update all" confirmation; "Backup first" is on when a container backs up by default. */
+  protected askUpdateAll(): void {
+    this.backupFirst.set(
+      this.backupStorage() !== null && this.updatable().some((c) => c.effectiveBackupBeforeUpdate),
+    );
+    this.confirming.set('update-all');
+  }
+
+  protected async updateAll(): Promise<void> {
+    this.confirming.set(null);
+    this.updatingAll.set(true);
+    try {
+      const { containers, updates } = await firstValueFrom(
+        this.api.updateAllContainers(this.backupFirst() && this.backupStorage() !== null),
+      );
+      this.toast.info(
+        containers > 0
+          ? `Updating ${containers} container(s) one after another – ${updates} update(s).`
+          : 'No container has pending updates.',
+      );
+      // Queued containers report isBusy, so the list keeps refreshing until all updates finished.
+      await this.load();
+      void this.statusService.refresh();
+    } catch (error) {
+      this.handleNotConfigured(error);
+      this.toast.error(error);
+    } finally {
+      this.updatingAll.set(false);
     }
   }
 

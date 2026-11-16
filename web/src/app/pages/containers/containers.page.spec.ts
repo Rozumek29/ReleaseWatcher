@@ -103,6 +103,38 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('no pending packages');
   });
 
+  it('updates all containers with pending updates after a confirmation, leaving out the host', async () => {
+    const node = container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [] });
+    const disabled = container({ id: 3, vmid: 103, name: 'off', isEnabled: false });
+    const { fixture, el } = await create([container(), node, disabled]);
+    const updateAll = () =>
+      [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) =>
+        b.textContent?.includes('Update all'),
+      )!;
+
+    updateAll().click();
+    await settle(fixture);
+    http.expectNone('/api/containers/update-all');
+    expect(el.querySelector('.header-actions')?.textContent).toContain('Update 1 container(s) one after another?');
+    const backup = el.querySelector<HTMLInputElement>('.header-actions .backup-check input')!;
+    expect(backup.checked).toBe(true);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const request = http.expectOne('/api/containers/update-all');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ backup: true });
+    request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
+    await settle(fixture);
+
+    http.expectOne('/api/containers').flush([container({ aptUpgradable: [], apps: [], updatesAvailable: 0 }), node]);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+    await settle(fixture);
+    // Only the host has pending updates now – it is updated by hand.
+    expect(updateAll().disabled).toBe(true);
+  });
+
   it('keeps polling while a container stays busy and stops afterwards', async () => {
     const { fixture } = await create([container()]);
     vi.useFakeTimers();

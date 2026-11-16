@@ -626,6 +626,82 @@ describe('containers API', () => {
     assert.equal((await request('PUT', '/api/settings', { containerCheckCron: 'often' })).status, 400);
   });
 
+  /** CT 101 with pending apt packages and a Vaultwarden app (1.30.0 → v1.32.0) with an update command. */
+  const addContainerWithUpdates = async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repo = (await request('GET', '/api/repositories')).json()[0];
+    await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      versionCommand: 'cat /opt/vw_version.txt',
+      latestSource: 'github',
+      repositoryId: repo.id,
+      updateCommand: 'update',
+    });
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    return container;
+  };
+
+  it('updates all containers one after another: apt, then applications, without the host', async () => {
+    const container = await addContainerWithUpdates();
+    shell.on(/^hostname$/, { output: 'pve\n' });
+    const node = (await request('POST', '/api/containers/node')).json();
+    await app.containers.wait(node.id);
+    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    const upgrade = Promise.withResolvers<{ output: string }>();
+    shell.on(/apt-get -y/, () => upgrade.promise);
+    shell.on(/'update'$/, { output: 'Updated.\n' });
+    shell.commands.length = 0;
+
+    const response = await request('POST', '/api/containers/update-all', { backup: true });
+    assert.equal(response.status, 202);
+    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
+    assert.equal((await request('POST', '/api/containers/update-all')).status, 409);
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
+    await app.updater.idle();
+
+    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|dist-upgrade|'update'$/.test(c));
+    assert.equal(updates.length, 3, updates.join('\n'));
+    assert.match(updates[0]!, /vzdump 101/, 'backed up once, before the first update');
+    assert.ok(updates[1]!.includes('apt-get -y'));
+    assert.match(updates[2]!, /pct exec 101 .*'update'$/);
+    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
+    assert.deepEqual(runs.slice(0, 2).map((r: { kind: string; status: string }) => [r.kind, r.status]), [
+      ['app-update', 'succeeded'],
+      ['apt-upgrade', 'succeeded'],
+    ]);
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, false);
+  });
+
+  it('skips the remaining updates of a container after a failure and honours backup: false', async () => {
+    const container = await addContainerWithUpdates();
+    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    shell.on(/apt-get -y/, { exitCode: 100, output: 'E: Could not get lock\n' });
+    shell.commands.length = 0;
+
+    assert.equal((await request('POST', '/api/containers/update-all', { backup: false })).status, 202);
+    await app.updater.idle();
+
+    assert.equal(shell.commands.some((c) => c.includes('vzdump')), false);
+    assert.equal(shell.commands.some((c) => /'update'$/.test(c)), false);
+    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
+    assert.equal(runs[0].kind, 'apt-upgrade');
+    assert.equal(runs[0].status, 'failed');
+  });
+
+  it('starts nothing when no container has pending updates', async () => {
+    await addContainer();
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    await app.scheduler.checkAll();
+    shell.commands.length = 0;
+    const response = await request('POST', '/api/containers/update-all');
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.json(), { containers: 0, updates: 0 });
+    assert.equal(shell.commands.length, 0);
+  });
+
   it('refuses container actions until the node is configured', async () => {
     shell.isConfigured = false;
     assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);

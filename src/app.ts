@@ -15,6 +15,7 @@ import type { Notifier } from './notifiers/notifier.ts';
 import { Poller } from './poller.ts';
 import { containerRoutes, containerStatus } from './proxmox/routes.ts';
 import { ContainerScheduler } from './proxmox/scheduler.ts';
+import { ContainerUpdater } from './proxmox/updater.ts';
 import { ContainerService } from './proxmox/service.ts';
 import type { NodeShell } from './proxmox/ssh.ts';
 import { ContainerStore } from './proxmox/store.ts';
@@ -120,6 +121,8 @@ export interface App {
   poller: Poller;
   /** Created but not started – call `scheduler.start()`. */
   scheduler: ContainerScheduler;
+  /** "Update all" of the containers page. */
+  updater: ContainerUpdater;
   containers: ContainerService;
   auth: AuthService;
   log: Logger;
@@ -299,6 +302,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     concurrency: () => settings.current.containerCheckConcurrency,
     log,
   });
+  const updater = new ContainerUpdater({ store: containerStore, service: containers, log });
 
   const settingsDto = () => {
     const current = settings.current;
@@ -587,6 +591,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           repositories: store,
           service: containers,
           scheduler,
+          updater,
           backupDefaults: () => ({ storage: settings.current.backupStorage, enabled: settings.current.backupBeforeUpdate }),
         }),
 
@@ -679,10 +684,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const close = async () => {
     poller.stop();
     await scheduler.stop();
+    await updater.stop();
     await server?.stop();
     server = null;
     await containers.idle();
   };
 
-  return { checker, poller, scheduler, containers, auth, log, listen, close };
+  return { checker, poller, scheduler, updater, containers, auth, log, listen, close };
 }

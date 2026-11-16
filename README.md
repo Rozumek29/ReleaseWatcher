@@ -40,6 +40,10 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    Server or `local`) and whether to back up by default; a container can override the default, and every update
    confirmation has a **Backup first** checkbox. The backup is a `vzdump` in snapshot mode (zstd, except on PBS),
    retention follows the storage's prune settings, and a failed backup stops the update.
+   **Update all** (Containers page) updates every enabled container with pending updates, one container after
+   another: apt first, then applications with a newer version and an update command. The Proxmox host and
+   stopped containers that may not be started are left out. With **Backup first** each container is backed up
+   once, before its first update, if it is set to back up; a failed update skips the rest of that container.
 4. Each container can have **applications**:
    - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
    - *latest version* – the newest release of a watched GitHub repository, a command, or none,
@@ -332,6 +336,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`kind: "node"`, `vmid: 0`, named after `hostname`) and start a check → `201`; `409` when already added. apt-upgrade of the host runs `dist-upgrade` without a backup (`{ "backup": true }` → `409`) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
+| `POST` | `/api/containers/update-all` | Update every enabled container with pending updates one after another – apt, then applications; not the Proxmox host. Body `{ backup?: boolean }` (`false` = no backups, otherwise each container's default). 202 with `{ containers, updates }`, 409 while running |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |

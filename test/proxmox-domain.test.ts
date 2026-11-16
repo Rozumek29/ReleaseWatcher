@@ -17,6 +17,9 @@ import {
   parsePctStatus,
   pctExec,
   parsePvesmStatus,
+  pendingUpdates,
+  type Container,
+  type ContainerApp,
 } from '../src/proxmox/domain.ts';
 import { SshShell } from '../src/proxmox/ssh.ts';
 
@@ -175,5 +178,28 @@ describe('proxmox domain', () => {
     assert.ok(options.includes('StrictHostKeyChecking=accept-new'));
     assert.ok(options.includes('LogLevel=ERROR')); // keeps "Permanently added…" out of version output
     assert.deepEqual(args.slice(-3), ['--', 'pve.lan', "sudo -n -- sh -c 'pct list'"]);
+  });
+
+  it('lists the updates "update all" runs: apt first, then applications with an update command', () => {
+    const container = {
+      id: 1, kind: 'container', vmid: 101, name: 'ct', isEnabled: true, aptEnabled: true, backupBeforeUpdate: null,
+      startWhenStopped: false, checkCron: null, updateCores: null, updateMemoryMb: null, resourcesToRestore: null,
+      status: 'running', aptUpgradable: [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }],
+      lastCheckedAt: null, lastError: null, notifiedSignature: null,
+    } as unknown as Container;
+    const app = (id: number, extra: Partial<ContainerApp>) =>
+      ({ id, installedVersion: '1.0.0', latestVersion: '1.1.0', updateCommand: 'update', ...extra }) as ContainerApp;
+    const apps = [
+      app(1, {}),
+      app(2, { updateCommand: null }),
+      app(3, { latestVersion: '1.0.0' }),
+      app(4, { installedVersion: null }),
+    ];
+    assert.deepEqual(pendingUpdates(container, apps), [{ kind: 'apt-upgrade' }, { kind: 'app-update', appId: 1 }]);
+    assert.deepEqual(pendingUpdates({ ...container, aptEnabled: false }, []), []);
+    assert.deepEqual(pendingUpdates({ ...container, kind: 'node' }, apps), []);
+    assert.deepEqual(pendingUpdates({ ...container, isEnabled: false }, apps), []);
+    assert.deepEqual(pendingUpdates({ ...container, status: 'stopped' }, apps), []);
+    assert.equal(pendingUpdates({ ...container, status: 'stopped', startWhenStopped: true }, apps).length, 2);
   });
 });

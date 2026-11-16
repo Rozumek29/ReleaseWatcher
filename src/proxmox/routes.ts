@@ -23,12 +23,14 @@ import type { ContainerScheduler } from './scheduler.ts';
 import { ContainerBusyError, type ContainerService } from './service.ts';
 import { ShellNotConfiguredError } from './ssh.ts';
 import type { AppInput, ContainerStore } from './store.ts';
+import { type ContainerUpdater, UpdateAllRunningError } from './updater.ts';
 
 export interface ContainerRoutesDeps {
   containers: ContainerStore;
   repositories: RepositoryStore;
   service: ContainerService;
   scheduler: ContainerScheduler;
+  updater: ContainerUpdater;
   /** Global backup settings: storage for backups and whether to back up before updates by default. */
   backupDefaults: () => { storage: string | null; enabled: boolean };
 }
@@ -114,7 +116,7 @@ async function guard(action: () => Response | Promise<Response>): Promise<Respon
     if (error instanceof ShellNotConfiguredError) {
       return problem(409, error.message);
     }
-    if (error instanceof ContainerBusyError) {
+    if (error instanceof ContainerBusyError || error instanceof UpdateAllRunningError) {
       return problem(409, error.message);
     }
     throw error;
@@ -123,7 +125,7 @@ async function guard(action: () => Response | Promise<Response>): Promise<Respon
 
 /** HTTP routes for Proxmox containers (registered by `buildApp`). */
 export function containerRoutes(deps: ContainerRoutesDeps) {
-  const { containers, repositories, service, scheduler } = deps;
+  const { containers, repositories, service, scheduler, updater } = deps;
 
   const appDto = (a: ContainerApp) => {
     const repo = a.repositoryId === null ? null : repositories.get(a.repositoryId);
@@ -170,7 +172,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       lastCheckedAt: c.lastCheckedAt,
       lastError: c.lastError,
       createdAt: c.createdAt,
-      isBusy: service.isBusy(c.id),
+      /** A task runs or the container waits for its turn in "update all". */
+      isBusy: service.isBusy(c.id) || updater.isQueued(c.id),
       apps: appDtos,
       /** apt counts as one pending update. */
       updatesAvailable: (c.aptUpgradable.length > 0 ? 1 : 0) + appDtos.filter((a) => a.updateAvailable).length,
@@ -355,6 +358,40 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           }
           void scheduler.checkAll();
           return Response.json({ queued: containers.listEnabled().length }, { status: 202 });
+        }),
+    },
+    // Updates every container with pending updates (apt, then applications), one after another. The host is left out.
+    '/api/containers/update-all': {
+      POST: (req: Request) =>
+        guard(async () => {
+          const options = await readUpdateOptions(req);
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          if (updater.isRunning) {
+            throw new UpdateAllRunningError();
+          }
+          const plan = updater.plan();
+          if (plan.length === 0) {
+            return Response.json({ containers: 0, updates: 0 });
+          }
+          // false = no backups; true/omitted = each container's own default (backupBeforeUpdate or the global one).
+          const backups = new Map<number, string | null>();
+          for (const { container } of plan) {
+            const backup = resolveBackup(container, options.backup === false ? false : undefined);
+            if (backup instanceof Response) {
+              return backup;
+            }
+            backups.set(container.id, backup);
+          }
+          void updater.start(
+            plan.map((p) => p.container.id),
+            (container) => backups.get(container.id) ?? null,
+          );
+          return Response.json(
+            { containers: plan.length, updates: plan.reduce((sum, p) => sum + p.updates.length, 0) },
+            { status: 202 },
+          );
         }),
     },
     '/api/containers/:id': {

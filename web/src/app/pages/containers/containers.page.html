@@ -4,14 +4,39 @@
     <p>LXC containers on your Proxmox node: pending apt packages and application updates.</p>
   </div>
   <div class="header-actions">
-    <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
-      <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
-      Check all
-    </button>
-    <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
-      <app-icon name="plus" [size]="16" />
-      Add container
-    </button>
+    @if (confirming() === 'update-all') {
+      <span class="confirm-text warn">Update {{ updatable().length }} container(s) one after another?</span>
+      <label class="backup-check" [class.disabled]="!backupStorage()" title="Backs up the containers set to back up before updates">
+        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+        Backup first
+        @if (backupStorage(); as storage) {
+          <span class="muted mono">→ {{ storage }}</span>
+        } @else {
+          <span class="muted">(choose a storage in Settings)</span>
+        }
+      </label>
+      <button type="button" class="btn btn-sm" (click)="updateAll()">Yes</button>
+      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+    } @else {
+      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
+        <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
+        Check all
+      </button>
+      <button
+        type="button"
+        class="btn btn-secondary"
+        (click)="askUpdateAll()"
+        [disabled]="updatingAll() || !configured() || updatable().length === 0"
+        [title]="updatable().length === 0 ? 'No container has pending updates' : 'apt upgrade and application updates of every container (not the Proxmox host)'"
+      >
+        <app-icon [name]="updatingAll() ? 'refresh' : 'arrowUp'" [size]="16" [class.spin]="updatingAll()" />
+        {{ updatingAll() ? 'Updating…' : 'Update all' }}
+      </button>
+      <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
+        <app-icon name="plus" [size]="16" />
+        Add container
+      </button>
+    }
   </div>
 </header>
 

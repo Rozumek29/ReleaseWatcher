@@ -126,6 +126,33 @@ export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 
   return diff === null ? app.latestVersion.trim() !== app.installedVersion.trim() : diff > 0;
 }
 
+/** One update of a container started by "update all". */
+export type PendingUpdate = { kind: 'apt-upgrade' } | { kind: 'app-update'; appId: number };
+
+/**
+ * Updates "update all" runs in a container, in order: apt first, then every application with a known newer
+ * version and an update command. The Proxmox host, disabled containers and stopped containers that may not be
+ * started are left out (they are updated by hand).
+ */
+export function pendingUpdates(container: Container, apps: readonly ContainerApp[]): PendingUpdate[] {
+  if (container.kind === 'node' || !container.isEnabled) {
+    return [];
+  }
+  if (container.status === 'stopped' && !container.startWhenStopped) {
+    return [];
+  }
+  const updates: PendingUpdate[] = [];
+  if (container.aptEnabled && container.aptUpgradable.length > 0) {
+    updates.push({ kind: 'apt-upgrade' });
+  }
+  for (const app of apps) {
+    if (app.updateCommand && appUpdateAvailable(app) === true) {
+      updates.push({ kind: 'app-update', appId: app.id });
+    }
+  }
+  return updates;
+}
+
 /** Quotes a string for a POSIX shell. */
 export const shQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
