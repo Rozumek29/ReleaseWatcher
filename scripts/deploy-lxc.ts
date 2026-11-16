@@ -77,7 +77,13 @@ try {
   const binary = join(root, 'dist', 'releasewatcher-linux-x64');
   if (!values['skip-build']) {
     step('Building the UI');
-    const build = Bun.spawnSync(['bun', 'run', 'build'], { cwd: root, stdout: 'inherit', stderr: 'inherit' });
+    // NG_CLI_ANALYTICS: never stop at the Angular CLI's interactive analytics question.
+    const build = Bun.spawnSync(['bun', 'run', 'build'], {
+      cwd: root,
+      stdout: 'inherit',
+      stderr: 'inherit',
+      env: { ...process.env, NG_CLI_ANALYTICS: 'false' },
+    });
     if (build.exitCode !== 0) fail('UI build failed.');
     step('Compiling the Linux executable');
     await compile({ outfile: binary, target: 'bun-linux-x64' });
