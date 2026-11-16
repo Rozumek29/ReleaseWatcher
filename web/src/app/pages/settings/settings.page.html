@@ -160,6 +160,10 @@
                   organization may have to approve the token before it works.
                 </li>
                 <li>
+                  <strong>Repositories of another user</strong> (you are only a collaborator): fine-grained tokens cannot
+                  read them at all – create the token on the owner's account, or move the repository to an organization.
+                </li>
+                <li>
                   <strong>Classic token:</strong> needs the <code>repo</code> scope, which also grants write access –
                   prefer a fine-grained token.
                 </li>
