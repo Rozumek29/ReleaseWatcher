@@ -19,6 +19,7 @@ interface Row {
   installed_version: string | null;
   installed_version_checked_at: string | null;
   installed_version_error: string | null;
+  github_token: string | null;
 }
 
 const toEntity = (r: Row): WatchedRepository => ({
@@ -39,6 +40,7 @@ const toEntity = (r: Row): WatchedRepository => ({
   installedVersion: r.installed_version,
   installedVersionCheckedAt: r.installed_version_checked_at,
   installedVersionError: r.installed_version_error,
+  githubToken: r.github_token,
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -140,6 +142,8 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE containers ADD COLUMN backup_before_update INTEGER;
    UPDATE containers SET backup_before_update = 1 WHERE snapshot_before_update = 1;
    ALTER TABLE containers DROP COLUMN snapshot_before_update;`,
+  // Per-repository GitHub token (overrides the global one).
+  `ALTER TABLE watched_repositories ADD COLUMN github_token TEXT;`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
@@ -191,7 +195,7 @@ export class RepositoryStore {
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            etag = ?, last_checked_at = ?, last_error = ?,
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?, installed_version = ?,
-           installed_version_checked_at = ?, installed_version_error = ?
+           installed_version_checked_at = ?, installed_version_error = ?, github_token = ?
          WHERE id = ?`,
       )
       .run(
@@ -208,6 +212,7 @@ export class RepositoryStore {
         repo.installedVersion,
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
+        repo.githubToken,
         repo.id,
       );
   }

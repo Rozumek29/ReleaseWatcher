@@ -42,6 +42,9 @@ export class RepositoriesPage {
 
   protected newRepository = '';
   protected newIncludePrereleases = false;
+  /** Optional token of a private repository the global token cannot read. */
+  protected newToken = '';
+  protected readonly showNewToken = signal(false);
 
   protected readonly hasEnabledNotifier = computed(() => this.notifiers().some((n) => n.isEnabled));
 
@@ -110,11 +113,17 @@ export class RepositoriesPage {
     this.adding.set(true);
     try {
       const created = await firstValueFrom(
-        this.api.addRepository({ repository, includePrereleases: this.newIncludePrereleases }),
+        this.api.addRepository({
+          repository,
+          includePrereleases: this.newIncludePrereleases,
+          ...(this.newToken.trim() ? { githubToken: this.newToken.trim() } : {}),
+        }),
       );
       this.repositories.update((list) => [...list, created].sort(byFullName));
       this.newRepository = '';
       this.newIncludePrereleases = false;
+      this.newToken = '';
+      this.showNewToken.set(false);
       this.toast.success(`Watching ${created.fullName}.`);
       void this.statusService.refresh();
     } catch (error) {

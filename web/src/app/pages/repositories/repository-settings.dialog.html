@@ -18,6 +18,32 @@
           <app-switch label="Include pre-releases" [checked]="includePrereleases" (toggled)="includePrereleases = !includePrereleases" />
         </div>
 
+        <div class="field">
+          <label for="repo-token">GitHub token <span class="optional">optional</span></label>
+          <input
+            id="repo-token"
+            class="input mono"
+            type="password"
+            name="token"
+            [(ngModel)]="token"
+            [placeholder]="repo.hasOwnToken && !removeToken ? (repo.githubTokenMasked ?? 'saved') + ' – type to replace' : 'github_pat_…'"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <span class="hint">
+            @if (repo.hasOwnToken && !removeToken) {
+              This repository uses its own token.
+              <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
+              to use the global token again.
+            } @else if (removeToken) {
+              The token will be removed on save – the global token (Settings) is used.
+            } @else {
+              Uses the global token from Settings. Set one here only for a private repository the global token cannot
+              read, e.g. one owned by another account (fine-grained token of the owner, Contents: Read-only).
+            }
+          </span>
+        </div>
+
         <fieldset class="group">
           <legend>
             <app-icon name="server" [size]="16" />

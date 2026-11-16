@@ -90,8 +90,9 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 ### Secrets
 
-- Installed-version header values, the Discord webhook URL, the GitHub token and the Proxmox SSH private key are
-  secrets (the key is exposed only as `sshKeyConfigured`). The API never
+- Installed-version header values, the Discord webhook URL, the GitHub token (global and per repository) and the
+  Proxmox SSH private key are secrets (the key is exposed only as `sshKeyConfigured`, a repository token as
+  `hasOwnToken` + masked value). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.
 - Never log secret values.

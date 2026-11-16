@@ -208,7 +208,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `DISCORD_USERNAME` | `ReleaseWatcher` | Display name of the webhook. |
 | `DISCORD_AVATAR_URL` | – | Avatar of the webhook. |
 | `DISCORD_MAX_BODY_LENGTH` | `1500` | Release notes are truncated to this length. |
-| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos – fine-grained token with access to those repositories and **Contents: Read-only** (Metadata: Read-only is added automatically); a classic token needs `repo`. Fine-grained tokens cannot read repositories of another user you only collaborate on – use a token of the owner. |
+| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos – fine-grained token with access to those repositories and **Contents: Read-only** (Metadata: Read-only is added automatically); a classic token needs `repo`. Fine-grained tokens cannot read repositories of another user you only collaborate on – give such a repository its own token (of the owner) in its settings; per-repository tokens override this one and are never returned by the API. |
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
 | `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
@@ -233,8 +233,8 @@ To run the published image instead of building locally, replace `build: .` in `d
 | Method | Route | Description |
 |---|---|---|
 | `GET` | `/api/repositories` | List watched repositories |
-| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false }` |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases": true, "isEnabled": true, "installedVersionUrl"?: "https://…", "installedVersionField"?: "data.version", "installedVersionHeaders"?: [{ "name": "Authorization", "value": "Bearer …" }] }` – a header with `value: null` keeps the saved value |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` – the token is optional, see below |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases": true, "isEnabled": true, "installedVersionUrl"?: "https://…", "installedVersionField"?: "data.version", "installedVersionHeaders"?: [{ "name": "Authorization", "value": "Bearer …" }] }` – a header with `value: null` keeps the saved value; `"githubToken"`: omit = keep, `null` = remove |
 | `POST` | `/api/installed-version/test` | `{ "url": "https://…", "field": null, "headers": [], "repositoryId"?: 1 }` → detected version and response preview |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately |

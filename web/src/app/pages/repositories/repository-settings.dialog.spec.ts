@@ -26,6 +26,8 @@ const repo: WatchedRepository = {
   installedVersionCheckedAt: null,
   installedVersionError: null,
   updateAvailable: null,
+  hasOwnToken: false,
+  githubTokenMasked: null,
 };
 
 describe('RepositorySettingsDialog', () => {
@@ -53,6 +55,7 @@ describe('RepositorySettingsDialog', () => {
     expect(request.request.body.installedVersionUrl).toBe('https://vault.lan/api/version');
     expect(request.request.body.installedVersionField).toBeNull();
     expect(request.request.body.installedVersionHeaders).toEqual([]);
+    expect('githubToken' in request.request.body).toBe(false); // untouched token field = keep
     request.flush({ ...repo, installedVersionUrl: 'https://vault.lan/api/version', installedVersion: '1.31.0', updateAvailable: true });
     await settle(fixture);
 
@@ -93,5 +96,30 @@ describe('RepositorySettingsDialog', () => {
       { name: 'Authorization', value: null },
       { name: 'X-Api-Key', value: 'k1' },
     ]);
+  });
+
+  it('sets, keeps and removes the repository token without ever showing it', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', { ...repo, hasOwnToken: true, githubTokenMasked: 'gith…1234' });
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const token = el.querySelector<HTMLInputElement>('#repo-token')!;
+    expect(token.value).toBe('');
+    expect(token.placeholder).toContain('gith…1234');
+
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Remove it'))!.click();
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.githubToken).toBeNull();
+    request.flush({ ...repo });
+    await settle(fixture);
+    http.verify();
   });
 });

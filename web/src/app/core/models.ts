@@ -22,11 +22,16 @@ export interface WatchedRepository {
   installedVersionError: string | null;
   /** True when the latest release is newer than the installed version; null when unknown. */
   updateAvailable: boolean | null;
+  /** The repository uses its own token instead of the global one (the token itself is never returned). */
+  hasOwnToken: boolean;
+  githubTokenMasked: string | null;
 }
 
 export interface AddRepositoryRequest {
   repository: string;
   includePrereleases: boolean;
+  /** Token for a private repository the global token cannot read. */
+  githubToken?: string | null;
 }
 
 export interface UpdateRepositoryRequest {
@@ -36,6 +41,8 @@ export interface UpdateRepositoryRequest {
   installedVersionUrl?: string | null;
   installedVersionField?: string | null;
   installedVersionHeaders?: HeaderInput[] | null;
+  /** Omit to keep, null to remove the repository's own token. */
+  githubToken?: string | null;
 }
 
 /** A header sent to the server. `value: null` keeps the value already saved under that name. */

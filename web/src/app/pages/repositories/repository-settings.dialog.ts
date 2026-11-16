@@ -37,6 +37,9 @@ export class RepositorySettingsDialog {
   protected includePrereleases = false;
   protected isEnabled = true;
   protected headers: HeaderRow[] = [];
+  /** New repository token; empty keeps the saved one. */
+  protected token = '';
+  protected removeToken = false;
   protected readonly showValues = signal(false);
   private nextHeaderId = 1;
 
@@ -55,6 +58,8 @@ export class RepositorySettingsDialog {
         this.field = repo.installedVersionField ?? '';
         this.includePrereleases = repo.includePrereleases;
         this.isEnabled = repo.isEnabled;
+        this.token = '';
+        this.removeToken = false;
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
         this.testResult.set(null);
@@ -104,6 +109,8 @@ export class RepositorySettingsDialog {
           installedVersionUrl: this.url.trim() || null,
           installedVersionField: this.field.trim() || null,
           installedVersionHeaders: this.headerInputs(),
+          // The token is never sent back to the UI: empty = keep, "Remove" = null.
+          ...(this.token.trim() ? { githubToken: this.token.trim() } : this.removeToken ? { githubToken: null } : {}),
         }),
       );
       this.saved.emit(updated);

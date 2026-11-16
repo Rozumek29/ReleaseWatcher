@@ -27,13 +27,21 @@ export class FakeSource implements ReleaseSource {
   error: Error | null = null;
   existing = new Set(['acme/widget']);
   calls = 0;
+  /** Repositories visible only with a specific token (full name → token). */
+  privateRepos = new Map<string, string>();
+  /** Token passed with the last call (null/undefined = global token). */
+  lastToken: string | null | undefined;
 
-  async repositoryExists(owner: string, name: string): Promise<boolean> {
-    return this.existing.has(`${owner}/${name}`.toLowerCase());
+  async repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean> {
+    this.lastToken = token;
+    const fullName = `${owner}/${name}`.toLowerCase();
+    const required = this.privateRepos.get(fullName);
+    return required !== undefined ? token === required : this.existing.has(fullName);
   }
 
-  async getRecentReleases(_owner: string, _name: string, etag: string | null): Promise<ReleaseFetchResult> {
+  async getRecentReleases(_owner: string, _name: string, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
     this.calls++;
+    this.lastToken = token;
     if (this.error) {
       throw this.error;
     }

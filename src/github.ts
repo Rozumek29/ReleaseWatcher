@@ -17,9 +17,10 @@ export interface RateLimit {
 export interface ReleaseSource {
   /** Current API quota, or null when the provider doesn't report one. */
   getRateLimit?(): Promise<RateLimit | null>;
-  repositoryExists(owner: string, name: string): Promise<boolean>;
+  /** `token` overrides the global token for this repository (e.g. a private repository of another account). */
+  repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean>;
   /** Most recent published releases (drafts excluded). Pass the previous ETag to get a cheap 304. */
-  getRecentReleases(owner: string, name: string, etag: string | null): Promise<ReleaseFetchResult>;
+  getRecentReleases(owner: string, name: string, etag: string | null, token?: string | null): Promise<ReleaseFetchResult>;
 }
 
 export class GitHubApiError extends Error {
@@ -70,8 +71,8 @@ export class GitHubReleaseSource implements ReleaseSource {
     return core ? { limit: core.limit, remaining: core.remaining, resetAt: new Date(core.reset * 1000).toISOString() } : null;
   }
 
-  async repositoryExists(owner: string, name: string): Promise<boolean> {
-    const response = await this.request(this.repoPath(owner, name));
+  async repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean> {
+    const response = await this.request(this.repoPath(owner, name), {}, token);
     if (response.status === 404) {
       return false;
     }
@@ -79,9 +80,14 @@ export class GitHubReleaseSource implements ReleaseSource {
     return true;
   }
 
-  async getRecentReleases(owner: string, name: string, etag: string | null): Promise<ReleaseFetchResult> {
+  async getRecentReleases(
+    owner: string,
+    name: string,
+    etag: string | null,
+    token?: string | null,
+  ): Promise<ReleaseFetchResult> {
     const path = `${this.repoPath(owner, name)}/releases?per_page=${this.options.releasesPerPage}`;
-    const response = await this.request(path, etag ? { 'If-None-Match': etag } : {});
+    const response = await this.request(path, etag ? { 'If-None-Match': etag } : {}, token);
 
     if (response.status === 304) {
       return { releases: [], etag, notModified: true };
@@ -111,8 +117,9 @@ export class GitHubReleaseSource implements ReleaseSource {
     return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
   }
 
-  private request(path: string, headers: Record<string, string> = {}): Promise<Response> {
-    const token = typeof this.options.token === 'function' ? this.options.token() : this.options.token;
+  /** `tokenOverride` (a repository's own token) wins over the global token. */
+  private request(path: string, headers: Record<string, string> = {}, tokenOverride?: string | null): Promise<Response> {
+    const token = tokenOverride || (typeof this.options.token === 'function' ? this.options.token() : this.options.token);
     return this.fetch(new URL(path, this.options.apiBaseUrl), {
       headers: {
         Accept: 'application/vnd.github+json',

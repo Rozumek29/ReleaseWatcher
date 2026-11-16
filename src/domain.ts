@@ -24,6 +24,8 @@ export interface WatchedRepository {
   installedVersion: string | null;
   installedVersionCheckedAt: string | null;
   installedVersionError: string | null;
+  /** Token used for this repository instead of the global one (private repository of another account). Secret. */
+  githubToken: string | null;
 }
 
 /** Source-agnostic description of a single release. */

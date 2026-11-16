@@ -29,6 +29,8 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     installedVersionCheckedAt: null,
     installedVersionError: null,
     updateAvailable: null,
+    hasOwnToken: false,
+    githubTokenMasked: null,
     ...extra,
   };
 };

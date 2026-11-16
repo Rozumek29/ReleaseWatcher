@@ -207,3 +207,13 @@
     transform: translateY(8px) scale(0.98);
   }
 }
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}

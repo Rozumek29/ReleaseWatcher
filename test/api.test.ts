@@ -59,6 +59,43 @@ describe('HTTP API', () => {
   const add = (repository: string) =>
     inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
 
+  it('uses a repository token for a private repository and never returns it', async () => {
+    source.privateRepos.set('other/private-app', 'github_pat_other_owner_1234');
+
+    const withoutToken = await add('other/private-app');
+    assert.equal(withoutToken.statusCode, 400);
+    assert.match(withoutToken.body, /needs a token/);
+
+    const response = await inject({
+      method: 'POST',
+      url: '/api/repositories',
+      payload: { repository: 'other/private-app', githubToken: 'github_pat_other_owner_1234' },
+    });
+    assert.equal(response.statusCode, 201);
+    assert.equal(response.body.includes('github_pat_other_owner_1234'), false);
+    const body = response.json();
+    assert.equal(body.hasOwnToken, true);
+    assert.equal(body.githubTokenMasked, 'gith…1234');
+    // The baseline check already used the repository's token.
+    assert.equal(source.lastToken, 'github_pat_other_owner_1234');
+
+    // Keep the token when it is omitted, remove it with null.
+    const kept = await inject({
+      method: 'PUT',
+      url: `/api/repositories/${body.id}`,
+      payload: { includePrereleases: false, isEnabled: true },
+    });
+    assert.equal(kept.json().hasOwnToken, true);
+    const removed = await inject({
+      method: 'PUT',
+      url: `/api/repositories/${body.id}`,
+      payload: { includePrereleases: false, isEnabled: true, githubToken: null },
+    });
+    assert.equal(removed.json().hasOwnToken, false);
+    await inject({ method: 'POST', url: `/api/repositories/${body.id}/check` });
+    assert.equal(source.lastToken, null);
+  });
+
   it('adds a repository and establishes the baseline', async () => {
     const response = await add('https://github.com/acme/widget');
     assert.equal(response.statusCode, 201);

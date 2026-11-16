@@ -81,7 +81,7 @@ export class ReleaseChecker {
     let notifiedCount = 0;
     await this.refreshInstalledVersion(repo);
     try {
-      const fetched = await this.source.getRecentReleases(repo.owner, repo.name, repo.etag);
+      const fetched = await this.source.getRecentReleases(repo.owner, repo.name, repo.etag, repo.githubToken);
 
       if (!fetched.notModified) {
         const { newReleases, newest } = selectNewReleases(repo, fetched.releases);

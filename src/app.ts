@@ -134,6 +134,9 @@ export const toDto = (r: WatchedRepository) => ({
   installedVersion: r.installedVersion,
   installedVersionCheckedAt: r.installedVersionCheckedAt,
   installedVersionError: r.installedVersionError,
+  // The repository's own token is a secret: only whether it is set and a masked hint.
+  hasOwnToken: r.githubToken !== null,
+  githubTokenMasked: maskSecret(r.githubToken, 4),
   /** True/false when both versions are known and comparable, otherwise null. */
   updateAvailable: (() => {
     const diff = compareVersions(r.lastSeenTag, r.installedVersion);
@@ -143,7 +146,11 @@ export const toDto = (r: WatchedRepository) => ({
 
 const addRepositorySchema: ObjectSchema = {
   type: 'object',
-  properties: { repository: { type: 'string' }, includePrereleases: { type: 'boolean' } },
+  properties: {
+    repository: { type: 'string' },
+    includePrereleases: { type: 'boolean' },
+    githubToken: { type: 'string', nullable: true, maxLength: 1000 },
+  },
   required: ['repository'],
 };
 
@@ -155,6 +162,7 @@ const updateRepositorySchema: ObjectSchema = {
     installedVersionUrl: { type: 'string', nullable: true, maxLength: 2000 },
     installedVersionField: { type: 'string', nullable: true, maxLength: 200 },
     installedVersionHeaders: headersSchema,
+    githubToken: { type: 'string', nullable: true, maxLength: 1000 },
   },
   required: ['includePrereleases', 'isEnabled'],
 };
@@ -326,7 +334,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const findRepository = (rawId: string) => store.get(parseId(rawId));
 
   const addRepository = async (req: Request) => {
-    const body = await readBody<{ repository: string; includePrereleases?: boolean }>(req, addRepositorySchema);
+    const body = await readBody<{ repository: string; includePrereleases?: boolean; githubToken?: string | null }>(
+      req,
+      addRepositorySchema,
+    );
+    const githubToken = body.githubToken?.trim() || null;
     const parsed = parseRepositoryName(body.repository);
     if (!parsed) {
       return validationProblem('repository', "Use the 'owner/repo' format or a https://github.com/owner/repo URL.");
@@ -338,14 +350,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
 
     try {
-      if (!(await source.repositoryExists(owner, name))) {
-        return validationProblem('repository', `Repository ${owner}/${name} was not found on GitHub.`);
+      if (!(await source.repositoryExists(owner, name, githubToken))) {
+        return validationProblem(
+          'repository',
+          `Repository ${owner}/${name} was not found on GitHub. A private repository needs a token with access to it.`,
+        );
       }
     } catch (error) {
       return problem(502, 'Bad Gateway', { detail: errorMessage(error) });
     }
 
     const repo = store.add(owner, name, body.includePrereleases ?? false);
+    if (githubToken) {
+      repo.githubToken = githubToken;
+      store.save(repo);
+    }
     // Establish the baseline right away so the UI shows the current latest release.
     await checker.check(repo);
 
@@ -360,6 +379,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       installedVersionUrl?: string | null;
       installedVersionField?: string | null;
       installedVersionHeaders?: HeaderInput[] | null;
+      /** Omit = keep, null/"" = remove (use the global token). */
+      githubToken?: string | null;
     }>(req, updateRepositorySchema);
     if (!repo) {
       return problem(404, 'Repository not found.');
@@ -367,6 +388,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (repo.includePrereleases !== body.includePrereleases) {
       // Filter changed: force a full fetch on the next check.
       repo.etag = null;
+    }
+    if (body.githubToken !== undefined) {
+      const token = body.githubToken?.trim() || null;
+      if (token !== repo.githubToken) {
+        repo.githubToken = token;
+        repo.etag = null; // another token may see different data
+      }
     }
     repo.includePrereleases = body.includePrereleases;
     repo.isEnabled = body.isEnabled;
