@@ -1,4 +1,4 @@
-# --- Build: Angular UI + self-contained server executable ---
+# --- Build: Angular UI + self-contained server executable (UI embedded) ---
 # The Angular CLI runs on Node; Bun is the package manager and compiles the server.
 FROM node:26-trixie-slim AS build
 COPY --from=oven/bun:1.4.4-debian /usr/local/bin/bun /usr/local/bin/bun
@@ -17,13 +17,12 @@ COPY src ./src
 RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher \
  && mkdir -p /data
 
-# --- Runtime: just the executable and the UI (no Bun, no Node, no shell) ---
+# --- Runtime: just the executable (no Bun, no Node, no shell) ---
 FROM gcr.io/distroless/cc-debian13:nonroot
 ENV PORT=8080 \
     DATABASE_PATH=/data/releasewatcher.db
 WORKDIR /app
 COPY --from=build /app/dist/releasewatcher ./releasewatcher
-COPY --from=build /app/public ./public
 COPY --from=build --chown=nonroot:nonroot /data /data
 VOLUME /data
 EXPOSE 8080

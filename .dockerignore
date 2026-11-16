@@ -6,3 +6,4 @@ public
 .env
 release
 dist
+.compile

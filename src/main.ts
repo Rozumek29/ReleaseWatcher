@@ -1,17 +1,13 @@
 // Bun loads `.env` from the working directory automatically; variables already set in the environment win.
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { buildApp } from './app.ts';
 import { loadConfig } from './config.ts';
 import { RepositoryStore } from './db.ts';
+import { embeddedUi } from './embedded-ui.ts';
 import { GitHubReleaseSource } from './github.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
 import { SettingsService } from './settings.ts';
-
-// In a `bun build --compile` executable the sources live in Bun's virtual file system
-// (`/$bunfs/…`, `B:\~BUN\…` on Windows), so the UI is looked up next to the binary instead.
-const isCompiled = /^(\/\$bunfs\/|[a-z]:[\\/]~BUN[\\/])/i.test(import.meta.path);
-const appRoot = isCompiled ? dirname(process.execPath) : join(import.meta.dir, '..');
 
 const config = loadConfig();
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
@@ -24,7 +20,8 @@ const app = await buildApp({
   settings,
   source: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
   notifiers,
-  publicDir: join(appRoot, 'public'),
+  // A compiled executable carries the UI inside (see scripts/compile.ts); from source it is read from disk.
+  ...(embeddedUi.size > 0 ? { embeddedUi } : { publicDir: join(import.meta.dir, '..', 'public') }),
   log,
 });
 

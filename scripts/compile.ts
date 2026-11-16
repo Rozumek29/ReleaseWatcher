@@ -1,34 +1,69 @@
-// Compiles the server into a single self-contained executable (Bun runtime included, no `bun install` needed).
-// The UI is not embedded: the binary serves `public/` from the directory it lives in.
+// Compiles the server and the built UI into a single self-contained executable (Bun runtime included,
+// nothing else needed on the target machine). Build the UI first (`bun run build`).
 //
 // Usage: bun scripts/compile.ts [--target=bun-linux-x64] [--outfile=dist/releasewatcher]
-//   --target   any `bun build --compile` target (bun-linux-x64, bun-linux-arm64, bun-windows-x64, bun-darwin-arm64,
-//              …-musl, …); defaults to the current platform.
+//   --target   any `bun build --compile` target; defaults to the current platform.
+import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = join(import.meta.dir, '..');
 
-export function compile(options: { outfile: string; target?: string | undefined }): void {
-  const args = [
-    'build',
-    './src/main.ts',
-    '--compile',
-    // --bytecode defaults to CommonJS, which has no top-level await (used by src/main.ts).
-    '--format=esm',
-    '--minify',
-    '--keep-names',
-    '--sourcemap',
-    '--bytecode',
-    `--outfile=${options.outfile}`,
-    ...(options.target ? [`--target=${options.target}`] : []),
+/**
+ * Writes a temporary entry point that embeds every file of `public/` (`with { type: 'file' }`), registers them
+ * in `embeddedUi` and only then loads `src/main.ts` (dynamic import, so it runs after the map is filled).
+ */
+async function writeEntry(dir: string): Promise<string> {
+  const files = (await Array.fromAsync(new Bun.Glob('**/*').scan({ cwd: join(root, 'public') })))
+    .map((file) => file.replaceAll('\\', '/'))
+    .sort();
+  const lines = [
+    "import { embeddedUi } from '../src/embedded-ui.ts';",
+    ...files.map((file, i) => `import f${i} from ${JSON.stringify(`../public/${file}`)} with { type: 'file' };`),
+    ...files.map((file, i) => `embeddedUi.set(${JSON.stringify(`/${file}`)}, f${i});`),
+    "await import('../src/main.ts');",
   ];
-  const result = Bun.spawnSync([process.execPath, ...args], { cwd: root, stdio: ['inherit', 'inherit', 'inherit'] });
-  if (result.exitCode !== 0) {
-    process.exit(result.exitCode ?? 1);
+  const entry = join(dir, 'entry.ts');
+  await Bun.write(entry, lines.join('\n') + '\n');
+  return entry;
+}
+
+export async function compile(options: { outfile: string; target?: string | undefined }): Promise<void> {
+  if (!existsSync(join(root, 'public', 'index.html'))) {
+    console.error('public/index.html is missing, run `bun run build` first.');
+    process.exit(1);
+  }
+  const tempDir = join(root, '.compile');
+  rmSync(tempDir, { recursive: true, force: true });
+  mkdirSync(tempDir);
+  try {
+    const entry = await writeEntry(tempDir);
+    const args = [
+      'build',
+      entry,
+      '--compile',
+      // --bytecode defaults to CommonJS, which has no top-level await (used by src/main.ts).
+      '--format=esm',
+      '--minify',
+      '--keep-names',
+      '--sourcemap',
+      '--bytecode',
+      `--outfile=${options.outfile}`,
+      ...(options.target ? [`--target=${options.target}`] : []),
+    ];
+    const result = Bun.spawnSync([process.execPath, ...args], { cwd: root, stdio: ['inherit', 'inherit', 'inherit'] });
+    if (result.exitCode !== 0) {
+      process.exit(result.exitCode ?? 1);
+    }
+    // The source map is embedded in the executable; drop the extra copy written next to it.
+    for (const map of [`${options.outfile}.map`, `${options.outfile.replace(/\.exe$/, '')}.map`]) {
+      rmSync(map, { force: true });
+    }
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true });
   }
 }
 
 if (import.meta.main) {
   const option = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  compile({ outfile: option('outfile') ?? 'dist/releasewatcher', target: option('target') });
+  await compile({ outfile: option('outfile') ?? 'dist/releasewatcher', target: option('target') });
 }

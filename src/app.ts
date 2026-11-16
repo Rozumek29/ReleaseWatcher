@@ -74,6 +74,8 @@ export interface AppDeps {
   ) => Promise<{ version: string; preview: string }>;
   /** Directory with the built Angular UI; skipped when missing. */
   publicDir?: string;
+  /** UI files embedded in a compiled executable (URL path → embedded file); takes precedence over `publicDir`. */
+  embeddedUi?: ReadonlyMap<string, string>;
   /** Defaults to an `info` level logger. */
   log?: Logger;
 }
@@ -185,6 +187,34 @@ async function findStaticFile(root: string, pathname: string): Promise<string | 
   } catch {
     return null;
   }
+}
+
+/** Where the UI comes from: `find` maps a URL path to a file path (or null), `index` is the SPA fallback. */
+interface UiResolver {
+  find(pathname: string): Promise<string | null>;
+  index: string;
+}
+
+async function createUiResolver(deps: Pick<AppDeps, 'publicDir' | 'embeddedUi'>): Promise<UiResolver | null> {
+  const embedded = deps.embeddedUi;
+  if (embedded?.has('/index.html')) {
+    return {
+      find: async (pathname) => {
+        try {
+          return embedded.get(decodeURIComponent(pathname)) ?? null;
+        } catch {
+          return null;
+        }
+      },
+      index: embedded.get('/index.html')!,
+    };
+  }
+  if (deps.publicDir === undefined) {
+    return null;
+  }
+  const dir = resolve(deps.publicDir);
+  const index = join(dir, 'index.html');
+  return (await Bun.file(index).exists()) ? { find: (pathname) => findStaticFile(dir, pathname), index } : null;
 }
 
 export async function buildApp(deps: AppDeps): Promise<App> {
@@ -363,13 +393,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   // Angular UI + SPA fallback; everything else (incl. unknown /api routes) is a 404 problem.
-  const publicDir = deps.publicDir === undefined ? null : resolve(deps.publicDir);
-  const uiDir = publicDir && (await Bun.file(join(publicDir, 'index.html')).exists()) ? publicDir : null;
+  const ui = await createUiResolver(deps);
   const fallback = async (req: Request) => {
     const { pathname } = new URL(req.url);
-    if (uiDir && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
-      const file = await findStaticFile(uiDir, pathname);
-      return new Response(Bun.file(file ?? join(uiDir, 'index.html')));
+    if (ui && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
+      return new Response(Bun.file((await ui.find(pathname)) ?? ui.index));
     }
     return problem(404, 'Not found.');
   };

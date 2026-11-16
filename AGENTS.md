@@ -16,6 +16,8 @@ app does, the API, configuration and project layout – this file covers only wh
   ```
 
 - Keep pushing follow-up commits to the same branch; the PR updates itself.
+- Wait for CI with `gh pr checks <pr> --watch` – AI agents run it through the **Monitor** tool (not a
+  blocking shell call with `sleep`/`timeout`) and react when it finishes.
 - Merge only after CI passes, and **always squash-merge**:
 
   ```bash
@@ -53,10 +55,11 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - The server has **no runtime dependencies**. Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
-- Releases and the Docker image run the server as a `bun build --compile` executable (ESM + bytecode). Code
-  must work there too: `import.meta.dir` points into Bun's virtual FS (`/$bunfs/…`), so locate files on disk
-  relative to `process.execPath` (see `appRoot` in `main.ts`), and avoid runtime-only `import()` of paths
-  the bundler cannot see.
+- The release executable and the Docker image run the server as a `bun build --compile` binary (ESM +
+  bytecode, `scripts/compile.ts`) with the UI embedded: a generated entry point imports every `public/` file
+  `with { type: 'file' }`, fills `embeddedUi` (`src/embedded-ui.ts`) and then imports `main.ts`. Code must work
+  there too: `import.meta.dir` points into Bun's virtual FS (`/$bunfs/…`), so don't read files relative to
+  the sources at runtime, and avoid `import()` of paths the bundler cannot see.
 
 ### Architecture notes
 

@@ -298,3 +298,35 @@ describe('UI hosting', () => {
     }
   });
 });
+
+describe('UI embedded in a compiled executable', () => {
+  it('serves files from the embedded map with an index.html fallback', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'releasewatcher-embedded-'));
+    writeFileSync(join(dir, 'index-abc.html'), '<app-root></app-root>');
+    writeFileSync(join(dir, 'main-abc.js'), 'console.log(1);');
+    const store = new RepositoryStore(':memory:');
+    const app = await buildApp({
+      store,
+      settings: new SettingsService(store, loadConfig({})),
+      source: new FakeSource(),
+      notifiers: [],
+      embeddedUi: new Map([
+        ['/index.html', join(dir, 'index-abc.html')],
+        ['/main.js', join(dir, 'main-abc.js')],
+      ]),
+      publicDir: join(dir, 'does-not-matter'),
+      log: silentLogger,
+    });
+    const baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
+    try {
+      const js = await fetch(new URL('/main.js', baseUrl));
+      assert.equal(await js.text(), 'console.log(1);');
+      assert.match(js.headers.get('content-type') ?? '', /javascript/);
+      assert.equal(await (await fetch(new URL('/repositories', baseUrl))).text(), '<app-root></app-root>');
+      assert.equal((await fetch(new URL('/api/nope', baseUrl))).status, 404);
+    } finally {
+      await app.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

@@ -60,35 +60,41 @@ adjust it if you change `PORT`).
 | `bun run serve`     | start the app without touching the UI build                          |
 | `bun run test`      | server tests (`bun test`) + UI tests (Vitest)                        |
 | `bun run typecheck` | type-check the server (TypeScript 7)                                 |
-| `bun run compile`   | compile the server into `dist/releasewatcher` for the current platform |
-| `bun run package`   | ready-to-run Linux x64 release folder in `release/` (see Releases)   |
+| `bun run compile`   | single-file executable (server + UI) into `dist/` for this platform  |
+| `bun run package`   | release artifacts in `release/` (see Releases)                       |
 
 Use `bun run test`, not plain `bun test` – the latter runs only the server tests (`bunfig.toml` limits
 it to `test/`).
 
 ## Releases
 
-`bun run package` builds `release/releasewatcher-<version>-linux-x64/`: the server compiled into one
-self-contained executable (`bun build --compile --bytecode`, Bun runtime included) plus the production UI in
-`public/`. The target machine needs nothing installed:
+`bun run package` builds both release artifacts in `release/`:
 
-```bash
-cp .env.example .env   # optional, settings can also be changed in the UI
-./releasewatcher       # http://localhost:8080
-```
+- `releasewatcher-<version>/` – server sources + production UI for Bun (no `bun install` needed, the server
+  has no runtime dependencies):
 
-The executable serves `public/` from its own directory and reads `.env` from the working directory.
-Compile flags live in `scripts/compile.ts`; to ship another platform, change `TARGET` in
-`scripts/package.ts` (e.g. `bun-linux-arm64`).
+  ```bash
+  cp .env.example .env   # optional, settings can also be changed in the UI
+  bun start              # http://localhost:8080
+  ```
 
-The Docker image uses the same executable on a distroless base (no Bun, Node or shell inside).
+- `releasewatcher-<version>-linux-x64` – one self-contained executable (`bun build --compile --bytecode`,
+  Bun runtime and UI embedded); the target machine needs nothing installed:
+
+  ```bash
+  chmod +x releasewatcher-1.2.3-linux-x64
+  ./releasewatcher-1.2.3-linux-x64   # reads .env from the working directory
+  ```
+
+Compile flags live in `scripts/compile.ts`; the target is `TARGET` in `scripts/package.ts`.
+The Docker image runs the same kind of executable on a distroless base (no Bun, Node or shell inside).
 
 Pushing a tag runs `.github/workflows/release.yml`:
 
-| Tag          | GitHub Release                         | Docker image (`ghcr.io/<owner>/releasewatcher`) |
-| ------------ | -------------------------------------- | ----------------------------------------------- |
-| `v1.2.3`     | release with `releasewatcher-1.2.3-linux-x64.tar.gz` | `1.2.3`, `1.2`, `latest`          |
-| `beta-1.2.3` | pre-release with the archive           | `beta-1.2.3`                                    |
+| Tag          | GitHub Release                                                    | Docker image (`ghcr.io/<owner>/releasewatcher`) |
+| ------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
+| `v1.2.3`     | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64`     | `1.2.3`, `1.2`, `latest`                        |
+| `beta-1.2.3` | pre-release with the same two files                               | `beta-1.2.3`                                    |
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
@@ -182,6 +188,7 @@ src/
   main.ts            entry point: config, DB, HTTP server, poller, graceful shutdown
   app.ts             HTTP routes (Bun.serve) + static UI with SPA fallback
   log.ts             minimal JSON-lines logger
+  embedded-ui.ts     UI files embedded into the compiled executable (filled by scripts/compile.ts)
   validation.ts      request body/param validation
   domain.ts          types, repository-name parsing, new-release selection
   db.ts              bun:sqlite store with simple versioned migrations

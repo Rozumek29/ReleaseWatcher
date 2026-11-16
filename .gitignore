@@ -24,3 +24,4 @@ web/dist/
 
 # Compiled server executable (bun run compile)
 /dist/
+/.compile/
