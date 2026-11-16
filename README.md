@@ -60,6 +60,51 @@ docker compose up -d --build
 
 Open http://localhost:8080. The SQLite database lives in the `releasewatcher-data` volume.
 
+## Native install (systemd, e.g. in its own LXC)
+
+The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node or
+Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. As root in the container:
+
+```bash
+# 1. Dependencies: the OpenSSH client reaches the Proxmox node
+apt-get update && apt-get install -y openssh-client ca-certificates
+
+# 2. System user and directories
+useradd --system --home-dir /var/lib/releasewatcher --shell /usr/sbin/nologin releasewatcher
+install -d -o releasewatcher -g releasewatcher -m 750 /var/lib/releasewatcher   # database + known_hosts
+install -d -m 755 /opt/releasewatcher                                           # executable
+install -d -o root -g releasewatcher -m 750 /etc/releasewatcher                 # configuration
+
+# 3. Executable – from the GitHub release (private repository: `gh release download v1.2.3 -R <owner>/ReleaseWatcher
+#    -p 'releasewatcher-*-linux-x64'` or the release page) or built with `bun scripts/compile.ts --target=bun-linux-x64`
+install -m 755 releasewatcher-1.2.3-linux-x64 /opt/releasewatcher/releasewatcher
+
+# 4. Configuration (optional – everything except Basic auth can be set in the UI)
+install -m 640 -g releasewatcher .env.example /etc/releasewatcher/releasewatcher.env
+nano /etc/releasewatcher/releasewatcher.env          # at least BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD
+# SSH key as a file instead of pasting it in the UI:
+#   install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key
+#   PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key   (in releasewatcher.env)
+
+# 5. Service (deploy/releasewatcher.service from this repository)
+install -m 644 releasewatcher.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now releasewatcher
+journalctl -u releasewatcher -f                      # logs (JSON lines)
+```
+
+Open `http://<container-ip>:8080`. `DATABASE_PATH` is set by the unit (`/var/lib/releasewatcher/releasewatcher.db`);
+the pinned host key of the node is stored next to it.
+
+- **Update:** replace `/opt/releasewatcher/releasewatcher` with the new executable and `systemctl restart releasewatcher`
+  (database migrations run on start). Keep the old file to roll back.
+- **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all three `releasewatcher.db*`
+  files) and `/etc/releasewatcher`.
+- **Hardening:** the unit runs as an unprivileged user with a read-only system (`ProtectSystem=strict`, writes only
+  to `/var/lib/releasewatcher`). In an unprivileged LXC this needs *nesting* (Proxmox enables it by default); if the
+  service fails with `status=226/NAMESPACE`, enable *Options → Features → Nesting* or remove the hardening lines.
+- **SSH key on the node:** restrict it to the container's IP (`from="<container-ip>"` in `authorized_keys`).
+
 ## Local development
 
 Requirements: Bun 1.4.4+ and Node.js 26 (the Angular CLI still runs on Node; Bun is only its package
@@ -262,6 +307,8 @@ src/
   proxmox/           LXC containers: SSH client (system OpenSSH), pct/apt parsing, store, service
                      (checks + updates + run log), cron scheduler, HTTP routes
 test/                bun:test tests
+deploy/
+  releasewatcher.service  systemd unit for a native install (see "Native install")
 scripts/
   ensure-web.ts      builds the UI for `bun start` when needed
   compile.ts         `bun build --compile` flags, used by `bun run compile`, packaging and the Dockerfile

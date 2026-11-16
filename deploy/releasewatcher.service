@@ -1,0 +1,49 @@
+# ReleaseWatcher as a native systemd service (e.g. in its own Proxmox LXC). See README → "Native install (systemd)".
+#
+#   install -m 644 deploy/releasewatcher.service /etc/systemd/system/
+#   systemctl daemon-reload && systemctl enable --now releasewatcher
+#
+# Paths: executable /opt/releasewatcher/releasewatcher, data (SQLite + known_hosts) /var/lib/releasewatcher,
+# configuration /etc/releasewatcher/releasewatcher.env (same variables as .env.example).
+
+[Unit]
+Description=ReleaseWatcher – GitHub releases and Proxmox LXC updates
+Documentation=https://github.com/Rozumek29/ReleaseWatcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=releasewatcher
+Group=releasewatcher
+WorkingDirectory=/var/lib/releasewatcher
+Environment=DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db
+# Optional ("-"): everything can also be configured in the UI.
+EnvironmentFile=-/etc/releasewatcher/releasewatcher.env
+ExecStart=/opt/releasewatcher/releasewatcher
+Restart=always
+RestartSec=5
+# The app stops its scheduler and waits for running tasks on SIGTERM.
+TimeoutStopSec=30
+
+# --- Hardening ---
+# Needs nesting in an unprivileged LXC (Proxmox enables it by default). If the service fails with
+# "status=226/NAMESPACE", enable Options → Features → Nesting for the container or remove these lines.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/releasewatcher
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+CapabilityBoundingSet=
+UMask=0027
+# Not set on purpose: MemoryDenyWriteExecute=yes – Bun's JavaScript JIT needs writable+executable memory.
+
+[Install]
+WantedBy=multi-user.target
