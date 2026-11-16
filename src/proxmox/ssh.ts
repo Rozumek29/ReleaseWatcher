@@ -63,10 +63,8 @@ export class SshShell implements NodeShell {
 
   /** Builds the `ssh` argument list (exported for tests). */
   buildArgs(options: SshOptions, keyFile: string, command: string, tty: boolean): string[] {
-    const multiplex =
-      process.platform === 'win32'
-        ? [] // OpenSSH for Windows has no connection multiplexing
-        : ['-o', 'ControlMaster=auto', '-o', `ControlPath=${join(this.ensureKeyDir(), 'cm-%C')}`, '-o', 'ControlPersist=60'];
+    // No ControlMaster multiplexing on purpose: a persisted master keeps stderr open, so reading output
+    // until EOF would hang until it expires.
     return [
       'ssh',
       '-F',
@@ -99,7 +97,6 @@ export class SshShell implements NodeShell {
       'ServerAliveInterval=15',
       '-o',
       'ServerAliveCountMax=4',
-      ...multiplex,
       tty ? '-tt' : '-T',
       '--',
       options.host!,

@@ -1,6 +1,8 @@
 # ReleaseWatcher
 
 Watches selected GitHub repositories for new releases and sends a notification (Discord today, more channels later).
+It also keeps the LXC containers of a Proxmox node up to date: it checks pending `apt` packages and application
+versions on a cron schedule and runs updates (apt, community-scripts `update`, your own scripts) at the push of a button.
 
 - **Server:** [Bun](https://bun.sh) 1.4+ running TypeScript natively (no build step), `Bun.serve` HTTP server,
   built-in `bun:sqlite`
@@ -17,6 +19,31 @@ Watches selected GitHub repositories for new releases and sends a notification (
    (`If-None-Match`/ETag; a `304` does not count against GitHub's rate limit).
 4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check),
    then the baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
+
+## Proxmox LXC containers
+
+1. In **Settings → Proxmox node** enter the host, SSH user (`root`, or a user allowed to run `pct` through
+   passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent,
+   keys with a passphrase are not supported). The node's host key is trusted on the first connection and pinned in
+   `known_hosts` next to the database. Use **Test connection** to verify.
+2. On the **Containers** page add containers found on the node (`pct list`). Commands run inside a container with
+   `pct exec <vmid> -- sh -lc '…'`, so containers need no SSH server of their own.
+3. Per container you can enable the **apt** check (`apt-get update` + `apt list --upgradable`; upgrade =
+   `apt-get -y upgrade`, keeping existing config files), take a **snapshot before every update** (`pct snapshot`;
+   snapshots are not removed automatically) and override the global check schedule with a cron expression.
+4. Each container can have **applications**:
+   - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
+   - *latest version* – the newest release of a watched GitHub repository, a command, or none,
+   - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`.
+     Enable **TTY** for scripts that need a terminal; every update has a timeout (default 30 min).
+5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
+   notify Discord when something new is pending (each pending item is reported once). **Updates never run
+   automatically** – start them from the UI; the console output is shown live and kept in the run history
+   (last 50 runs per container). Only one task runs in a container at a time; a stopped container is reported, not
+   started.
+
+> Interactive scripts (whiptail dialogs) cannot be answered from the UI – a script that waits for input ends with a
+> timeout. Prefer non-interactive update commands.
 
 ## Quick start (Docker)
 
@@ -136,6 +163,13 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
+| `PROXMOX_HOST` | – | Proxmox node for container checks. Empty = containers disabled. |
+| `PROXMOX_SSH_PORT` | `22` | SSH port of the node. |
+| `PROXMOX_SSH_USER` | `root` | SSH user; non-root users need passwordless `sudo` for `pct`. |
+| `PROXMOX_SSH_KEY_FILE` | – | Path to the private key (read at start; the key can also be pasted in the UI). |
+| `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
+| `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default container check schedule (5-field cron, `@daily`, …). |
+| `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | When both are set, the UI and API (except `/health`) require HTTP Basic auth. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
 > (fewer with ETag hits), so for more than ~10 repositories at a 15 min interval add a token.
@@ -154,14 +188,29 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; `null` resets a value to the environment default |
-| `GET` | `/api/status` | Poller state (next/last run) and repository counts |
+| `GET` | `/api/status` | Poller state (next/last run), repository and container counts |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
+| `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
+| `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
+| `GET` | `/api/containers` | Added containers with their applications and pending updates |
+| `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "snapshotBeforeUpdate", "checkCron"?: "0 3 * * *" \| null }` |
+| `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
+| `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
+| `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
+| `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run |
+| `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
+| `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
+| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run |
+| `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
+| `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`) |
 | `GET` | `/health` | Liveness |
 
 ## Adding a new notifier (e.g. Slack, Teams, e-mail)
 
-1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()`).
+1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()` for releases,
+   `notifyContainerUpdates()` for pending container updates).
 2. Register it in `src/notifiers/index.ts`. Notifiers receive their options through a callback, so values
    changed in the UI (`settings.current`) apply without a restart:
 
@@ -197,7 +246,11 @@ src/
   poller.ts          interval scheduler (interval can change at runtime)
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars
   version.ts         version parsing/comparison, reading the installed version of a self-hosted app
+  cron.ts            5-field cron parser (container check schedule)
+  http.ts            problem-details response helpers
   notifiers/         Notifier interface, dispatcher, Discord
+  proxmox/           LXC containers: SSH client (system OpenSSH), pct/apt parsing, store, service
+                     (checks + updates + run log), cron scheduler, HTTP routes
 test/                bun:test tests
 scripts/
   ensure-web.ts      builds the UI for `bun start` when needed
@@ -206,12 +259,16 @@ scripts/
 web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
   src/app/pages/repositories watched repositories
-  src/app/pages/settings     Discord, GitHub, polling settings
+  src/app/pages/containers   Proxmox LXC containers, applications, run log
+  src/app/pages/settings     Discord, GitHub, polling, Proxmox node settings
 ```
 
 ## Security note
 
 The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
 Header values (API keys, tokens) are stored in plain text in the SQLite file – protect the data volume.
-The API has no authentication. Run it on a private network or behind a reverse proxy with auth
-(e.g. Cloudflare Access, Authelia, basic auth in nginx) if you expose it publicly.
+**The UI can run commands as root on your Proxmox node.** Set `BASIC_AUTH_USERNAME`/`BASIC_AUTH_PASSWORD`
+(the server logs a warning without them), keep it on a private network and put it behind HTTPS (reverse proxy) –
+Basic auth over plain HTTP sends the password in clear text. The SSH private key is stored in the SQLite file
+when pasted in the UI (or read from `PROXMOX_SSH_KEY_FILE`); it is never returned by the API. Consider a dedicated
+key used only by ReleaseWatcher.

@@ -13,17 +13,24 @@ COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
 # Debian (glibc) build stage on purpose: when the target matches the host, Bun embeds its own runtime,
-# so an Alpine stage would produce a musl binary that cannot start on the glibc distroless image below.
+# so an Alpine stage would produce a musl binary that cannot start on the glibc Debian image below.
 RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher \
  && mkdir -p /data
 
-# --- Runtime: just the executable (no Bun, no Node, no shell) ---
-FROM gcr.io/distroless/cc-debian13:nonroot
+# --- Runtime: the executable + OpenSSH client (used to reach the Proxmox node) ---
+FROM debian:trixie-slim
+# Same UID/GID as the distroless "nonroot" user used before, so existing /data volumes stay writable.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends openssh-client ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && groupadd --gid 65532 nonroot \
+ && useradd --uid 65532 --gid 65532 --create-home --shell /usr/sbin/nologin nonroot
 ENV PORT=8080 \
     DATABASE_PATH=/data/releasewatcher.db
 WORKDIR /app
 COPY --from=build /app/dist/releasewatcher ./releasewatcher
 COPY --from=build --chown=nonroot:nonroot /data /data
+USER nonroot
 VOLUME /data
 EXPOSE 8080
 ENTRYPOINT ["/app/releasewatcher"]

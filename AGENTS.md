@@ -72,6 +72,12 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Logging goes through the `Logger` from `log.ts` (`log.info({ fields }, 'message')`, JSON lines).
 - `checker.ts` advances the baseline (`lastSeenTag`/`lastSeenPublishedAt`) after **each** dispatched release
   so a crash cannot cause duplicate notifications. Preserve this when changing it.
+- Proxmox containers live in `src/proxmox/`: all node access goes through the `NodeShell` interface
+  (`SshShell` spawns the system `ssh` client – key-only, `BatchMode`; tests use `FakeShell` from
+  `test/helpers.ts`, never a real node). Commands inside containers are built with `pctExec()`/`shQuote()` –
+  never interpolate user input into shell strings without them. `ContainerService` allows one task per container
+  and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
+  (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
 - Settings: values saved from the UI live in the `settings` table and override env vars; `null` in
   `PUT /api/settings` resets to the env value. Components read `settings.current` lazily (callbacks), so
   changes apply without a restart.
@@ -84,7 +90,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 ### Secrets
 
-- Installed-version header values, the Discord webhook URL and the GitHub token are secrets. The API never
+- Installed-version header values, the Discord webhook URL, the GitHub token and the Proxmox SSH private key are
+  secrets (the key is exposed only as `sshKeyConfigured`). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.
 - Never log secret values.
@@ -113,11 +120,12 @@ When changing an endpoint, also update the API table in `README.md`.
   API tests start the app on `127.0.0.1` with `port: 0` and use `fetch`.
 - Tests must never call the real GitHub API, Discord or other network services.
 - Add or update tests with every behavior change (logic → `domain`/`version`/`checker` tests,
-  endpoints → `test/api.test.ts`).
+  endpoints → `test/api.test.ts`, containers → `test/containers.test.ts`).
 
 ## Common changes – checklist
 
-- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`), register it in
+- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`, both `notify` and
+  `notifyContainerUpdates`), register it in
   `src/notifiers/index.ts`; if configurable from the UI, see “New setting”.
 - **New setting:** `Settings` + `current` + `validate()` in `src/settings.ts`, env default in `src/config.ts`
   (and `.env.example`), DTO + `PUT /api/settings` schema in `src/app.ts`, `models.ts` + Settings page in
