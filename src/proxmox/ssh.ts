@@ -163,14 +163,30 @@ export class SshShell implements NodeShell {
     const file = join(this.ensureKeyDir(), 'id');
     if (this.writtenKey !== privateKey) {
       // OpenSSH rejects keys without a trailing newline and keys readable by others.
-      writeFileSync(file, `${privateKey.replace(/\r\n/g, '\n').trim()}\n`, { mode: 0o600 });
-      chmodSync(file, 0o600);
+      writePrivateKeyFile(file, privateKey);
       this.writtenKey = privateKey;
     }
     return file;
   }
 }
 
+/**
+ * Writes an SSH private key readable only by the current user. OpenSSH refuses keys others can read: on Unix that
+ * is the file mode; Windows OpenSSH checks the ACL instead, and files in %TEMP% inherit entries for other users or
+ * groups – so inheritance is removed and only the current user is granted access.
+ */
+export function writePrivateKeyFile(file: string, privateKey: string): void {
+  // OpenSSH also rejects keys without a trailing newline.
+  writeFileSync(file, `${privateKey.replace(/\r\n/g, '\n').trim()}\n`, { mode: 0o600 });
+  chmodSync(file, 0o600);
+  if (process.platform === 'win32') {
+    const user = process.env['USERDOMAIN'] ? `${process.env['USERDOMAIN']}\\${process.env['USERNAME']}` : process.env['USERNAME'];
+    const result = Bun.spawnSync(['icacls', file, '/inheritance:r', '/grant:r', `${user}:F`], { stdout: 'ignore', stderr: 'pipe' });
+    if (result.exitCode !== 0) {
+      throw new Error(`Could not restrict access to the SSH key file: ${result.stderr.toString().trim()}`);
+    }
+  }
+}
 
 /** Human readable explanation of a failed SSH connection (exit code 255). */
 export function describeSshFailure(result: CommandResult): string {

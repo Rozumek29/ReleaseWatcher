@@ -15,10 +15,11 @@
 //   --database <path>  local database to read defaults from / copy (default: DATABASE_PATH or releasewatcher.db)
 
 import { Database } from 'bun:sqlite';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { writePrivateKeyFile } from '../src/proxmox/ssh.ts';
 import { compile } from './compile.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -117,8 +118,7 @@ try {
     sshOptions.push('-i', resolve(values.identity), '-o', 'IdentitiesOnly=yes');
   } else if (saved['proxmoxSshKey']) {
     const keyFile = join(staging, 'id');
-    writeFileSync(keyFile, `${saved['proxmoxSshKey'].replace(/\r\n/g, '\n').trim()}\n`, { mode: 0o600 });
-    chmodSync(keyFile, 0o600);
+    writePrivateKeyFile(keyFile, saved['proxmoxSshKey']);
     sshOptions.push('-i', keyFile, '-o', 'IdentitiesOnly=yes');
   }
   const target = `${user}@${node}`;
