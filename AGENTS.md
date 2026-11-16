@@ -2,6 +2,8 @@
 
 Guidance for AI coding agents (and humans) working in this repository. Read `README.md` first for what the
 app does, the API, configuration and project layout – this file covers only what is not obvious from it.
+Architecture, API conventions and the UI design system (tokens, components, layout, interaction patterns) are
+described in `DESIGN.md` – follow it for every UI or API change so new code looks and behaves like the rest.
 
 ## Workflow (mandatory)
 
@@ -15,6 +17,8 @@ app does, the API, configuration and project layout – this file covers only wh
   gh pr create --draft --fill   # or --title/--body
   ```
 
+- **No AI attribution:** never add `Co-Authored-By:` / session trailers or "Generated with …" lines for AI tools
+  to commit messages or PR descriptions.
 - Keep pushing follow-up commits to the same branch; the PR updates itself.
 - Wait for CI with `gh pr checks <pr> --watch` – AI agents run it through the **Monitor** tool (not a
   blocking shell call with `sleep`/`timeout`) and react when it finishes.
