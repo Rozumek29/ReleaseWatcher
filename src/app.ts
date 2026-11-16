@@ -18,7 +18,9 @@ import { ContainerStore } from './proxmox/store.ts';
 import {
   MAX_POLL_INTERVAL_MINUTES,
   MIN_POLL_INTERVAL_MINUTES,
+  MAX_CHECK_CONCURRENCY,
   maskSecret,
+  MIN_CHECK_CONCURRENCY,
   SettingsValidationError,
   type SettingsPatch,
   type SettingsService,
@@ -181,6 +183,7 @@ const settingsSchema: ObjectSchema = {
     proxmoxUser: { type: 'string', nullable: true, maxLength: 32 },
     proxmoxSshKey: { type: 'string', nullable: true, maxLength: 20_000 },
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
+    containerCheckConcurrency: { type: 'integer', nullable: true },
   },
 };
 
@@ -256,6 +259,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     store: containerStore,
     service: containers,
     defaultCron: () => settings.current.containerCheckCron,
+    concurrency: () => settings.current.containerCheckConcurrency,
     log,
   });
 
@@ -291,6 +295,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         sshKeySource: settings.sourceOf('proxmoxSshKey'),
         checkCron: current.containerCheckCron,
         checkCronSource: settings.sourceOf('containerCheckCron'),
+        checkConcurrency: current.containerCheckConcurrency,
+        checkConcurrencySource: settings.sourceOf('containerCheckConcurrency'),
+        minCheckConcurrency: MIN_CHECK_CONCURRENCY,
+        maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
       },
     };
   };

@@ -37,7 +37,9 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`.
      Enable **TTY** for scripts that need a terminal; every update has a timeout (default 30 min).
 5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
-   notify Discord when something new is pending (each pending item is reported once). **Updates never run
+   notify Discord when something new is pending (each pending item is reported once). A check is a single SSH
+   connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
+   timeout; up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. **Updates never run
    automatically** – start them from the UI; the console output is shown live and kept in the run history
    (last 50 runs per container). Only one task runs in a container at a time; a stopped container is reported, not
    started.
@@ -169,6 +171,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `PROXMOX_SSH_KEY_FILE` | – | Path to the private key (read at start; the key can also be pasted in the UI). |
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
 | `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default container check schedule (5-field cron, `@daily`, …). |
+| `CONTAINER_CHECK_CONCURRENCY` | `3` | How many containers are checked at the same time (1–10). |
 | `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | When both are set, the UI and API (except `/health`) require HTTP Basic auth. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check

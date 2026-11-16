@@ -15,6 +15,10 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     sshKeySource: configured ? 'ui' : null,
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
+    checkConcurrency: 3,
+    checkConcurrencySource: null,
+    minCheckConcurrency: 1,
+    maxCheckConcurrency: 10,
   },
 });
 

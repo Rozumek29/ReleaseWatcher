@@ -301,6 +301,28 @@
           </span>
         </div>
 
+        <div class="field">
+          <label for="pve-concurrency">Parallel checks</label>
+          <input
+            id="pve-concurrency"
+            class="input"
+            type="number"
+            name="containerCheckConcurrency"
+            [min]="s.proxmox.minCheckConcurrency"
+            [max]="s.proxmox.maxCheckConcurrency"
+            [(ngModel)]="checkConcurrency"
+            [class.invalid]="errors()['containerCheckConcurrency']"
+          />
+          @if (errors()['containerCheckConcurrency']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.proxmox.checkConcurrencySource) }}. How many containers are checked at the same time
+            (scheduled checks and "Check all"), {{ s.proxmox.minCheckConcurrency }}–{{ s.proxmox.maxCheckConcurrency }}.
+            Each check uses one SSH connection.
+          </span>
+        </div>
+
         @if (nodeTest(); as t) {
           <pre class="node-test" [class.failed]="!t.ok" aria-label="Connection test result">{{ t.text }}</pre>
         }

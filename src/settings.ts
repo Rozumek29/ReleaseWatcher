@@ -16,7 +16,12 @@ export interface Settings {
   proxmoxSshKey: string | null;
   /** Default cron schedule of container checks. */
   containerCheckCron: string;
+  /** How many containers are checked at the same time. */
+  containerCheckConcurrency: number;
 }
+
+export const MIN_CHECK_CONCURRENCY = 1;
+export const MAX_CHECK_CONCURRENCY = 10;
 
 export type SettingKey = keyof Settings;
 export type SettingsPatch = { [K in SettingKey]?: Settings[K] | null };
@@ -56,6 +61,7 @@ export class SettingsService {
       proxmoxUser: config.proxmox.user,
       proxmoxSshKey: config.proxmox.privateKey,
       containerCheckCron: config.proxmox.checkCron,
+      containerCheckConcurrency: config.proxmox.checkConcurrency,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
@@ -73,6 +79,10 @@ export class SettingsService {
       proxmoxUser: o.proxmoxUser ?? this.defaults.proxmoxUser,
       proxmoxSshKey: o.proxmoxSshKey ?? this.defaults.proxmoxSshKey,
       containerCheckCron: o.containerCheckCron ?? this.defaults.containerCheckCron,
+      containerCheckConcurrency:
+        o.containerCheckConcurrency !== undefined
+          ? Number(o.containerCheckConcurrency)
+          : this.defaults.containerCheckConcurrency,
     };
   }
 
@@ -182,6 +192,16 @@ function validate(key: SettingKey, value: string): void {
         throw new SettingsValidationError(key, 'Keys protected with a passphrase are not supported.');
       }
       return;
+    case 'containerCheckConcurrency': {
+      const count = Number(value);
+      if (!Number.isInteger(count) || count < MIN_CHECK_CONCURRENCY || count > MAX_CHECK_CONCURRENCY) {
+        throw new SettingsValidationError(
+          key,
+          `Parallel checks must be between ${MIN_CHECK_CONCURRENCY} and ${MAX_CHECK_CONCURRENCY}.`,
+        );
+      }
+      return;
+    }
     case 'containerCheckCron': {
       const error = validateCron(value);
       if (error) {

@@ -9,6 +9,11 @@ import {
   type ContainerApp,
   type DiscoveredContainer,
   firstLine,
+  buildCheckScript,
+  type CheckStep,
+  newCheckToken,
+  parseCheckOutput,
+  type StepResult,
   parseAptUpgradable,
   parsePctList,
   parsePctStatus,
@@ -37,8 +42,8 @@ interface TaskResult {
 }
 
 const NODE_TIMEOUT_MS = 30_000;
-const CHECK_TIMEOUT_MS = 2 * 60_000;
-const APT_CHECK_TIMEOUT_MS = 5 * 60_000;
+const CHECK_TIMEOUT_SECONDS = 2 * 60;
+const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
 const APT_UPGRADE_TIMEOUT_MS = 60 * 60_000;
 const SNAPSHOT_TIMEOUT_MS = 10 * 60_000;
 /** Output kept per run (the tail is preserved). */
@@ -275,36 +280,57 @@ export class ContainerService {
     const errors: string[] = [];
     const apps = containers.listApps(container.id);
 
-    log.note(`Checking CT ${container.vmid} (${container.name})`);
-    const status = await this.deps.shell.run(`pct status ${container.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
-    if (status.exitCode !== 0) {
-      throw new Error(describeSshFailure(status));
+    // Everything is read with one SSH connection and one `pct exec` (see buildCheckScript).
+    const steps: CheckStep[] = [];
+    if (container.aptEnabled) {
+      steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
-    container.status = parsePctStatus(status.output);
+    for (const app of apps) {
+      if (app.versionCommand) {
+        steps.push({ id: `v${app.id}`, script: app.versionCommand, timeoutSeconds: CHECK_TIMEOUT_SECONDS });
+      }
+      if (app.latestSource === 'command' && app.latestCommand) {
+        steps.push({ id: `l${app.id}`, script: app.latestCommand, timeoutSeconds: CHECK_TIMEOUT_SECONDS });
+      }
+    }
+    const token = newCheckToken();
+    const totalSeconds = steps.reduce((sum, step) => sum + step.timeoutSeconds, 0);
+
+    log.note(`Checking CT ${container.vmid} (${container.name})`);
+    const result = await this.deps.shell.run(buildCheckScript(container.vmid, steps, token), {
+      timeoutMs: NODE_TIMEOUT_MS + totalSeconds * 1000,
+    });
+    const batch = parseCheckOutput(result.output, token);
+    if (!batch.status) {
+      throw new Error(describeSshFailure(result));
+    }
+    if (batch.status.exitCode !== 0) {
+      throw new Error(`pct status failed: ${batch.status.output.trim() || `exit code ${batch.status.exitCode}`}`);
+    }
+    container.status = parsePctStatus(batch.status.output);
     log.note(`Status: ${container.status ?? 'unknown'}`);
 
     if (container.status !== 'running') {
       errors.push(`Container is ${container.status ?? 'in an unknown state'} – start it to check for updates.`);
     } else {
       if (container.aptEnabled) {
-        log.note('apt: looking for upgradable packages');
-        const result = await this.exec(container.vmid, APT_CHECK_SCRIPT, null, { timeoutMs: APT_CHECK_TIMEOUT_MS });
-        if (result.exitCode === 0) {
-          container.aptUpgradable = parseAptUpgradable(result.output);
+        const apt = batch.steps.get('apt');
+        if (apt?.exitCode === 0) {
+          container.aptUpgradable = parseAptUpgradable(apt.output);
           log.note(`apt: ${container.aptUpgradable.length} upgradable package(s)`);
           for (const pkg of container.aptUpgradable) {
             log.write(`   ${pkg.name} ${pkg.currentVersion ?? '?'} → ${pkg.newVersion}\n`);
           }
         } else {
-          errors.push(`apt: ${describeSshFailure(result)}`);
-          log.note(`apt check failed: ${describeSshFailure(result)}`);
+          errors.push(`apt: ${describeStep(apt)}`);
+          log.note(`apt check failed: ${describeStep(apt)}`);
         }
       } else {
         container.aptUpgradable = [];
       }
 
       for (const app of apps) {
-        await this.checkApp(container, app, log);
+        this.applyAppResults(app, batch.steps, log);
         if (app.error) {
           errors.push(`${app.name}: ${app.error}`);
         }
@@ -321,15 +347,15 @@ export class ContainerService {
     return errors.length;
   }
 
-  private async checkApp(container: Container, app: ContainerApp, log: RunLog): Promise<void> {
+  private applyAppResults(app: ContainerApp, results: ReadonlyMap<string, StepResult>, log: RunLog): void {
     const errors: string[] = [];
     if (app.versionCommand) {
-      const result = await this.exec(container.vmid, app.versionCommand, null, { timeoutMs: CHECK_TIMEOUT_MS });
-      const version = result.exitCode === 0 ? firstLine(result.output) : null;
+      const result = results.get(`v${app.id}`);
+      const version = result?.exitCode === 0 ? firstLine(result.output) : null;
       if (version) {
         app.installedVersion = version;
       } else {
-        errors.push(`version command: ${result.exitCode === 0 ? 'printed nothing' : describeSshFailure(result)}`);
+        errors.push(`version command: ${result?.exitCode === 0 ? 'printed nothing' : describeStep(result)}`);
       }
     }
 
@@ -348,12 +374,12 @@ export class ContainerService {
           errors.push('no command for the latest version');
           break;
         }
-        const result = await this.exec(container.vmid, app.latestCommand, null, { timeoutMs: CHECK_TIMEOUT_MS });
-        const version = result.exitCode === 0 ? firstLine(result.output) : null;
+        const result = results.get(`l${app.id}`);
+        const version = result?.exitCode === 0 ? firstLine(result.output) : null;
         if (version) {
           app.latestVersion = version;
         } else {
-          errors.push(`latest-version command: ${result.exitCode === 0 ? 'printed nothing' : describeSshFailure(result)}`);
+          errors.push(`latest-version command: ${result?.exitCode === 0 ? 'printed nothing' : describeStep(result)}`);
         }
         break;
       }
@@ -395,4 +421,16 @@ export class ContainerService {
       log.note(`Notification sent (${result.sent.join(', ')})`);
     }
   }
+}
+
+/** Explains a failed check step (missing = the batch was cut off, 124 = `timeout` fired). */
+function describeStep(result: StepResult | undefined): string {
+  if (!result) {
+    return 'did not run (the check was cut off – connection lost or overall timeout)';
+  }
+  if (result.exitCode === 124) {
+    return 'timed out';
+  }
+  const text = result.output.trim();
+  return text ? `exit code ${result.exitCode}: ${text.slice(-500)}` : `exit code ${result.exitCode}`;
 }

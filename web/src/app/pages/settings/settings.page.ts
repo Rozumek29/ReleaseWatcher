@@ -47,6 +47,7 @@ export class SettingsPage implements OnInit {
   protected proxmoxUser = '';
   protected sshKey = '';
   protected checkCron = '';
+  protected checkConcurrency: number | null = 3;
 
   protected readonly presets = INTERVAL_PRESETS;
 
@@ -102,12 +103,15 @@ export class SettingsPage implements OnInit {
 
   protected async saveProxmox(): Promise<void> {
     const port = this.proxmoxPort === null || `${this.proxmoxPort}` === '' ? null : Number(this.proxmoxPort);
+    const concurrency =
+      this.checkConcurrency === null || `${this.checkConcurrency}` === '' ? null : Number(this.checkConcurrency);
     const patch: SettingsPatch = {
       // Empty values reset to the environment default.
       proxmoxHost: this.proxmoxHost.trim() || null,
       proxmoxPort: port,
       proxmoxUser: this.proxmoxUser.trim() || null,
       containerCheckCron: this.checkCron.trim() || null,
+      containerCheckConcurrency: concurrency,
     };
     // The key is never shown; an empty field keeps the saved one.
     if (this.sshKey.trim()) {
@@ -217,5 +221,6 @@ export class SettingsPage implements OnInit {
     this.proxmoxUser = settings.proxmox.user;
     this.sshKey = '';
     this.checkCron = settings.proxmox.checkCron;
+    this.checkConcurrency = settings.proxmox.checkConcurrency;
   }
 }

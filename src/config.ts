@@ -28,6 +28,7 @@ export interface Config {
     privateKey: string | null;
     knownHostsFile: string;
     checkCron: string;
+    checkConcurrency: number;
   };
   /** Optional HTTP Basic auth for the UI and API (both must be set). */
   basicAuth: { username: string; password: string } | null;
@@ -67,6 +68,7 @@ export function loadConfig(env: Env = process.env): Config {
         str(env, 'SSH_KNOWN_HOSTS_FILE') ??
         join(databasePath === ':memory:' ? '.' : dirname(databasePath), 'known_hosts'),
       checkCron: str(env, 'CONTAINER_CHECK_CRON') ?? '0 */6 * * *',
+      checkConcurrency: Math.min(10, Math.max(1, int(env, 'CONTAINER_CHECK_CONCURRENCY', 3))),
     },
     basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
   };

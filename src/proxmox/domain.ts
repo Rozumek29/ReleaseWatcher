@@ -188,3 +188,83 @@ export function pendingSignature(container: Pick<Container, 'aptUpgradable'>, ap
   ].toSorted();
   return parts.length > 0 ? parts.join('|') : null;
 }
+
+/** One command of a batched container check. */
+export interface CheckStep {
+  /** Section id in the output (letters, digits, `-`). */
+  id: string;
+  script: string;
+  timeoutSeconds: number;
+}
+
+export interface StepResult {
+  exitCode: number;
+  output: string;
+}
+
+export interface CheckBatchResult {
+  /** `pct status` result; null when the node was not reached. */
+  status: StepResult | null;
+  steps: Map<string, StepResult>;
+}
+
+/** Random section marker – command output cannot fake it. */
+export const newCheckToken = (): string => `@@RW-${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}@@`;
+
+/**
+ * Builds a single node command that runs `pct status` and – only for a running container – all `steps` inside it
+ * with one `pct exec` (one SSH connection, two `pct` starts instead of one per command). Every step gets its own
+ * timeout (`timeout` from coreutils/busybox when available) and exit code; output sections are delimited by
+ * `<token> begin <id>` / `<token> end <id> <exit code>` lines. The container script travels base64-encoded, so
+ * user commands are quoted only once.
+ */
+export function buildCheckScript(vmid: number, steps: readonly CheckStep[], token: string): string {
+  const node = [
+    `s=$(pct status ${vmid} 2>&1); rc=$?`,
+    `printf '%s begin status\n%s\n%s end status %s\n' '${token}' "$s" '${token}' "$rc"`,
+  ];
+  if (steps.length > 0) {
+    const inner = [
+      'rw_step() {',
+      `  printf '%s begin %s\n' '${token}' "$1"`,
+      '  if command -v timeout >/dev/null 2>&1; then timeout "$2" sh -c "$3" </dev/null 2>&1; else sh -c "$3" </dev/null 2>&1; fi',
+      '  rc=$?',
+      `  printf '\n%s end %s %s\n' '${token}' "$1" "$rc"`,
+      '}',
+      ...steps.map((s) => `rw_step ${s.id} ${Math.max(1, Math.round(s.timeoutSeconds))} ${shQuote(s.script)}`),
+    ].join('\n');
+    const encoded = Buffer.from(inner, 'utf8').toString('base64');
+    node.push(
+      `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc "$(printf %s '${encoded}' | base64 -d)" ;; esac`,
+    );
+  }
+  return node.join('\n');
+}
+
+/** Splits the output of {@link buildCheckScript} into its sections. */
+export function parseCheckOutput(output: string, token: string): CheckBatchResult {
+  const steps = new Map<string, StepResult>();
+  let current: { id: string; lines: string[] } | null = null;
+  for (const line of output.split('\n')) {
+    if (line.startsWith(`${token} begin `)) {
+      current = { id: line.slice(token.length + 7).trim(), lines: [] };
+      continue;
+    }
+    if (current && line.startsWith(`${token} end `)) {
+      const [id, code] = line.slice(token.length + 5).trim().split(' ');
+      if (id === current.id) {
+        let text = current.lines.join('\n');
+        if (current.id !== 'status' && text.endsWith('\n')) {
+          text = text.slice(0, -1); // newline printed before the end marker
+        }
+        steps.set(id, { exitCode: Number(code ?? 1), output: text });
+      }
+      current = null;
+      continue;
+    }
+    current?.lines.push(line);
+  }
+  const status = steps.get('status') ?? null;
+  steps.delete('status');
+  return { status, steps };
+}

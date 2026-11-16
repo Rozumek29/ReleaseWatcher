@@ -208,6 +208,38 @@ describe('containers API', () => {
     assert.match((await request('GET', `/api/containers/${response.json().id}`)).json().lastError, /stopped/);
   });
 
+  it('checks containers in parallel up to the configured limit, one batch command each', async () => {
+    shell.on(/^pct list$/, {
+      output: `${PCT_LIST}103        running                 a\n104        running                 b\n`,
+    });
+    for (const vmid of [101, 103, 104]) {
+      const response = await request('POST', '/api/containers', { vmid });
+      await app.containers.wait(response.json().id);
+    }
+    assert.equal((await request('PUT', '/api/settings', { containerCheckConcurrency: 2 })).status, 200);
+    assert.equal((await request('PUT', '/api/settings', { containerCheckConcurrency: 11 })).status, 400);
+
+    let running = 0;
+    let maxRunning = 0;
+    shell.on(/^pct status (101|103|104)$/, async () => {
+      running++;
+      maxRunning = Math.max(maxRunning, running);
+      await Bun.sleep(30);
+      running--;
+      return { output: 'status: running\n' };
+    });
+    shell.commands.length = 0;
+    shell.connections = 0;
+
+    assert.equal((await request('POST', '/api/containers/check-all')).status, 202);
+    await app.scheduler.idle();
+
+    assert.equal(maxRunning, 2);
+    // Exactly one SSH connection per container check (status, apt and app commands batched).
+    assert.equal(shell.connections, 3);
+    assert.equal(shell.commands.filter((c) => c.startsWith('pct status')).length, 3);
+  });
+
   it('runs scheduled checks only for due containers', async () => {
     const container = await addContainer();
     const dto = (await request('GET', `/api/containers/${container.id}`)).json();

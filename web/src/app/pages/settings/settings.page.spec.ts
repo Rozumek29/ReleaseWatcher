@@ -19,6 +19,10 @@ const settings: AppSettings = {
     sshKeySource: 'ui',
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
+    checkConcurrency: 3,
+    checkConcurrencySource: null,
+    minCheckConcurrency: 1,
+    maxCheckConcurrency: 10,
   },
 };
 
@@ -80,6 +84,10 @@ describe('SettingsPage', () => {
     const cron = section.querySelector<HTMLInputElement>('#pve-cron')!;
     cron.value = '0 3 * * *';
     cron.dispatchEvent(new Event('input'));
+    const concurrency = section.querySelector<HTMLInputElement>('#pve-concurrency')!;
+    expect(concurrency.value).toBe('3');
+    concurrency.value = '5';
+    concurrency.dispatchEvent(new Event('input'));
     section.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     const save = http.expectOne('/api/settings');
     expect(save.request.method).toBe('PUT');
@@ -88,6 +96,7 @@ describe('SettingsPage', () => {
       proxmoxPort: 22,
       proxmoxUser: 'root',
       containerCheckCron: '0 3 * * *',
+      containerCheckConcurrency: 5,
     });
     save.flush(settings);
     await settle(fixture);

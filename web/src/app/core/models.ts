@@ -98,6 +98,11 @@ export interface AppSettings {
     sshKeySource: SettingSource;
     checkCron: string;
     checkCronSource: SettingSource;
+    /** How many containers are checked at the same time. */
+    checkConcurrency: number;
+    checkConcurrencySource: SettingSource;
+    minCheckConcurrency: number;
+    maxCheckConcurrency: number;
   };
 }
 
@@ -113,6 +118,7 @@ export interface SettingsPatch {
   proxmoxUser?: string | null;
   proxmoxSshKey?: string | null;
   containerCheckCron?: string | null;
+  containerCheckConcurrency?: number | null;
 }
 
 export interface AppStatus {

@@ -6,15 +6,20 @@ import type { ContainerStore } from './store.ts';
 
 /**
  * Runs container checks according to cron expressions: each container uses its own `checkCron` or the
- * global default. Wakes up at the start of every minute; checks run one after another.
+ * global default. Wakes up at the start of every minute. Queued checks run in parallel, at most
+ * `concurrency()` at a time; a container is never queued twice.
  */
 export class ContainerScheduler {
   private timer: Timer | null = null;
   private stopped = false;
-  private queue: Promise<void> = Promise.resolve();
+  /** Waiting container IDs (in order) with the trigger they were queued with. */
+  private readonly pending = new Map<number, RunTrigger>();
+  private readonly inFlight = new Set<number>();
+  private idleWaiters: (() => void)[] = [];
   private readonly store: ContainerStore;
   private readonly service: ContainerService;
   private readonly defaultCron: () => string;
+  private readonly concurrency: () => number;
   private readonly log: Pick<Logger, 'warn' | 'error'>;
   private readonly cache = new Map<string, CronSchedule | null>();
 
@@ -22,11 +27,14 @@ export class ContainerScheduler {
     store: ContainerStore;
     service: ContainerService;
     defaultCron: () => string;
+    /** Maximum number of checks running at the same time (read on every dispatch). */
+    concurrency?: () => number;
     log: Pick<Logger, 'warn' | 'error'>;
   }) {
     this.store = deps.store;
     this.service = deps.service;
     this.defaultCron = deps.defaultCron;
+    this.concurrency = deps.concurrency ?? (() => 1);
     this.log = deps.log;
   }
 
@@ -59,33 +67,65 @@ export class ContainerScheduler {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    await this.queue;
+    this.pending.clear();
+    await this.idle();
   }
 
-  /** Runs the checks due at `now` (exposed for tests). Resolves when they are finished. */
+  /** Queues the checks due at `now` (exposed for tests). Resolves when the queue is empty. */
   tick(now: Date): Promise<void> {
-    if (!this.service.shell.isConfigured) {
-      return this.queue;
+    if (this.service.shell.isConfigured) {
+      for (const container of this.store.listEnabled()) {
+        if (this.scheduleOf(container)?.matches(now)) {
+          this.enqueue(container.id, 'schedule');
+        }
+      }
     }
-    const due = this.store.listEnabled().filter((c) => this.scheduleOf(c)?.matches(now));
-    for (const container of due) {
-      this.queue = this.queue.then(() => this.checkOne(container.id, 'schedule'));
-    }
-    return this.queue;
+    return this.idle();
   }
 
-  /** Checks all enabled containers one after another (manual "check all"). */
+  /** Queues a check of all enabled containers (manual "check all"). Resolves when the queue is empty. */
   checkAll(): Promise<void> {
     for (const container of this.store.listEnabled()) {
-      this.queue = this.queue.then(() => this.checkOne(container.id, 'manual'));
+      this.enqueue(container.id, 'manual');
     }
-    return this.queue;
+    return this.idle();
+  }
+
+  /** Resolves when nothing is queued or running. */
+  idle(): Promise<void> {
+    if (this.pending.size === 0 && this.inFlight.size === 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private enqueue(containerId: number, trigger: RunTrigger): void {
+    if (this.stopped || this.pending.has(containerId) || this.inFlight.has(containerId)) {
+      return;
+    }
+    this.pending.set(containerId, trigger);
+    this.dispatch();
+  }
+
+  private dispatch(): void {
+    const limit = Math.max(1, this.concurrency());
+    while (!this.stopped && this.inFlight.size < limit && this.pending.size > 0) {
+      const [containerId, trigger] = this.pending.entries().next().value!;
+      this.pending.delete(containerId);
+      this.inFlight.add(containerId);
+      void this.checkOne(containerId, trigger).finally(() => {
+        this.inFlight.delete(containerId);
+        this.dispatch();
+      });
+    }
+    if (this.pending.size === 0 && this.inFlight.size === 0) {
+      const waiters = this.idleWaiters;
+      this.idleWaiters = [];
+      waiters.forEach((resolve) => resolve());
+    }
   }
 
   private async checkOne(containerId: number, trigger: RunTrigger): Promise<void> {
-    if (this.stopped) {
-      return;
-    }
     const container = this.store.get(containerId);
     if (!container || this.service.isBusy(container.id)) {
       return; // deleted meanwhile, or an update is running right now
@@ -102,8 +142,7 @@ export class ContainerScheduler {
     if (this.stopped) {
       return;
     }
-    const now = Date.now();
-    const delay = 60_000 - (now % 60_000) + 50;
+    const delay = 60_000 - (Date.now() % 60_000) + 50;
     this.timer = setTimeout(() => {
       this.timer = null;
       this.tick(new Date()).catch((error: unknown) => this.log.error({ err: error }, 'Container scheduler failed'));
