@@ -16,6 +16,11 @@ app does, the API, configuration and project layout – this file covers only wh
   ```
 
 - Keep pushing follow-up commits to the same branch; the PR updates itself.
+- Merge only after CI passes, and **always squash-merge**:
+
+  ```bash
+  gh pr ready && gh pr merge --squash --delete-branch
+  ```
 - Before marking work done, run the full check (same as CI):
 
   ```bash
