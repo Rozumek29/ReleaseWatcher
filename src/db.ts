@@ -199,7 +199,7 @@ export class RepositoryStore {
   }
 
   list(): WatchedRepository[] {
-    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY owner, name').all().map(toEntity);
+    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY name COLLATE NOCASE, owner COLLATE NOCASE').all().map(toEntity);
   }
 
   listEnabled(): WatchedRepository[] {

@@ -119,7 +119,7 @@ export class RepositoriesPage {
           ...(this.newToken.trim() ? { githubToken: this.newToken.trim() } : {}),
         }),
       );
-      this.repositories.update((list) => [...list, created].sort(byFullName));
+      this.repositories.update((list) => [...list, created].sort(byName));
       this.newRepository = '';
       this.newIncludePrereleases = false;
       this.newToken = '';
@@ -206,6 +206,7 @@ export class RepositoriesPage {
   }
 }
 
-function byFullName(a: WatchedRepository, b: WatchedRepository): number {
-  return a.fullName.localeCompare(b.fullName);
+/** Same order as the server: repository name first, owner only breaks ties. */
+function byName(a: WatchedRepository, b: WatchedRepository): number {
+  return a.name.localeCompare(b.name) || a.owner.localeCompare(b.owner);
 }

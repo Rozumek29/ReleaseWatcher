@@ -89,6 +89,26 @@ describe('RepositoriesPage', () => {
     expect(el.querySelectorAll('.row').length).toBe(1);
   });
 
+  it('keeps repositories sorted by repository name, not by owner', async () => {
+    const { el, fixture } = await render([repo(1, 'zeta/alpha'), repo(2, 'acme/widget')]);
+    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
+    input.value = 'aaa/middle';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
+    await settle(fixture);
+    http.expectOne({ method: 'POST', url: '/api/repositories' }).flush(repo(3, 'aaa/middle'));
+    await settle(fixture);
+    http.match('/api/status').forEach((r) => r.flush({}));
+
+    const names = [...el.querySelectorAll('.row')].map((r) => r.textContent ?? '');
+    expect(names.map((t) => ['alpha', 'middle', 'widget'].find((n) => t.includes(n)))).toEqual([
+      'alpha',
+      'middle',
+      'widget',
+    ]);
+  });
+
   it('switches to the grid layout', async () => {
     const { el, fixture } = await render([repo(1, 'angular/angular')]);
     expect(el.querySelector('.list.grid')).toBeNull();

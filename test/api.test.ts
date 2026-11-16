@@ -108,6 +108,19 @@ describe('HTTP API', () => {
     assert.equal(notifier.sent.length, 0);
   });
 
+  it('lists repositories by repository name, not by owner', async () => {
+    const names = ['zeta/alpha', 'acme/Widget', 'aaa/middle', 'beta/widget'];
+    names.forEach((n) => source.existing.add(n.toLowerCase()));
+    for (const name of names) {
+      assert.equal((await add(name)).statusCode, 201);
+    }
+    const list = (await inject({ method: 'GET', url: '/api/repositories' })).json();
+    assert.deepEqual(
+      list.map((r: { fullName: string }) => r.fullName),
+      ['zeta/alpha', 'aaa/middle', 'acme/Widget', 'beta/widget'],
+    );
+  });
+
   it('rejects duplicates case-insensitively', async () => {
     await add('acme/widget');
     const response = await add('ACME/Widget');
