@@ -1,0 +1,91 @@
+<section class="card auth-card" aria-labelledby="setup-title">
+  <div class="auth-brand">
+    <span class="logo"><app-icon name="bell" [size]="22" /></span>
+    <h1 id="setup-title">Welcome to ReleaseWatcher</h1>
+    <p>Create the account. You can add passkeys afterwards on the Account page.</p>
+  </div>
+
+  @if (error(); as e) {
+    <div class="form-error" role="alert"><app-icon name="alert" [size]="16" /> <span>{{ e }}</span></div>
+  }
+
+  <form (ngSubmit)="create()" novalidate>
+    <div class="field">
+      <label for="setup-code">Setup code</label>
+      <input
+        id="setup-code"
+        class="input mono"
+        name="code"
+        [(ngModel)]="code"
+        placeholder="ABCD-EFGH"
+        autocomplete="one-time-code"
+        autocapitalize="characters"
+        spellcheck="false"
+        [class.invalid]="errors()['code']"
+      />
+      @if (errors()['code']; as e) {
+        <span class="error">{{ e }}</span>
+      }
+      <ul class="code-help">
+        <li>printed at the end of <code>bun run deploy</code>,</li>
+        <li>in the server log (<code>journalctl -u releasewatcher</code>),</li>
+        <li>or in the <code>setup-code</code> file next to the database.</li>
+      </ul>
+    </div>
+
+    <div class="field">
+      <label for="setup-username">User name</label>
+      <input
+        id="setup-username"
+        class="input"
+        name="username"
+        [(ngModel)]="username"
+        autocomplete="username"
+        autocapitalize="none"
+        spellcheck="false"
+        [class.invalid]="errors()['username']"
+      />
+      @if (errors()['username']; as e) {
+        <span class="error">{{ e }}</span>
+      }
+    </div>
+
+    <div class="field">
+      <label for="setup-password">Password</label>
+      <input
+        id="setup-password"
+        class="input"
+        type="password"
+        name="password"
+        [(ngModel)]="password"
+        autocomplete="new-password"
+        [class.invalid]="errors()['password']"
+      />
+      @if (errors()['password']; as e) {
+        <span class="error">{{ e }}</span>
+      } @else {
+        <span class="hint">At least {{ minLength }} characters.</span>
+      }
+    </div>
+
+    <div class="field">
+      <label for="setup-confirm">Repeat the password</label>
+      <input
+        id="setup-confirm"
+        class="input"
+        type="password"
+        name="confirm"
+        [(ngModel)]="confirm"
+        autocomplete="new-password"
+        [class.invalid]="errors()['confirm']"
+      />
+      @if (errors()['confirm']; as e) {
+        <span class="error">{{ e }}</span>
+      }
+    </div>
+
+    <button type="submit" class="btn btn-block" [disabled]="saving()">
+      {{ saving() ? 'Creating…' : 'Create account' }}
+    </button>
+  </form>
+</section>

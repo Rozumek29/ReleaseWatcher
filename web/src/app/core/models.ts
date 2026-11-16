@@ -272,3 +272,42 @@ export interface RunSummary {
 export interface Run extends RunSummary {
   output: string;
 }
+
+/** Login state of the browser (GET /api/auth/state). */
+export interface AuthState {
+  /** No account yet – the setup screen creates it. */
+  setupRequired: boolean;
+  authenticated: boolean;
+  username: string | null;
+  hasPasskeys: boolean;
+}
+
+export interface PasskeyInfo {
+  /** Credential ID (base64url). */
+  id: string;
+  name: string;
+  transports: string[];
+  deviceType: string | null;
+  backedUp: boolean;
+  createdAt: string;
+  lastUsedAt: string | null;
+}
+
+export interface SessionInfo {
+  id: string;
+  method: 'password' | 'passkey' | 'setup';
+  userAgent: string | null;
+  ip: string | null;
+  createdAt: string;
+  lastSeenAt: string;
+  expiresAt: string;
+  /** The session of this browser. */
+  current: boolean;
+}
+
+/** PUT /api/auth/account – the current password is always required. */
+export interface AccountUpdate {
+  currentPassword: string;
+  username?: string | null;
+  newPassword?: string | null;
+}

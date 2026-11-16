@@ -1,0 +1,50 @@
+<section class="card auth-card" aria-labelledby="login-title">
+  <div class="auth-brand">
+    <span class="logo"><app-icon name="bell" [size]="22" /></span>
+    <h1 id="login-title">Sign in to ReleaseWatcher</h1>
+  </div>
+
+  @if (error(); as e) {
+    <div class="form-error" role="alert"><app-icon name="alert" [size]="16" /> <span>{{ e }}</span></div>
+  }
+
+  <form (ngSubmit)="signIn()">
+    <div class="field">
+      <label for="login-username">User name</label>
+      <input
+        id="login-username"
+        class="input"
+        name="username"
+        [(ngModel)]="username"
+        autocomplete="username webauthn"
+        autocapitalize="none"
+        spellcheck="false"
+        required
+      />
+    </div>
+    <div class="field">
+      <label for="login-password">Password</label>
+      <input
+        id="login-password"
+        class="input"
+        type="password"
+        name="password"
+        [(ngModel)]="password"
+        autocomplete="current-password"
+        required
+      />
+    </div>
+    <button type="submit" class="btn btn-block" [disabled]="busy() !== null || !username.trim() || !password">
+      <app-icon name="lock" [size]="16" />
+      {{ busy() === 'password' ? 'Signing in…' : 'Sign in' }}
+    </button>
+  </form>
+
+  @if (showPasskey()) {
+    <div class="divider">or</div>
+    <button type="button" class="btn btn-secondary btn-block passkey-btn" (click)="signInWithPasskey()" [disabled]="busy() !== null">
+      <app-icon name="key" [size]="16" />
+      {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
+    </button>
+  }
+</section>

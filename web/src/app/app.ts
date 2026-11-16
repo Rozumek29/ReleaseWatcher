@@ -1,6 +1,7 @@
-import { Component, DestroyRef, OnInit, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
+import { AuthService } from './core/auth.service';
 import { StatusService } from './core/status.service';
 import { ToastService } from './core/toast.service';
 import { Icon, IconName } from './shared/icon';
@@ -12,17 +13,18 @@ interface NavItem {
   icon: IconName;
 }
 
-/** App shell: sidebar navigation, poller status and global toasts. */
+/** App shell: sidebar navigation, poller status and global toasts; sign-in pages get a bare layout. */
 @Component({
   selector: 'app-root',
   imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, RelativeTimePipe],
   templateUrl: './app.html',
   styleUrl: './app.scss',
 })
-export class App implements OnInit {
+export class App {
   protected readonly statusService = inject(StatusService);
   protected readonly toastService = inject(ToastService);
-  private readonly destroyRef = inject(DestroyRef);
+  protected readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
 
   protected readonly nav: NavItem[] = [
     { path: '/repositories', label: 'Repositories', icon: 'repo' },
@@ -33,19 +35,44 @@ export class App implements OnInit {
   protected readonly sidebarOpen = signal(false);
   /** Ticks every 30 s so relative times ("in 5 minutes") stay current. */
   protected readonly now = signal(Date.now());
+  private readonly url = signal(this.router.url);
+  /** Sign-in and setup pages: no sidebar. */
+  protected readonly authLayout = computed(() => /^\/(login|setup)(\/|\?|$)/.test(this.url()));
 
   constructor() {
-    inject(Router)
-      .events.pipe(filter((e) => e instanceof NavigationEnd))
-      .subscribe(() => this.sidebarOpen.set(false));
+    this.router.events.pipe(filter((e) => e instanceof NavigationEnd)).subscribe((e) => {
+      this.url.set(e.urlAfterRedirects);
+      this.sidebarOpen.set(false);
+    });
+
+    // Poll the status only while signed in – otherwise every request would be a 401.
+    let timer: ReturnType<typeof setInterval> | null = null;
+    const stop = () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    effect(() => {
+      const signedIn = this.auth.authenticated();
+      untracked(() => {
+        stop();
+        if (signedIn) {
+          void this.statusService.refresh();
+          timer = setInterval(() => {
+            this.now.set(Date.now());
+            void this.statusService.refresh();
+          }, 30_000);
+        } else {
+          this.statusService.status.set(null);
+        }
+      });
+    });
+    inject(DestroyRef).onDestroy(stop);
   }
 
-  ngOnInit(): void {
-    void this.statusService.refresh();
-    const timer = setInterval(() => {
-      this.now.set(Date.now());
-      void this.statusService.refresh();
-    }, 30_000);
-    this.destroyRef.onDestroy(() => clearInterval(timer));
+  protected async signOut(): Promise<void> {
+    await this.auth.logout();
+    await this.router.navigateByUrl('/login');
   }
 }

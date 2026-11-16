@@ -182,3 +182,9 @@ export function describeError(error: unknown): string {
   }
   return error instanceof Error ? error.message : String(error);
 }
+
+/** Field validation errors of a problem-details response (`errors`), one message per field; null when none. */
+export function fieldErrors(error: unknown): Record<string, string> | null {
+  const errors = (error as { error?: { errors?: Record<string, string[]> } } | null)?.error?.errors;
+  return errors ? Object.fromEntries(Object.entries(errors).map(([k, v]) => [k, v.join(' ')])) : null;
+}

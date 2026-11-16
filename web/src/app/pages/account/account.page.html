@@ -1,0 +1,182 @@
+<header class="page-header">
+  <div>
+    <h1>Account</h1>
+    <p>Signed in as <strong>{{ auth.username() }}</strong>. One account manages ReleaseWatcher – share the password or add a passkey per device.</p>
+  </div>
+  <button type="button" class="btn btn-secondary" (click)="signOut()">
+    <app-icon name="logout" [size]="16" /> Sign out
+  </button>
+</header>
+
+<div class="sections">
+  <!-- User name and password -->
+  <section class="card section" aria-labelledby="account-title">
+    <div class="section-head">
+      <span class="section-icon account"><app-icon name="user" /></span>
+      <div class="section-title">
+        <h2 id="account-title">User name &amp; password</h2>
+        <p>Changing the password signs out all other sessions.</p>
+      </div>
+    </div>
+    <form class="section-body" (ngSubmit)="saveAccount()" novalidate>
+      <div class="field">
+        <label for="account-username">User name</label>
+        <input id="account-username" class="input" name="username" [(ngModel)]="username" autocomplete="username" autocapitalize="none" spellcheck="false" [class.invalid]="errors()['username']" />
+        @if (errors()['username']; as e) {
+          <span class="error">{{ e }}</span>
+        }
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="account-new">New password <span class="optional">optional</span></label>
+          <input id="account-new" class="input" type="password" name="newPassword" [(ngModel)]="newPassword" autocomplete="new-password" [class.invalid]="errors()['newPassword']" />
+          @if (errors()['newPassword']; as e) {
+            <span class="error">{{ e }}</span>
+          } @else {
+            <span class="hint">At least {{ minLength }} characters.</span>
+          }
+        </div>
+        <div class="field">
+          <label for="account-confirm">Repeat the new password</label>
+          <input id="account-confirm" class="input" type="password" name="confirmPassword" [(ngModel)]="confirmPassword" autocomplete="new-password" [class.invalid]="errors()['confirmPassword']" />
+          @if (errors()['confirmPassword']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+      </div>
+      <div class="field">
+        <label for="account-current">Current password</label>
+        <input id="account-current" class="input" type="password" name="currentPassword" [(ngModel)]="currentPassword" autocomplete="current-password" [class.invalid]="errors()['currentPassword']" />
+        @if (errors()['currentPassword']; as e) {
+          <span class="error">{{ e }}</span>
+        } @else {
+          <span class="hint">Required to save any change.</span>
+        }
+      </div>
+      <div class="section-actions">
+        <span class="spacer"></span>
+        <button type="submit" class="btn" [disabled]="savingAccount()">{{ savingAccount() ? 'Saving…' : 'Save' }}</button>
+      </div>
+    </form>
+  </section>
+
+  <!-- Passkeys -->
+  <section class="card section" aria-labelledby="passkeys-title">
+    <div class="section-head">
+      <span class="section-icon passkeys"><app-icon name="key" /></span>
+      <div class="section-title">
+        <h2 id="passkeys-title">Passkeys</h2>
+        <p>Sign in with Windows Hello, Touch ID, your phone or a security key – no password needed.</p>
+      </div>
+    </div>
+    <div class="section-body">
+      @if (!auth.passkeysSupported) {
+        <div class="notice">
+          <app-icon name="alert" [size]="16" />
+          <span>
+            Passkeys only work over <strong>HTTPS with a host name</strong> (e.g. <code>https://watcher.example.com</code>),
+            not on a plain <code>http://</code> IP address. Put ReleaseWatcher behind a reverse proxy with a certificate and
+            set <code>PUBLIC_URL</code> to that address.
+          </span>
+        </div>
+      }
+
+      @if (passkeys().length === 0) {
+        <p class="muted">No passkeys yet.</p>
+      } @else {
+        <ul class="list">
+          @for (p of passkeys(); track p.id) {
+            <li class="list-item">
+              @if (renaming() === p.id) {
+                <form class="inline-form" (ngSubmit)="rename(p)">
+                  <input class="input" name="rename" [(ngModel)]="renameValue" aria-label="Passkey name" maxlength="100" />
+                  <button type="submit" class="btn btn-sm">Save</button>
+                  <button type="button" class="btn btn-sm btn-ghost" (click)="renaming.set(null)">Cancel</button>
+                </form>
+              } @else {
+                <div class="item-main">
+                  <span class="item-name">{{ p.name }}</span>
+                  <span class="item-meta">
+                    added {{ p.createdAt | relativeTime: now() }}
+                    · {{ p.lastUsedAt ? 'used ' + (p.lastUsedAt | relativeTime: now()) : 'never used' }}
+                    @if (p.backedUp) {
+                      · synced
+                    }
+                  </span>
+                </div>
+                <div class="item-actions">
+                  @if (confirmDelete() === p.id) {
+                    <span class="confirm-text">Remove?</span>
+                    <button type="button" class="btn btn-sm btn-danger-ghost" (click)="deletePasskey(p)">Remove</button>
+                    <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDelete.set(null)">Keep</button>
+                  } @else {
+                    <button type="button" class="btn btn-sm btn-ghost" (click)="startRename(p)">Rename</button>
+                    <button type="button" class="icon-btn" (click)="confirmDelete.set(p.id)" [attr.aria-label]="'Remove passkey ' + p.name">
+                      <app-icon name="trash" [size]="16" />
+                    </button>
+                  }
+                </div>
+              }
+            </li>
+          }
+        </ul>
+      }
+
+      @if (passkeyError(); as e) {
+        <span class="error" role="alert">{{ e }}</span>
+      }
+      <form class="inline-form add-passkey" (ngSubmit)="addPasskey()">
+        <label for="passkey-name" class="visually-hidden">Name of the new passkey</label>
+        <input id="passkey-name" class="input" name="passkeyName" [(ngModel)]="newPasskeyName" maxlength="100" [disabled]="!auth.passkeysSupported" />
+        <button type="submit" class="btn" [disabled]="!auth.passkeysSupported || addingPasskey()">
+          <app-icon name="plus" [size]="16" /> {{ addingPasskey() ? 'Waiting for the passkey…' : 'Add passkey' }}
+        </button>
+      </form>
+    </div>
+  </section>
+
+  <!-- Sessions -->
+  <section class="card section" aria-labelledby="sessions-title">
+    <div class="section-head">
+      <span class="section-icon sessions"><app-icon name="server" /></span>
+      <div class="section-title">
+        <h2 id="sessions-title">Signed-in sessions</h2>
+        <p>Browsers signed in to this account. Sessions end after 30 days without use.</p>
+      </div>
+    </div>
+    <div class="section-body">
+      <ul class="list">
+        @for (s of sessions(); track s.id) {
+          <li class="list-item session">
+            <div class="item-main">
+              <span class="item-name">
+                {{ browserOf(s.userAgent) }}
+                @if (s.current) {
+                  <span class="badge badge-success">This browser</span>
+                }
+              </span>
+              <span class="item-meta">
+                {{ methodLabel(s.method) }}
+                @if (s.ip) {
+                  · {{ s.ip }}
+                }
+                · active {{ s.lastSeenAt | relativeTime: now() }}
+              </span>
+            </div>
+            @if (!s.current) {
+              <div class="item-actions">
+                <button type="button" class="btn btn-sm btn-ghost" (click)="endSession(s)">Sign out</button>
+              </div>
+            }
+          </li>
+        }
+      </ul>
+      <div class="section-actions">
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-secondary" (click)="endOtherSessions()" [disabled]="sessions().length < 2">
+          Sign out other sessions
+        </button>
+      </div>
+    </div>
+  </section>
+</div>

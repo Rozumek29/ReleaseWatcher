@@ -1,3 +1,8 @@
+@if (authLayout()) {
+<main class="auth-layout">
+  <router-outlet />
+</main>
+} @else {
 <div class="shell" [class.sidebar-open]="sidebarOpen()">
   <header class="mobile-bar">
     <button type="button" class="icon-btn" (click)="sidebarOpen.set(true)" aria-label="Open navigation">
@@ -78,12 +83,23 @@
         Check all now
       </button>
     </section>
+
+    <section class="user" aria-label="Account">
+      <a routerLink="/account" routerLinkActive="active" class="user-link" [attr.aria-current]="null">
+        <app-icon name="user" [size]="16" />
+        <span class="user-name">{{ auth.username() }}</span>
+      </a>
+      <button type="button" class="icon-btn" (click)="signOut()" aria-label="Sign out" title="Sign out">
+        <app-icon name="logout" [size]="16" />
+      </button>
+    </section>
   </aside>
 
   <main class="content">
     <router-outlet />
   </main>
 </div>
+}
 
 <div class="toasts" aria-live="polite">
   @for (toast of toastService.toasts(); track toast.id) {
