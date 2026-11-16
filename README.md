@@ -133,7 +133,9 @@ The UI and the API require a login – **one account** that can sign in with its
 - **First start:** without an account the app logs a one-time **setup code** (also in `setup-code` next to the
   database, and printed by `bun run deploy`). The UI shows the setup screen: enter the code, a user name and a
   password (10+ characters). Without the code nobody else can claim a fresh installation.
-- **Upgrading from Basic auth:** if `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` are set and no account exists, the
+- **Upgrading from Basic auth** (installs made with an earlier `bun run deploy` have a generated password in
+  `/etc/releasewatcher/releasewatcher.env` – `grep BASIC_AUTH` it): if `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` are
+  set and no account exists, the
   account is created with them on the first start – just sign in with the same credentials.
 - **Passkeys** (Account page → *Add passkey*) need a secure context: **HTTPS with a host name** (or `localhost`).
   Put the app behind a reverse proxy (Caddy, Nginx Proxy Manager, Traefik …) and set
@@ -146,10 +148,15 @@ The UI and the API require a login – **one account** that can sign in with its
   nothing else:
 
   ```bash
-  sudo -u releasewatcher env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db     /opt/releasewatcher/releasewatcher --reset-login
+  # in the container (on the node: prefix each command with `pct exec <vmid> --`)
+  sed -i '/^BASIC_AUTH_/d' /etc/releasewatcher/releasewatcher.env   # else the old credentials come back on restart
+  runuser -u releasewatcher -- env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db \
+    /opt/releasewatcher/releasewatcher --reset-login
+  systemctl restart releasewatcher
+  cat /var/lib/releasewatcher/setup-code
   ```
 
-  Then open the UI and create the account again with the new setup code (`/var/lib/releasewatcher/setup-code`).
+  Then open the UI and create the account again with the new setup code.
 
 ## Local development
 
