@@ -150,6 +150,20 @@ export class ApiService {
     );
   }
 
+  /**
+   * Runs every pending update of one container (apt, then applications) one after another.
+   * `backup` decides about one backup (vzdump) before the first update.
+   */
+  runContainerUpdates(
+    id: number,
+    backup: boolean,
+  ): Observable<{ containers: number; updates: number }> {
+    return this.http.post<{ containers: number; updates: number }>(
+      `${this.baseUrl}/containers/${id}/update-all`,
+      { backup },
+    );
+  }
+
   checkContainer(id: number): Observable<Run> {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/check`, {});
   }

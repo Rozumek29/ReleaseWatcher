@@ -17,13 +17,15 @@ import {
   MIN_APP_TIMEOUT_SECONDS,
   MIN_UPDATE_CORES,
   MIN_UPDATE_MEMORY_MB,
+  type PendingUpdate,
   type Run,
+  targetLabel,
 } from './domain.ts';
 import type { ContainerScheduler } from './scheduler.ts';
 import { ContainerBusyError, type ContainerService } from './service.ts';
 import { ShellNotConfiguredError } from './ssh.ts';
 import type { AppInput, ContainerStore } from './store.ts';
-import { type ContainerUpdater, UpdateAllRunningError } from './updater.ts';
+import { type ContainerUpdater, UpdateAllRunningError, type UpdateRequest } from './updater.ts';
 
 export interface ContainerRoutesDeps {
   containers: ContainerStore;
@@ -236,6 +238,32 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   const accepted = (run: Run) => Response.json(runDto(run), { status: 202, headers: { location: `/api/runs/${run.id}` } });
 
+  /**
+   * Queues the planned containers for "update all" with their backup storage; answers 202 with the counts
+   * (200 with zeros when nothing is pending) or the first backup problem.
+   */
+  const startUpdates = (
+    plan: { container: Container; updates: PendingUpdate[] }[],
+    backupOf: (container: Container) => string | null | Response,
+  ): Response => {
+    if (plan.length === 0) {
+      return Response.json({ containers: 0, updates: 0 });
+    }
+    const requests: UpdateRequest[] = [];
+    for (const { container } of plan) {
+      const backup = backupOf(container);
+      if (backup instanceof Response) {
+        return backup;
+      }
+      requests.push({ containerId: container.id, backupStorage: backup });
+    }
+    updater.enqueue(requests);
+    return Response.json(
+      { containers: plan.length, updates: plan.reduce((sum, p) => sum + p.updates.length, 0) },
+      { status: 202 },
+    );
+  };
+
   return {
     '/api/proxmox/test': {
       POST: () =>
@@ -368,30 +396,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!service.shell.isConfigured) {
             throw new ShellNotConfiguredError();
           }
-          if (updater.isRunning) {
+          const plan = updater.plan().filter(({ container }) => !updater.isQueued(container.id));
+          if (plan.length === 0 && updater.isRunning) {
             throw new UpdateAllRunningError();
           }
-          const plan = updater.plan();
-          if (plan.length === 0) {
-            return Response.json({ containers: 0, updates: 0 });
-          }
           // false = no backups; true/omitted = each container's own default (backupBeforeUpdate or the global one).
-          const backups = new Map<number, string | null>();
-          for (const { container } of plan) {
-            const backup = resolveBackup(container, options.backup === false ? false : undefined);
-            if (backup instanceof Response) {
-              return backup;
-            }
-            backups.set(container.id, backup);
-          }
-          void updater.start(
-            plan.map((p) => p.container.id),
-            (container) => backups.get(container.id) ?? null,
-          );
-          return Response.json(
-            { containers: plan.length, updates: plan.reduce((sum, p) => sum + p.updates.length, 0) },
-            { status: 202 },
-          );
+          return startUpdates(plan, (container) => resolveBackup(container, options.backup === false ? false : undefined));
         }),
     },
     '/api/containers/:id': {
@@ -491,6 +501,24 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
+        }),
+    },
+    // Runs every pending update of one container (apt, then applications) one after another.
+    '/api/containers/:id/update-all': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/update-all'>) =>
+        guard(async () => {
+          const options = await readUpdateOptions(req);
+          const container = findContainer(req.params.id);
+          if (!container) {
+            return problem(404, 'Container not found.');
+          }
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          if (updater.isQueued(container.id)) {
+            throw new UpdateAllRunningError(`Updates of ${targetLabel(container)} are already running – wait for them to finish.`);
+          }
+          return startUpdates(updater.plan([container]), (c) => resolveBackup(c, options.backup));
         }),
     },
     '/api/containers/:id/runs': {

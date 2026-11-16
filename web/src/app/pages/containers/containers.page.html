@@ -159,7 +159,32 @@
               <span class="confirm-text">Remove {{ label(c) }}?</span>
               <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+            } @else if (confirming() === 'update-' + c.id) {
+              <span class="confirm-text warn">Run {{ pendingCount(c) }} update(s) one after another?</span>
+              <label class="backup-check" [class.disabled]="!backupStorage()" title="One backup before the first update">
+                <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                Backup first
+                @if (backupStorage(); as storage) {
+                  <span class="muted mono">→ {{ storage }}</span>
+                } @else {
+                  <span class="muted">(choose a storage in Settings)</span>
+                }
+              </label>
+              <button type="button" class="btn btn-sm" (click)="updateContainer(c)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
             } @else {
+              @if (pendingCount(c) > 1) {
+                <button
+                  type="button"
+                  class="btn btn-sm"
+                  (click)="ask('update-' + c.id, c)"
+                  [disabled]="isBusy(c) || !configured()"
+                  title="apt upgrade and all application updates of this container, one after another"
+                >
+                  <app-icon name="arrowUp" [size]="14" />
+                  Update all ({{ pendingCount(c) }})
+                </button>
+              }
               <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
                 <app-icon name="refresh" [size]="14" />
                 Check

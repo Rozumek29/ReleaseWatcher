@@ -44,6 +44,9 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    another: apt first, then applications with a newer version and an update command. The Proxmox host and
    stopped containers that may not be started are left out. With **Backup first** each container is backed up
    once, before its first update, if it is set to back up; a failed update skips the rest of that container.
+   A container with more than one pending update also has its own **Update all (n)** button that runs just its
+   updates the same way (it waits in the queue when another "update all" is running). Applications are listed
+   alphabetically.
 4. Each container can have **applications**:
    - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
    - *latest version* – the newest release of a watched GitHub repository, a command, or none,
@@ -337,6 +340,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
 | `POST` | `/api/containers/update-all` | Update every enabled container with pending updates one after another – apt, then applications; not the Proxmox host. Body `{ backup?: boolean }` (`false` = no backups, otherwise each container's default). 202 with `{ containers, updates }`, 409 while running |
+| `POST` | `/api/containers/:id/update-all` | Run every pending update of one container one after another (apt, then applications) – queued next to a running "update all". Body `{ backup?: boolean }` overrides the container's default (one backup before the first update). 202 with `{ containers, updates }` (200 with zeros when nothing is pending), 409 while its updates are queued or running |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |

@@ -1,6 +1,9 @@
+import { NgTemplateOutlet } from '@angular/common';
 import {
   Component,
   ElementRef,
+  Injector,
+  afterNextRender,
   effect,
   inject,
   input,
@@ -51,15 +54,20 @@ const emptyForm = (): AppForm => ({
   timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
 });
 
+/** Applications in alphabetical order, like the server lists them. */
+const byName = (list: ContainerApp[]): ContainerApp[] =>
+  [...list].sort((a, b) => a.name.localeCompare(b.name, 'en', { sensitivity: 'base' }) || a.id - b.id);
+
 /** Settings of one container and its applications (version check + update command). */
 @Component({
   selector: 'app-container-settings-dialog',
-  imports: [FormsModule, Icon, Switch],
+  imports: [FormsModule, NgTemplateOutlet, Icon, Switch],
   templateUrl: './container-settings.dialog.html',
   styleUrls: ['./dialog.scss', './container-settings.dialog.scss'],
 })
 export class ContainerSettingsDialog {
   private readonly api = inject(ApiService);
+  private readonly injector = inject(Injector);
 
   /** Container being edited; null closes the dialog. */
   readonly container = input<Container | null>(null);
@@ -155,13 +163,11 @@ export class ContainerSettingsDialog {
   }
 
   protected newApp(): void {
-    this.appError.set(null);
-    this.appForm.set(emptyForm());
+    this.openAppForm(emptyForm());
   }
 
   protected editApp(app: ContainerApp): void {
-    this.appError.set(null);
-    this.appForm.set({
+    this.openAppForm({
       id: app.id,
       name: app.name,
       versionCommand: app.versionCommand ?? '',
@@ -172,6 +178,21 @@ export class ContainerSettingsDialog {
       useTty: app.useTty,
       timeoutSeconds: app.timeoutSeconds,
     });
+  }
+
+  /** Shows the form (in place of the edited application, or below the list) and moves the focus into it. */
+  private openAppForm(form: AppForm): void {
+    this.appError.set(null);
+    this.confirmDeleteAppId.set(null);
+    this.appForm.set(form);
+    afterNextRender(
+      () => {
+        const name = this.dialog().nativeElement.querySelector<HTMLInputElement>('#app-name');
+        name?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+        name?.focus({ preventScroll: true });
+      },
+      { injector: this.injector },
+    );
   }
 
   /** Writes a form field (the form object is replaced so the signal notices). */
@@ -200,12 +221,12 @@ export class ContainerSettingsDialog {
     try {
       if (form.id === null) {
         const created = await firstValueFrom(this.api.addContainerApp(container.id, request));
-        this.apps.update((list) => [...list, created]);
+        this.apps.update((list) => byName([...list, created]));
       } else {
         const updated = await firstValueFrom(
           this.api.updateContainerApp(container.id, form.id, request),
         );
-        this.apps.update((list) => list.map((a) => (a.id === updated.id ? updated : a)));
+        this.apps.update((list) => byName(list.map((a) => (a.id === updated.id ? updated : a))));
       }
       this.appForm.set(null);
     } catch (error) {

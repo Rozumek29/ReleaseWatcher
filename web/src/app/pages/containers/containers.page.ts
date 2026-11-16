@@ -76,14 +76,7 @@ export class ContainersPage {
   protected readonly label = targetLabel;
   /** Containers "Update all" would update (same rules as the server: no host, no disabled or blocked ones). */
   protected readonly updatable = computed(() =>
-    this.containers().filter(
-      (c) =>
-        c.kind !== 'node' &&
-        c.isEnabled &&
-        !this.blockedWhileStopped(c) &&
-        ((c.aptEnabled && c.aptUpgradable.length > 0) ||
-          c.apps.some((a) => a.updateAvailable === true && !!a.updateCommand)),
-    ),
+    this.containers().filter((c) => this.pendingCount(c) > 0),
   );
 
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -344,6 +337,35 @@ export class ContainersPage {
   /** Stopped and not allowed to be started temporarily – commands cannot run in it. */
   protected blockedWhileStopped(container: Container): boolean {
     return container.status === 'stopped' && !container.startWhenStopped;
+  }
+
+  /**
+   * Updates "Update all" runs in the container (same rules as the server: apt counts once, then every application
+   * with a newer version and an update command; nothing for the host, paused or blocked containers).
+   */
+  protected pendingCount(container: Container): number {
+    if (container.kind === 'node' || !container.isEnabled || this.blockedWhileStopped(container)) {
+      return 0;
+    }
+    const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;
+    return apt + container.apps.filter((a) => a.updateAvailable === true && !!a.updateCommand).length;
+  }
+
+  /** Runs every pending update of one container, one after another (a single backup before the first one). */
+  protected async updateContainer(container: Container): Promise<void> {
+    this.confirming.set(null);
+    const backup = this.backupFirst() && this.backupStorage() !== null;
+    await this.withBusy(container.id, async () => {
+      const { updates } = await firstValueFrom(this.api.runContainerUpdates(container.id, backup));
+      this.toast.info(
+        updates > 0
+          ? `Updating ${targetLabel(container)} – ${updates} update(s) one after another.`
+          : `${targetLabel(container)} has no pending updates.`,
+      );
+      // The container reports isBusy while its updates run, so the list keeps refreshing.
+      await this.load();
+      void this.statusService.refresh();
+    });
   }
 
   protected cronOf(container: Container): string {

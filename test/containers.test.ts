@@ -691,6 +691,58 @@ describe('containers API', () => {
     assert.equal(runs[0].status, 'failed');
   });
 
+  it('updates all pending updates of one container: apt, then applications, one backup', async () => {
+    const container = await addContainerWithUpdates();
+    await request('PUT', '/api/settings', { backupStorage: 'pbs' });
+    const upgrade = Promise.withResolvers<{ output: string }>();
+    shell.on(/apt-get -y/, () => upgrade.promise);
+    shell.on(/'update'$/, { output: 'Updated.\n' });
+    shell.commands.length = 0;
+
+    const response = await request('POST', `/api/containers/${container.id}/update-all`, { backup: true });
+    assert.equal(response.status, 202);
+    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
+    // Queued already – by itself and by the global "update all".
+    assert.equal((await request('POST', `/api/containers/${container.id}/update-all`)).status, 409);
+    assert.equal((await request('POST', '/api/containers/update-all')).status, 409);
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
+    await app.updater.idle();
+
+    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|'update'$/.test(c));
+    assert.equal(updates.length, 3, updates.join('\n'));
+    assert.match(updates[0]!, /vzdump 101 .*pbs/);
+    assert.ok(updates[1]!.includes('apt-get -y'));
+    assert.match(updates[2]!, /pct exec 101 .*'update'$/);
+    assert.equal((await request('POST', '/api/containers/999/update-all')).status, 404);
+  });
+
+  it('queues a container while "update all" of another one runs', async () => {
+    const first = await addContainerWithUpdates();
+    shell.on(/^pct status 102$/, { output: 'status: running\n' });
+    const second = (await request('POST', '/api/containers', { vmid: 102 })).json();
+    await app.containers.wait(second.id);
+    const upgrade = Promise.withResolvers<{ output: string }>();
+    shell.on(/pct exec 101 .*apt-get -y/, () => upgrade.promise);
+    shell.commands.length = 0;
+
+    assert.equal((await request('POST', `/api/containers/${first.id}/update-all`, { backup: false })).status, 202);
+    assert.equal((await request('POST', `/api/containers/${second.id}/update-all`, { backup: false })).status, 202);
+    assert.equal((await request('GET', `/api/containers/${second.id}`)).json().isBusy, true);
+    upgrade.resolve({ output: 'done\n' });
+    await app.updater.idle();
+    assert.ok(shell.commands.some((c) => /pct exec 102 .*apt-get -y/.test(c)), shell.commands.join('\n'));
+  });
+
+  it('lists applications in alphabetical order', async () => {
+    const container = await addContainer();
+    for (const name of ['ViaVersion', 'bluemap', 'Purpur']) {
+      await request('POST', `/api/containers/${container.id}/apps`, { name, latestSource: 'none' });
+    }
+    const apps = (await request('GET', `/api/containers/${container.id}`)).json().apps;
+    assert.deepEqual(apps.map((a: { name: string }) => a.name), ['bluemap', 'Purpur', 'ViaVersion']);
+  });
+
   it('starts nothing when no container has pending updates', async () => {
     await addContainer();
     shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });

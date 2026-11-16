@@ -140,101 +140,48 @@
             @if (apps().length > 0) {
               <ul class="apps">
                 @for (a of apps(); track a.id) {
-                  <li class="app-row">
-                    <div class="app-text">
-                      <strong>{{ a.name }}</strong>
-                      <span class="muted small">
-                        {{ sourceLabel(a) }}
-                        @if (a.updateCommand) {
-                          · update: <code>{{ a.updateCommand }}</code>
+                  @if (appForm()?.id === a.id) {
+                    <!-- Edited in place, so the form is next to the application even in a long list. -->
+                    <li class="app-row editing">
+                      <ng-container *ngTemplateOutlet="appFormTemplate; context: { $implicit: appForm() }" />
+                    </li>
+                  } @else {
+                    <li class="app-row">
+                      <div class="app-text">
+                        <strong>{{ a.name }}</strong>
+                        <span class="muted small">
+                          {{ sourceLabel(a) }}
+                          @if (a.updateCommand) {
+                            · update: <code>{{ a.updateCommand }}</code>
+                          } @else {
+                            · no update command
+                          }
+                        </span>
+                      </div>
+                      <div class="app-actions">
+                        @if (confirmDeleteAppId() === a.id) {
+                          <span class="confirm-text">Remove?</span>
+                          <button type="button" class="btn btn-sm btn-danger-ghost" (click)="deleteApp(a)">Yes</button>
+                          <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteAppId.set(null)">No</button>
                         } @else {
-                          · no update command
+                          <button type="button" class="icon-btn" (click)="editApp(a)" [attr.aria-label]="'Edit ' + a.name" title="Edit">
+                            <app-icon name="sliders" [size]="15" />
+                          </button>
+                          <button type="button" class="icon-btn" (click)="confirmDeleteAppId.set(a.id)" [attr.aria-label]="'Remove ' + a.name" title="Remove">
+                            <app-icon name="trash" [size]="15" />
+                          </button>
                         }
-                      </span>
-                    </div>
-                    <div class="app-actions">
-                      @if (confirmDeleteAppId() === a.id) {
-                        <span class="confirm-text">Remove?</span>
-                        <button type="button" class="btn btn-sm btn-danger-ghost" (click)="deleteApp(a)">Yes</button>
-                        <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteAppId.set(null)">No</button>
-                      } @else {
-                        <button type="button" class="icon-btn" (click)="editApp(a)" [attr.aria-label]="'Edit ' + a.name" title="Edit">
-                          <app-icon name="sliders" [size]="15" />
-                        </button>
-                        <button type="button" class="icon-btn" (click)="confirmDeleteAppId.set(a.id)" [attr.aria-label]="'Remove ' + a.name" title="Remove">
-                          <app-icon name="trash" [size]="15" />
-                        </button>
-                      }
-                    </div>
-                  </li>
+                      </div>
+                    </li>
+                  }
                 }
               </ul>
             }
 
             @if (appForm(); as f) {
-              <div class="app-form" role="group" aria-label="Application">
-                <div class="field">
-                  <label for="app-name">Name</label>
-                  <input id="app-name" class="input" [ngModel]="f.name" (ngModelChange)="setField('name', $event)" placeholder="Vaultwarden" autocomplete="off" />
-                </div>
-                <div class="field">
-                  <label for="app-version">Version command <span class="optional">optional</span></label>
-                  <input id="app-version" class="input mono" [ngModel]="f.versionCommand" (ngModelChange)="setField('versionCommand', $event)" placeholder="cat /opt/vaultwarden_version.txt" autocomplete="off" spellcheck="false" />
-                </div>
-                <div class="field">
-                  <label for="app-source">Latest version from</label>
-                  <select id="app-source" class="input" [ngModel]="f.latestSource" (ngModelChange)="setField('latestSource', $event)">
-                    <option value="none">Nothing (no comparison)</option>
-                    <option value="github">A watched GitHub repository</option>
-                    <option value="command">A command</option>
-                  </select>
-                </div>
-                @if (f.latestSource === 'github') {
-                  <div class="field">
-                    <label for="app-repo">Repository</label>
-                    <select id="app-repo" class="input" [ngModel]="f.repositoryId" (ngModelChange)="setField('repositoryId', $event)">
-                      <option [ngValue]="null" disabled>Choose a repository…</option>
-                      @for (r of repositories(); track r.id) {
-                        <option [ngValue]="r.id">{{ r.fullName }}{{ r.lastSeenTag ? ' (' + r.lastSeenTag + ')' : '' }}</option>
-                      }
-                    </select>
-                    @if (repositories().length === 0) {
-                      <span class="hint">Watch the repository on the Repositories page first.</span>
-                    }
-                  </div>
-                }
-                @if (f.latestSource === 'command') {
-                  <div class="field">
-                    <label for="app-latest">Latest version command</label>
-                    <input id="app-latest" class="input mono" [ngModel]="f.latestCommand" (ngModelChange)="setField('latestCommand', $event)" placeholder="curl -fsSL https://… | jq -r .version" autocomplete="off" spellcheck="false" />
-                    <span class="hint">Runs inside the container; the first output line is the version.</span>
-                  </div>
-                }
-                <div class="field">
-                  <label for="app-update">Update command <span class="optional">optional</span></label>
-                  <input id="app-update" class="input mono" [ngModel]="f.updateCommand" (ngModelChange)="setField('updateCommand', $event)" placeholder="update   or   cd /opt/app && ./pull.sh" autocomplete="off" spellcheck="false" />
-                </div>
-                <div class="form-row">
-                  <app-switch label="Use a terminal (TTY)" [checked]="f.useTty" (toggled)="setField('useTty', !f.useTty)" />
-                  <div class="field timeout-field">
-                    <label for="app-timeout">Timeout (s)</label>
-                    <input id="app-timeout" class="input" type="number" min="10" max="21600" [ngModel]="f.timeoutSeconds" (ngModelChange)="setField('timeoutSeconds', $event)" />
-                  </div>
-                </div>
-                <span class="hint">
-                  Enable the terminal for interactive scripts such as the community-scripts <code>update</code> command.
-                  Updates are only started manually.
-                </span>
-                @if (appError(); as e) {
-                  <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
-                }
-                <div class="app-form-actions">
-                  <button type="button" class="btn btn-ghost btn-sm" (click)="appForm.set(null)">Cancel</button>
-                  <button type="button" class="btn btn-sm" (click)="saveApp()" [disabled]="savingApp() || !f.name.trim()">
-                    {{ savingApp() ? 'Saving…' : f.id === null ? 'Add application' : 'Save application' }}
-                  </button>
-                </div>
-              </div>
+              @if (f.id === null) {
+                <ng-container *ngTemplateOutlet="appFormTemplate; context: { $implicit: f }" />
+              }
             } @else {
               @if (appError(); as e) {
                 <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
@@ -261,4 +208,69 @@
       </footer>
     </div>
   }
+  <ng-template #appFormTemplate let-f>
+    <div class="app-form" role="group" aria-label="Application">
+      <div class="field">
+        <label for="app-name">Name</label>
+        <input id="app-name" class="input" [ngModel]="f.name" (ngModelChange)="setField('name', $event)" placeholder="Vaultwarden" autocomplete="off" />
+      </div>
+      <div class="field">
+        <label for="app-version">Version command <span class="optional">optional</span></label>
+        <input id="app-version" class="input mono" [ngModel]="f.versionCommand" (ngModelChange)="setField('versionCommand', $event)" placeholder="cat /opt/vaultwarden_version.txt" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="field">
+        <label for="app-source">Latest version from</label>
+        <select id="app-source" class="input" [ngModel]="f.latestSource" (ngModelChange)="setField('latestSource', $event)">
+          <option value="none">Nothing (no comparison)</option>
+          <option value="github">A watched GitHub repository</option>
+          <option value="command">A command</option>
+        </select>
+      </div>
+      @if (f.latestSource === 'github') {
+        <div class="field">
+          <label for="app-repo">Repository</label>
+          <select id="app-repo" class="input" [ngModel]="f.repositoryId" (ngModelChange)="setField('repositoryId', $event)">
+            <option [ngValue]="null" disabled>Choose a repository…</option>
+            @for (r of repositories(); track r.id) {
+              <option [ngValue]="r.id">{{ r.fullName }}{{ r.lastSeenTag ? ' (' + r.lastSeenTag + ')' : '' }}</option>
+            }
+          </select>
+          @if (repositories().length === 0) {
+            <span class="hint">Watch the repository on the Repositories page first.</span>
+          }
+        </div>
+      }
+      @if (f.latestSource === 'command') {
+        <div class="field">
+          <label for="app-latest">Latest version command</label>
+          <input id="app-latest" class="input mono" [ngModel]="f.latestCommand" (ngModelChange)="setField('latestCommand', $event)" placeholder="curl -fsSL https://… | jq -r .version" autocomplete="off" spellcheck="false" />
+          <span class="hint">Runs inside the container; the first output line is the version.</span>
+        </div>
+      }
+      <div class="field">
+        <label for="app-update">Update command <span class="optional">optional</span></label>
+        <input id="app-update" class="input mono" [ngModel]="f.updateCommand" (ngModelChange)="setField('updateCommand', $event)" placeholder="update   or   cd /opt/app && ./pull.sh" autocomplete="off" spellcheck="false" />
+      </div>
+      <div class="form-row">
+        <app-switch label="Use a terminal (TTY)" [checked]="f.useTty" (toggled)="setField('useTty', !f.useTty)" />
+        <div class="field timeout-field">
+          <label for="app-timeout">Timeout (s)</label>
+          <input id="app-timeout" class="input" type="number" min="10" max="21600" [ngModel]="f.timeoutSeconds" (ngModelChange)="setField('timeoutSeconds', $event)" />
+        </div>
+      </div>
+      <span class="hint">
+        Enable the terminal for interactive scripts such as the community-scripts <code>update</code> command.
+        Updates are only started manually.
+      </span>
+      @if (appError(); as e) {
+        <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+      }
+      <div class="app-form-actions">
+        <button type="button" class="btn btn-ghost btn-sm" (click)="appForm.set(null)">Cancel</button>
+        <button type="button" class="btn btn-sm" (click)="saveApp()" [disabled]="savingApp() || !f.name.trim()">
+          {{ savingApp() ? 'Saving…' : f.id === null ? 'Add application' : 'Save application' }}
+        </button>
+      </div>
+    </div>
+  </ng-template>
 </dialog>

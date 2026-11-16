@@ -135,6 +135,36 @@ describe('ContainersPage', () => {
     expect(updateAll().disabled).toBe(true);
   });
 
+  it('updates everything in one container after a confirmation', async () => {
+    const single = container({ id: 4, vmid: 104, name: 'single', aptUpgradable: [], updatesAvailable: 1 });
+    const { fixture, el } = await create([container(), single]);
+    const rows = el.querySelectorAll<HTMLElement>('li.row');
+    const rowButton = (row: HTMLElement, text: string) =>
+      [...row.querySelectorAll<HTMLButtonElement>('.actions button')].find((b) => b.textContent?.includes(text));
+    // Only a container with more than one pending update gets the button.
+    expect(rowButton(rows[1]!, 'Update all')).toBeUndefined();
+
+    rowButton(rows[0]!, 'Update all (2)')!.click();
+    await settle(fixture);
+    expect(rows[0]!.querySelector('.actions')?.textContent).toContain('Run 2 update(s) one after another?');
+    expect(rows[0]!.querySelector<HTMLInputElement>('.actions .backup-check input')!.checked).toBe(true);
+    rows[0]!.querySelector<HTMLInputElement>('.actions .backup-check input')!.click();
+
+    rowButton(rows[0]!, 'Yes')!.click();
+    const request = http.expectOne('/api/containers/1/update-all');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ backup: false });
+    request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
+    await settle(fixture);
+    http.expectOne('/api/containers').flush([container({ isBusy: true }), single]);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+    await settle(fixture);
+    expect(el.querySelector('li.row')?.textContent).toContain('Working…');
+    expect(rowButton(el.querySelector<HTMLElement>('li.row')!, 'Update all')!.disabled).toBe(true);
+  });
+
   it('keeps polling while a container stays busy and stops afterwards', async () => {
     const { fixture } = await create([container()]);
     vi.useFakeTimers();

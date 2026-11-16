@@ -40,6 +40,11 @@
   &:last-child {
     border-bottom: none;
   }
+
+  // The application being edited shows the form in its place.
+  &.editing {
+    display: block;
+  }
 }
 
 .app-text {

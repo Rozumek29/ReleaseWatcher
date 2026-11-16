@@ -241,8 +241,8 @@ export class ContainerStore {
   listApps(containerId?: number): ContainerApp[] {
     const rows =
       containerId === undefined
-        ? this.db.query<AppRow, []>('SELECT * FROM container_apps ORDER BY container_id, id').all()
-        : this.db.query<AppRow, [number]>('SELECT * FROM container_apps WHERE container_id = ? ORDER BY id').all(containerId);
+        ? this.db.query<AppRow, []>('SELECT * FROM container_apps ORDER BY container_id, name COLLATE NOCASE, id').all()
+        : this.db.query<AppRow, [number]>('SELECT * FROM container_apps WHERE container_id = ? ORDER BY name COLLATE NOCASE, id').all(containerId);
     return rows.map(toApp);
   }
 

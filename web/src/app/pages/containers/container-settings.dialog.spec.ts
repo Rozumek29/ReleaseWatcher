@@ -133,6 +133,31 @@ describe('ContainerSettingsDialog', () => {
     expect(el.querySelector('.app-form')).toBeNull();
   });
 
+  it('edits an application in place and keeps the list sorted by name', async () => {
+    const base = container().apps[0]!;
+    const app = (id: number, name: string) => ({ ...base, id, name });
+    const { fixture, el } = await open(container({ apps: [app(1, 'Alpha'), app(2, 'Beta'), app(3, 'Gamma')] }));
+    const names = () => [...el.querySelectorAll('.app-row strong')].map((s) => s.textContent?.trim());
+
+    el.querySelector<HTMLButtonElement>('[aria-label="Edit Beta"]')!.click();
+    await settle(fixture);
+    const rows = [...el.querySelectorAll('.apps > .app-row')];
+    // The form replaces the edited row instead of appearing below the whole list.
+    expect(rows[1]!.classList).toContain('editing');
+    expect(rows[1]!.querySelector('.app-form')).not.toBeNull();
+    expect(el.querySelectorAll('.app-form').length).toBe(1);
+    expect(el.querySelector<HTMLInputElement>('#app-name')!.value).toBe('Beta');
+
+    type(el, '#app-name', 'Zeta');
+    [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
+    const request = http.expectOne('/api/containers/1/apps/2');
+    expect(request.request.body.name).toBe('Zeta');
+    request.flush(app(2, 'Zeta'));
+    await settle(fixture);
+    expect(el.querySelector('.app-form')).toBeNull();
+    expect(names()).toEqual(['Alpha', 'Gamma', 'Zeta']);
+  });
+
   it('shows validation errors of an application', async () => {
     const { fixture, el } = await open(container({ apps: [] }));
     [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Add application'))!.click();
