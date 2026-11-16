@@ -1,6 +1,8 @@
-import { timingSafeEqual } from 'node:crypto';
 import { stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
+import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
+import { AuthStore } from './auth/store.ts';
 import { ReleaseChecker } from './checker.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
@@ -89,8 +91,19 @@ export interface AppDeps {
   log?: Logger;
   /** Runs commands on the Proxmox node; defaults to an unconfigured shell (containers cannot be checked). */
   shell?: NodeShell;
-  /** When set, the UI and API (except /health) require these HTTP Basic credentials. */
-  basicAuth?: { username: string; password: string } | null;
+  /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
+  auth?: {
+    /** false turns the session check off – only for tests of other features. */
+    requireAuth?: boolean;
+    /** PUBLIC_URL: pins the origin and the WebAuthn RP ID (e.g. https://watcher.example.com). */
+    publicUrl?: string | null;
+    /** TRUST_PROXY: take the client IP from X-Forwarded-For (only behind a reverse proxy). */
+    trustProxy?: boolean;
+    /** Directory for the setup-code file (null = only logged). */
+    dataDir?: string | null;
+    /** Creates the account from these credentials when none exists (former BASIC_AUTH_*). */
+    bootstrap?: { username: string; password: string } | null;
+  };
 }
 
 const unconfiguredShell: NodeShell = {
@@ -105,6 +118,7 @@ export interface App {
   /** Created but not started – call `scheduler.start()`. */
   scheduler: ContainerScheduler;
   containers: ContainerService;
+  auth: AuthService;
   log: Logger;
   /** Starts the HTTP server (`port: 0` picks a free port). */
   listen(options: { port: number; hostname: string }): Bun.Server<undefined>;
@@ -259,6 +273,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   settings.onChange(() => poller.reschedule());
 
   const shell = deps.shell ?? unconfiguredShell;
+  const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
+  await auth.bootstrap(deps.auth?.bootstrap ?? null);
+  auth.ensureSetupCode();
   const containerStore = new ContainerStore(store.database);
   const interrupted = containerStore.failInterruptedRuns();
   if (interrupted > 0) {
@@ -475,37 +492,60 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return Response.json(settingsDto());
   };
 
-  // Optional HTTP Basic auth: the API can run commands as root on the Proxmox node.
-  const expectedAuth = deps.basicAuth
-    ? Buffer.from(`Basic ${Buffer.from(`${deps.basicAuth.username}:${deps.basicAuth.password}`).toString('base64')}`)
-    : null;
-  const authorized = (req: Request): boolean => {
-    if (!expectedAuth) {
+  // Login: every route except PUBLIC_ROUTES needs a session (the API can run commands as root on the node).
+  const requireAuth = deps.auth?.requireAuth ?? true;
+  const context = (req: Request, server: Bun.Server<undefined>) =>
+    requestContext(req, server.requestIP(req)?.address ?? null, {
+      publicUrl: deps.auth?.publicUrl ?? null,
+      trustProxy: deps.auth?.trustProxy ?? false,
+    });
+  const signedIn = (req: Request) => auth.sessionFromToken(sessionTokenFrom(req)) !== null;
+  /**
+   * CSRF defence on top of SameSite=Strict cookies: browsers send Origin with every state-changing request,
+   * and it must be this site. Requests without Origin (curl, scripts) carry no browser cookies anyway.
+   */
+  const sameOrigin = (req: Request): boolean => {
+    if (req.method === 'GET' || req.method === 'HEAD') {
       return true;
     }
-    const given = Buffer.from(req.headers.get('authorization') ?? '');
-    return given.length === expectedAuth.length && timingSafeEqual(given, expectedAuth);
+    const origin = req.headers.get('origin');
+    if (!origin) {
+      return true;
+    }
+    let originHost: string;
+    try {
+      originHost = new URL(origin).host;
+    } catch {
+      return false;
+    }
+    const hosts = [req.headers.get('x-forwarded-host')?.split(',')[0]?.trim(), req.headers.get('host'), new URL(req.url).host];
+    if (deps.auth?.publicUrl) {
+      hosts.push(new URL(deps.auth.publicUrl).host);
+    }
+    return hosts.includes(originHost);
   };
-  const unauthorized = () =>
-    new Response('Authentication required.', {
-      status: 401,
-      headers: { 'www-authenticate': 'Basic realm="ReleaseWatcher", charset="UTF-8"' },
-    });
-  /** Wraps every route handler with the auth check; /health stays public for container health checks. */
+  /** Wraps every route handler with the origin and session checks; /health stays public for health checks. */
   const protect = <R extends string>(routes: Bun.Serve.Routes<undefined, R>): Bun.Serve.Routes<undefined, R | '/health'> => {
     type AnyHandler = (req: Request, server: Bun.Server<undefined>) => Response | Promise<Response>;
     const guard =
-      (handler: AnyHandler): AnyHandler =>
-      (req, server) =>
-        authorized(req) ? handler(req, server) : unauthorized();
+      (path: string, handler: AnyHandler): AnyHandler =>
+      (req, server) => {
+        if (!sameOrigin(req)) {
+          return problem(403, 'Cross-site request refused.');
+        }
+        if (requireAuth && !PUBLIC_ROUTES.has(path) && !signedIn(req)) {
+          return problem(401, 'Sign in first.');
+        }
+        return handler(req, server);
+      };
     const wrapped: Record<string, unknown> = {};
     for (const [path, value] of Object.entries(routes)) {
       wrapped[path] =
         typeof value === 'function'
-          ? guard(value as AnyHandler)
+          ? guard(path, value as AnyHandler)
           : value && typeof value === 'object' && !(value instanceof Response) && !('dir' in value)
             ? Object.fromEntries(
-                Object.entries(value).map(([method, h]) => [method, typeof h === 'function' ? guard(h as AnyHandler) : h]),
+                Object.entries(value).map(([method, h]) => [method, typeof h === 'function' ? guard(path, h as AnyHandler) : h]),
               )
             : value;
     }
@@ -520,7 +560,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (ui && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
       return new Response(Bun.file((await ui.find(pathname)) ?? ui.index));
     }
-    return problem(404, 'Not found.');
+    return requireAuth && !signedIn(req) ? problem(401, 'Sign in first.') : problem(404, 'Not found.');
   };
 
   let server: Bun.Server<undefined> | null = null;
@@ -530,6 +570,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       port: options.port,
       hostname: options.hostname,
       routes: protect({
+        ...authRoutes({ auth, context }),
         ...containerRoutes({
           containers: containerStore,
           repositories: store,
@@ -612,7 +653,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           },
         },
       }),
-      fetch: (req) => (authorized(req) ? fallback(req) : unauthorized()),
+      fetch: fallback,
       error: (error) => {
         if (error instanceof RequestValidationError) {
           return validationProblem('request', error.message);
@@ -632,5 +673,5 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     await containers.idle();
   };
 
-  return { checker, poller, scheduler, containers, log, listen, close };
+  return { checker, poller, scheduler, containers, auth, log, listen, close };
 }

@@ -32,8 +32,12 @@ export interface Config {
     backupStorage: string | null;
     backupBeforeUpdate: boolean;
   };
-  /** Optional HTTP Basic auth for the UI and API (both must be set). */
+  /** Former Basic auth credentials – create the login account on the first start (migration). */
   basicAuth: { username: string; password: string } | null;
+  /** Public URL behind a reverse proxy (pins the origin / WebAuthn RP ID). */
+  publicUrl: string | null;
+  /** Trust X-Forwarded-For for the client IP (only behind a reverse proxy that sets it). */
+  trustProxy: boolean;
 }
 
 type Env = Record<string, string | undefined>;
@@ -75,6 +79,8 @@ export function loadConfig(env: Env = process.env): Config {
       backupBeforeUpdate: (str(env, 'BACKUP_BEFORE_UPDATE') ?? 'false').toLowerCase() === 'true',
     },
     basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
+    publicUrl: publicUrl(str(env, 'PUBLIC_URL')),
+    trustProxy: (str(env, 'TRUST_PROXY') ?? 'false').toLowerCase() === 'true',
   };
 }
 
@@ -101,4 +107,20 @@ function readKeyFile(path: string): string {
   } catch (error) {
     throw new Error(`Cannot read PROXMOX_SSH_KEY_FILE "${path}": ${error instanceof Error ? error.message : String(error)}`);
   }
+}
+
+function publicUrl(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error(`PUBLIC_URL must be a URL like https://watcher.example.com, got "${value}".`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new Error('PUBLIC_URL must use http(s).');
+  }
+  return url.origin;
 }

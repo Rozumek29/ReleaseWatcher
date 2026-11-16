@@ -144,6 +144,38 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE containers DROP COLUMN snapshot_before_update;`,
   // Per-repository GitHub token (overrides the global one).
   `ALTER TABLE watched_repositories ADD COLUMN github_token TEXT;`,
+  // Login: a single admin account with a password and optional passkeys, plus browser sessions.
+  `CREATE TABLE account (
+     id                  INTEGER PRIMARY KEY CHECK (id = 1),
+     username            TEXT NOT NULL,
+     password_hash       TEXT NOT NULL,
+     webauthn_user_id    TEXT NOT NULL,
+     created_at          TEXT NOT NULL,
+     password_changed_at TEXT NOT NULL
+   );
+
+   CREATE TABLE passkeys (
+     id           TEXT PRIMARY KEY,
+     public_key   BLOB NOT NULL,
+     counter      INTEGER NOT NULL DEFAULT 0,
+     transports   TEXT,
+     device_type  TEXT,
+     backed_up    INTEGER NOT NULL DEFAULT 0,
+     name         TEXT NOT NULL,
+     created_at   TEXT NOT NULL,
+     last_used_at TEXT
+   );
+
+   CREATE TABLE sessions (
+     id           TEXT PRIMARY KEY,
+     method       TEXT NOT NULL,
+     user_agent   TEXT,
+     ip           TEXT,
+     created_at   TEXT NOT NULL,
+     last_seen_at TEXT NOT NULL,
+     expires_at   TEXT NOT NULL
+   );
+   CREATE INDEX idx_sessions_expires ON sessions (expires_at);`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */

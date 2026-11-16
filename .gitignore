@@ -27,3 +27,6 @@ known_hosts
 # Compiled server executable (bun run compile)
 /dist/
 /.compile/
+
+# Bun cache created by some local setups
+.bun-cache/

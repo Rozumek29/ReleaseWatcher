@@ -42,6 +42,7 @@ describe('HTTP API', () => {
       source,
       notifiers: [notifier],
       log: silentLogger,
+      auth: { requireAuth: false },
       fetchInstalledVersion: async (url, _field, headers) => {
         lastHeaders = headers;
         if (url.includes('down')) {
@@ -326,7 +327,8 @@ describe('UI hosting', () => {
   it('falls back to index.html for client-side routes but not for the API', async () => {
     assert.equal(await (await get('/')).text(), '<app-root></app-root>');
     assert.equal(await (await get('/settings')).text(), '<app-root></app-root>');
-    assert.equal((await get('/api/nope')).status, 404);
+    // The UI is public, the API is not: without a session unknown API paths are 401, not the SPA.
+    assert.equal((await get('/api/nope')).status, 401);
   });
 
   it('never serves files outside the UI directory', async () => {
@@ -360,7 +362,7 @@ describe('UI embedded in a compiled executable', () => {
       assert.equal(await js.text(), 'console.log(1);');
       assert.match(js.headers.get('content-type') ?? '', /javascript/);
       assert.equal(await (await fetch(new URL('/repositories', baseUrl))).text(), '<app-root></app-root>');
-      assert.equal((await fetch(new URL('/api/nope', baseUrl))).status, 404);
+      assert.equal((await fetch(new URL('/api/nope', baseUrl))).status, 401);
     } finally {
       await app.close();
       rmSync(dir, { recursive: true, force: true });

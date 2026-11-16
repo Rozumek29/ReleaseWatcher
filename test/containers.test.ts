@@ -18,7 +18,6 @@ describe('containers API', () => {
   let source: FakeSource;
   let notifier: RecordingNotifier;
   let baseUrl: URL;
-  let auth: { username: string; password: string } | null = null;
 
   const request = async (method: string, url: string, payload?: unknown, headers: Record<string, string> = {}) => {
     const response = await fetch(new URL(url, baseUrl), {
@@ -44,7 +43,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, basicAuth: auth });
+    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, auth: { requireAuth: false } });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
@@ -71,6 +70,7 @@ describe('containers API', () => {
       'idx_container_runs_container',
       'idx_container_runs_running',
       'idx_containers_enabled',
+      'idx_sessions_expires',
       'idx_watched_repositories_enabled',
     ]);
   });
@@ -322,24 +322,4 @@ describe('containers API', () => {
     assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);
   });
 
-  describe('with basic auth', () => {
-    beforeEach(async () => {
-      await app.close();
-      auth = { username: 'admin', password: 'secret' };
-      const settings = new SettingsService(store, loadConfig({}));
-      app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, basicAuth: auth });
-      baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
-      auth = null;
-    });
-
-    it('requires credentials except for /health', async () => {
-      assert.equal((await request('GET', '/api/containers')).status, 401);
-      assert.equal((await request('GET', '/does-not-exist')).status, 401);
-      assert.equal((await request('GET', '/health')).status, 200);
-      const ok = await request('GET', '/api/containers', undefined, {
-        authorization: `Basic ${btoa('admin:secret')}`,
-      });
-      assert.equal(ok.status, 200);
-    });
-  });
 });

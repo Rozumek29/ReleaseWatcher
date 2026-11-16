@@ -8,6 +8,8 @@ export type Schema =
   | { type: 'boolean'; nullable?: boolean }
   | { type: 'number' | 'integer'; nullable?: boolean; minimum?: number }
   | { type: 'array'; nullable?: boolean; maxItems?: number; items: Schema }
+  /** Any JSON object, passed through unchanged (e.g. WebAuthn responses validated by their own library). */
+  | { type: 'json'; nullable?: boolean }
   | ObjectSchema;
 
 export interface ObjectSchema {
@@ -55,6 +57,8 @@ export function validate(value: unknown, schema: Schema, path: string): unknown 
         return fail(`must NOT have more than ${schema.maxItems} items`);
       }
       return value.map((item, i) => validate(item, schema.items, `${path}/${i}`));
+    case 'json':
+      return isPlainObject(value) ? value : fail('must be object');
     case 'object': {
       if (!isPlainObject(value)) return fail('must be object');
       for (const key of schema.required ?? []) {
