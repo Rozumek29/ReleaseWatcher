@@ -102,8 +102,10 @@
                   next {{ c.nextCheckAt | relativeTime: now() }}
                 </span>
               }
-              @if (c.snapshotBeforeUpdate) {
-                <span class="meta-item">snapshot before updates</span>
+              @if (c.effectiveBackupBeforeUpdate && backupStorage()) {
+                <span class="meta-item" title="A vzdump backup is made before updates (can be changed per update)">
+                  backup before updates
+                </span>
               }
             </div>
           </div>
@@ -155,10 +157,19 @@
                 <div class="item-actions">
                   @if (confirming() === 'apt-' + c.id) {
                     <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
-                    <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
+                    <label class="backup-check" [class.disabled]="!backupStorage()">
+                    <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                    Backup first
+                    @if (backupStorage(); as storage) {
+                      <span class="muted mono">→ {{ storage }}</span>
+                    } @else {
+                      <span class="muted">(choose a storage in Settings)</span>
+                    }
+                  </label>
+                  <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                   } @else {
-                    <button type="button" class="btn btn-sm btn-secondary" (click)="confirming.set('apt-' + c.id)" [disabled]="isBusy(c) || !configured()">
+                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured()">
                       <app-icon name="arrowUp" [size]="14" /> Upgrade
                     </button>
                   }
@@ -201,6 +212,15 @@
               <div class="item-actions">
                 @if (confirming() === 'app-' + c.id + '-' + a.id) {
                   <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
+                  <label class="backup-check" [class.disabled]="!backupStorage()">
+                    <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                    Backup first
+                    @if (backupStorage(); as storage) {
+                      <span class="muted mono">→ {{ storage }}</span>
+                    } @else {
+                      <span class="muted">(choose a storage in Settings)</span>
+                    }
+                  </label>
                   <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
                   <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                 } @else if (a.updateCommand && a.updateAvailable !== false) {
@@ -209,7 +229,7 @@
                     type="button"
                     class="btn btn-sm"
                     [class.btn-secondary]="!a.updateAvailable"
-                    (click)="confirming.set('app-' + c.id + '-' + a.id)"
+                    (click)="ask('app-' + c.id + '-' + a.id, c)"
                     [disabled]="isBusy(c) || !configured()"
                     [title]="'Run: ' + a.updateCommand"
                   >
@@ -237,6 +257,8 @@
 <app-container-settings-dialog
   [container]="editing()"
   [globalCron]="globalCron()"
+  [globalBackup]="settings()?.proxmox?.backupBeforeUpdate ?? false"
+  [backupStorage]="backupStorage()"
   (saved)="onSettingsSaved($event)"
   (closed)="onSettingsClosed()"
 />

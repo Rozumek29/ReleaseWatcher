@@ -41,6 +41,10 @@ describe('ContainerSettingsDialog', () => {
 
     expect(el.querySelector<HTMLInputElement>('#ct-cron')!.placeholder).toContain('0 */6 * * *');
     type(el, '#ct-cron', '30 4 * * *');
+    const backup = el.querySelector<HTMLSelectElement>('#ct-backup')!;
+    expect(backup.value).toBe('default');
+    backup.value = 'no';
+    backup.dispatchEvent(new Event('change'));
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
 
     const request = http.expectOne('/api/containers/1');
@@ -49,7 +53,7 @@ describe('ContainerSettingsDialog', () => {
       name: 'vaultwarden',
       isEnabled: true,
       aptEnabled: true,
-      snapshotBeforeUpdate: false,
+      backupBeforeUpdate: false,
       checkCron: '30 4 * * *',
     });
     request.flush(container({ checkCron: '30 4 * * *' }));

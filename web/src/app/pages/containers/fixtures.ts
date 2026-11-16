@@ -19,6 +19,10 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
+    backupStorage: 'pbs',
+    backupStorageSource: 'ui',
+    backupBeforeUpdate: true,
+    backupBeforeUpdateSource: 'ui',
   },
 });
 
@@ -28,7 +32,8 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   name: 'vaultwarden',
   isEnabled: true,
   aptEnabled: true,
-  snapshotBeforeUpdate: false,
+  backupBeforeUpdate: null,
+  effectiveBackupBeforeUpdate: true,
   checkCron: null,
   nextCheckAt: '2030-01-01T06:00:00Z',
   status: 'running',

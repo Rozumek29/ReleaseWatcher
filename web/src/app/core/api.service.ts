@@ -5,6 +5,7 @@ import {
   AddRepositoryRequest,
   AppSettings,
   AppStatus,
+  BackupStorage,
   CheckResult,
   Container,
   ContainerApp,
@@ -100,6 +101,10 @@ export class ApiService {
     return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers`);
   }
 
+  getBackupStorages(): Observable<BackupStorage[]> {
+    return this.http.get<BackupStorage[]>(`${this.baseUrl}/proxmox/storages`);
+  }
+
   getContainers(): Observable<Container[]> {
     return this.http.get<Container[]>(`${this.baseUrl}/containers`);
   }
@@ -128,8 +133,9 @@ export class ApiService {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/check`, {});
   }
 
-  upgradeApt(id: number): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, {});
+  /** `backup` decides about a backup (vzdump) before this update. */
+  upgradeApt(id: number, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });
   }
 
   addContainerApp(containerId: number, request: ContainerAppRequest): Observable<ContainerApp> {
@@ -151,8 +157,11 @@ export class ApiService {
     return this.http.delete<void>(`${this.baseUrl}/containers/${containerId}/apps/${appId}`);
   }
 
-  updateApp(containerId: number, appId: number): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${containerId}/apps/${appId}/update`, {});
+  /** `backup` decides about a backup (vzdump) before this update. */
+  updateApp(containerId: number, appId: number, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${containerId}/apps/${appId}/update`, {
+      backup,
+    });
   }
 
   getContainerRuns(containerId: number): Observable<RunSummary[]> {

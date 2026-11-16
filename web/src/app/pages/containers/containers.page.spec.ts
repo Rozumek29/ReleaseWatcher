@@ -74,10 +74,16 @@ describe('ContainersPage', () => {
     await settle(fixture);
     http.expectNone('/api/containers/1/apt-upgrade');
     expect(el.textContent).toContain('Upgrade 2 package(s)?');
+    // "Backup first" starts with the container's default and can be changed for this update.
+    const backup = el.querySelector<HTMLInputElement>('.backup-check input')!;
+    expect(backup.checked).toBe(true);
+    expect(el.querySelector('.backup-check')?.textContent).toContain('→ pbs');
+    backup.click();
 
     [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
     const request = http.expectOne('/api/containers/1/apt-upgrade');
     expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ backup: false });
     request.flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
       statusText: 'Accepted',

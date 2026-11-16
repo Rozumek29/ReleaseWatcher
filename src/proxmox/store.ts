@@ -7,7 +7,7 @@ interface ContainerRow {
   name: string;
   is_enabled: number;
   apt_enabled: number;
-  snapshot_before_update: number;
+  backup_before_update: number | null;
   check_cron: string | null;
   status: string | null;
   apt_upgradable: string | null;
@@ -66,7 +66,7 @@ const toContainer = (r: ContainerRow): Container => ({
   name: r.name,
   isEnabled: r.is_enabled === 1,
   aptEnabled: r.apt_enabled === 1,
-  snapshotBeforeUpdate: r.snapshot_before_update === 1,
+  backupBeforeUpdate: r.backup_before_update === null ? null : r.backup_before_update === 1,
   checkCron: r.check_cron,
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
@@ -152,7 +152,7 @@ export class ContainerStore {
     this.db
       .query(
         `UPDATE containers SET
-           name = ?, is_enabled = ?, apt_enabled = ?, snapshot_before_update = ?, check_cron = ?, status = ?,
+           name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, check_cron = ?, status = ?,
            apt_upgradable = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
@@ -160,7 +160,7 @@ export class ContainerStore {
         c.name,
         c.isEnabled ? 1 : 0,
         c.aptEnabled ? 1 : 0,
-        c.snapshotBeforeUpdate ? 1 : 0,
+        c.backupBeforeUpdate === null ? null : c.backupBeforeUpdate ? 1 : 0,
         c.checkCron,
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,

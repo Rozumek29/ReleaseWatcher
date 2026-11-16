@@ -23,6 +23,10 @@ const settings: AppSettings = {
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
+    backupStorage: 'pbs',
+    backupStorageSource: 'ui',
+    backupBeforeUpdate: true,
+    backupBeforeUpdateSource: 'ui',
   },
 };
 
@@ -73,10 +77,28 @@ describe('SettingsPage', () => {
     http.expectOne('/api/settings').flush(settings);
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
+    http.expectOne('/api/proxmox/storages').flush([
+      { name: 'local', type: 'dir', status: 'active', availableBytes: 50 * 1024 ** 3 },
+      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 2 * 1024 ** 4 },
+      { name: 'nas', type: 'cifs', status: 'inactive', availableBytes: 0 },
+    ]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
     const section = el.querySelector<HTMLElement>('section[aria-labelledby=proxmox-title]')!;
+    const storage = section.querySelector<HTMLSelectElement>('#pve-backup-storage')!;
+    expect([...storage.options].map((o) => o.textContent?.trim())).toEqual([
+      '– none (no backups before updates) –',
+      'local (dir, 50 GB free)',
+      'pbs (pbs, 2.0 TB free)',
+      'nas (cifs, inactive)',
+    ]);
+    expect(storage.value).toBe('pbs');
+    storage.value = 'local';
+    storage.dispatchEvent(new Event('change'));
+    [...section.querySelectorAll<HTMLElement>('app-switch button, app-switch [role=switch]')]
+      .find((b) => b.closest('app-switch')?.textContent?.includes('Back up before updates'))!
+      .click();
     expect(section.querySelector<HTMLInputElement>('#pve-host')!.value).toBe('pve.lan');
     expect(section.querySelector<HTMLTextAreaElement>('#pve-key')!.value).toBe('');
     expect(section.textContent).toContain('Configured (saved here)');
@@ -97,6 +119,8 @@ describe('SettingsPage', () => {
       proxmoxUser: 'root',
       containerCheckCron: '0 3 * * *',
       containerCheckConcurrency: 5,
+      backupStorage: 'local',
+      backupBeforeUpdate: false,
     });
     save.flush(settings);
     await settle(fixture);

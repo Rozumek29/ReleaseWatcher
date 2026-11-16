@@ -2,7 +2,7 @@ import type { RepositoryStore } from '../db.ts';
 import { fullName } from '../domain.ts';
 import { errorMessage, problem, validationProblem } from '../http.ts';
 import { validateCron } from '../cron.ts';
-import { type ObjectSchema, parseId, readBody } from '../validation.ts';
+import { type ObjectSchema, parseId, readBody, RequestValidationError, validate } from '../validation.ts';
 import {
   appUpdateAvailable,
   type Container,
@@ -24,6 +24,8 @@ export interface ContainerRoutesDeps {
   repositories: RepositoryStore;
   service: ContainerService;
   scheduler: ContainerScheduler;
+  /** Global backup settings: storage for backups and whether to back up before updates by default. */
+  backupDefaults: () => { storage: string | null; enabled: boolean };
 }
 
 const COMMAND_MAX_LENGTH = 4000;
@@ -40,11 +42,31 @@ const updateContainerSchema: ObjectSchema = {
     name: { type: 'string', maxLength: 100 },
     isEnabled: { type: 'boolean' },
     aptEnabled: { type: 'boolean' },
-    snapshotBeforeUpdate: { type: 'boolean' },
+    backupBeforeUpdate: { type: 'boolean', nullable: true },
     checkCron: { type: 'string', nullable: true, maxLength: 200 },
   },
-  required: ['name', 'isEnabled', 'aptEnabled', 'snapshotBeforeUpdate'],
+  required: ['name', 'isEnabled', 'aptEnabled'],
 };
+
+/** Optional body of the update endpoints: `backup` overrides the container/global default for this update. */
+const updateOptionsSchema: ObjectSchema = {
+  type: 'object',
+  properties: { backup: { type: 'boolean', nullable: true } },
+};
+
+async function readUpdateOptions(req: Request): Promise<{ backup?: boolean | null }> {
+  const text = await req.text();
+  if (!text.trim()) {
+    return {};
+  }
+  let json: unknown;
+  try {
+    json = JSON.parse(text);
+  } catch {
+    throw new RequestValidationError('body must be valid JSON');
+  }
+  return validate(json, updateOptionsSchema, 'body') as { backup?: boolean | null };
+}
 
 const appSchema: ObjectSchema = {
   type: 'object',
@@ -124,7 +146,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       name: c.name,
       isEnabled: c.isEnabled,
       aptEnabled: c.aptEnabled,
-      snapshotBeforeUpdate: c.snapshotBeforeUpdate,
+      backupBeforeUpdate: c.backupBeforeUpdate,
+      /** Whether updates back up first unless changed for a single update. */
+      effectiveBackupBeforeUpdate: c.backupBeforeUpdate ?? deps.backupDefaults().enabled,
       checkCron: c.checkCron,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
@@ -183,6 +207,16 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     };
   };
 
+  /** Storage to back up to before an update (null = no backup), or a problem response. */
+  const resolveBackup = (container: Container, requested: boolean | null | undefined): string | null | Response => {
+    const defaults = deps.backupDefaults();
+    const enabled = requested ?? container.backupBeforeUpdate ?? defaults.enabled;
+    if (!enabled) {
+      return null;
+    }
+    return defaults.storage ?? problem(409, 'Choose a backup storage in Settings → Proxmox node, or update without a backup.');
+  };
+
   const accepted = (run: Run) => Response.json(runDto(run), { status: 202, headers: { location: `/api/runs/${run.id}` } });
 
   return {
@@ -207,6 +241,19 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
+          }
+        }),
+    },
+
+    // Storages on the node that accept backups (`pvesm status --content backup`).
+    '/api/proxmox/storages': {
+      GET: () =>
+        guard(async () => {
+          try {
+            return Response.json(await service.backupStorages());
+          } catch (error) {
+            if (error instanceof ShellNotConfiguredError) throw error;
+            return problem(502, 'Listing storages failed.', { detail: errorMessage(error) });
           }
         }),
     },
@@ -261,7 +308,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           name: string;
           isEnabled: boolean;
           aptEnabled: boolean;
-          snapshotBeforeUpdate: boolean;
+          backupBeforeUpdate?: boolean | null;
           checkCron?: string | null;
         }>(req, updateContainerSchema);
         if (!container) {
@@ -280,7 +327,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           name,
           isEnabled: body.isEnabled,
           aptEnabled: body.aptEnabled,
-          snapshotBeforeUpdate: body.snapshotBeforeUpdate,
+          backupBeforeUpdate: body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
           checkCron,
         });
         if (!container.aptEnabled) {
@@ -310,7 +357,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     '/api/containers/:id/apt-upgrade': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/apt-upgrade'>) =>
-        guard(() => {
+        guard(async () => {
+          const options = await readUpdateOptions(req);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
@@ -318,7 +366,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container.aptEnabled) {
             return problem(409, 'apt is disabled for this container.');
           }
-          return accepted(service.startAptUpgrade(container));
+          const backup = resolveBackup(container, options.backup);
+          return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
         }),
     },
     '/api/containers/:id/runs': {
@@ -378,7 +427,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     '/api/containers/:id/apps/:appId/update': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/update'>) =>
-        guard(() => {
+        guard(async () => {
+          const options = await readUpdateOptions(req);
           const container = findContainer(req.params.id);
           const app = container ? containers.getApp(container.id, parseId(req.params.appId, 'params/appId')) : null;
           if (!container || !app) {
@@ -387,7 +437,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!app.updateCommand) {
             return problem(409, `No update command is configured for ${app.name}.`);
           }
-          return accepted(service.startAppUpdate(container, app));
+          const backup = resolveBackup(container, options.backup);
+          return backup instanceof Response ? backup : accepted(service.startAppUpdate(container, app, backup));
         }),
     },
     '/api/runs/:id': {

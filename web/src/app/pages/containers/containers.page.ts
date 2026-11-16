@@ -64,6 +64,9 @@ export class ContainersPage {
 
   protected readonly available = computed(() => this.discovered().filter((c) => !c.added));
   protected readonly globalCron = computed(() => this.settings()?.proxmox.checkCron ?? '');
+  protected readonly backupStorage = computed(() => this.settings()?.proxmox.backupStorage ?? null);
+  /** "Backup first" checkbox of the open update confirmation. */
+  protected readonly backupFirst = signal(false);
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
 
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -168,14 +171,22 @@ export class ContainersPage {
     return this.startRun(container, () => this.api.checkContainer(container.id));
   }
 
+  /** Opens an update confirmation; "Backup first" starts with the container's default. */
+  protected ask(key: string, container: Container): void {
+    this.backupFirst.set(container.effectiveBackupBeforeUpdate && this.backupStorage() !== null);
+    this.confirming.set(key);
+  }
+
   protected upgradeApt(container: Container): Promise<void> {
     this.confirming.set(null);
-    return this.startRun(container, () => this.api.upgradeApt(container.id));
+    const backup = this.backupFirst();
+    return this.startRun(container, () => this.api.upgradeApt(container.id, backup));
   }
 
   protected updateApp(container: Container, app: ContainerApp): Promise<void> {
     this.confirming.set(null);
-    return this.startRun(container, () => this.api.updateApp(container.id, app.id));
+    const backup = this.backupFirst();
+    return this.startRun(container, () => this.api.updateApp(container.id, app.id, backup));
   }
 
   protected async remove(container: Container): Promise<void> {

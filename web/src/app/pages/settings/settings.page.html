@@ -343,6 +343,43 @@
           </span>
         </div>
 
+        <div class="field">
+          <label for="pve-backup-storage">Backup storage</label>
+          <div class="storage-row">
+            <select id="pve-backup-storage" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
+              <option value="">– none (no backups before updates) –</option>
+              @if (backupStorage && !isListed(backupStorage)) {
+                <option [value]="backupStorage">{{ backupStorage }}</option>
+              }
+              @for (st of storages() ?? []; track st.name) {
+                <option [value]="st.name" [disabled]="st.status !== 'active'">{{ storageLabel(st) }}</option>
+              }
+            </select>
+            <button type="button" class="btn btn-ghost btn-sm" (click)="loadStorages()" [disabled]="loadingStorages() || !s.proxmox.configured">
+              <app-icon name="refresh" [size]="14" /> {{ loadingStorages() ? 'Loading…' : 'Reload' }}
+            </button>
+          </div>
+          @if (errors()['backupStorage']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          @if (storagesError(); as e) {
+            <span class="error">Could not list storages: {{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.proxmox.backupStorageSource) }}. Storages of the node that accept backups. Backups are made
+            with <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
+            to the storage's retention (prune) settings.
+          </span>
+        </div>
+
+        <div class="field">
+          <app-switch label="Back up before updates by default" [checked]="backupDefault" (toggled)="backupDefault = !backupDefault" />
+          <span class="hint">
+            {{ sourceLabel(s.proxmox.backupBeforeUpdateSource) }}. Containers can override it, and every update
+            confirmation has a "Backup first" checkbox. A failed backup stops the update.
+          </span>
+        </div>
+
         @if (nodeTest(); as t) {
           <pre class="node-test" [class.failed]="!t.ok" aria-label="Connection test result">{{ t.text }}</pre>
         }

@@ -184,6 +184,8 @@ const settingsSchema: ObjectSchema = {
     proxmoxSshKey: { type: 'string', nullable: true, maxLength: 20_000 },
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckConcurrency: { type: 'integer', nullable: true },
+    backupStorage: { type: 'string', nullable: true, maxLength: 100 },
+    backupBeforeUpdate: { type: 'boolean', nullable: true },
   },
 };
 
@@ -299,6 +301,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         checkConcurrencySource: settings.sourceOf('containerCheckConcurrency'),
         minCheckConcurrency: MIN_CHECK_CONCURRENCY,
         maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
+        backupStorage: current.backupStorage,
+        backupStorageSource: settings.sourceOf('backupStorage'),
+        backupBeforeUpdate: current.backupBeforeUpdate,
+        backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
       },
     };
   };
@@ -496,7 +502,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       port: options.port,
       hostname: options.hostname,
       routes: protect({
-        ...containerRoutes({ containers: containerStore, repositories: store, service: containers, scheduler }),
+        ...containerRoutes({
+          containers: containerStore,
+          repositories: store,
+          service: containers,
+          scheduler,
+          backupDefaults: () => ({ storage: settings.current.backupStorage, enabled: settings.current.backupBeforeUpdate }),
+        }),
 
         '/api/repositories': {
           GET: () => Response.json(store.list().map(toDto)),

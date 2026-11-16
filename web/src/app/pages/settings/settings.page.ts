@@ -3,11 +3,12 @@ import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, RateLimit, SettingSource, SettingsPatch } from '../../core/models';
+import { AppSettings, BackupStorage, RateLimit, SettingSource, SettingsPatch } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { Switch } from '../../shared/switch';
 
 type Section = 'discord' | 'github' | 'polling' | 'proxmox';
 
@@ -15,7 +16,7 @@ const INTERVAL_PRESETS = [5, 15, 30, 60, 180, 360, 1440];
 
 @Component({
   selector: 'app-settings-page',
-  imports: [FormsModule, DecimalPipe, Icon, RelativeTimePipe],
+  imports: [FormsModule, DecimalPipe, Icon, RelativeTimePipe, Switch],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',
 })
@@ -35,6 +36,9 @@ export class SettingsPage implements OnInit {
   protected readonly showToken = signal(false);
   protected readonly testingNode = signal(false);
   protected readonly nodeTest = signal<{ ok: boolean; text: string } | null>(null);
+  protected readonly storages = signal<BackupStorage[] | null>(null);
+  protected readonly storagesError = signal<string | null>(null);
+  protected readonly loadingStorages = signal(false);
 
   // Form state. Secrets start empty: an empty field on save means "keep the current value".
   protected webhookUrl = '';
@@ -48,6 +52,8 @@ export class SettingsPage implements OnInit {
   protected sshKey = '';
   protected checkCron = '';
   protected checkConcurrency: number | null = 3;
+  protected backupStorage = '';
+  protected backupDefault = false;
 
   protected readonly presets = INTERVAL_PRESETS;
 
@@ -59,6 +65,9 @@ export class SettingsPage implements OnInit {
   async ngOnInit(): Promise<void> {
     try {
       this.apply(await firstValueFrom(this.api.getSettings()));
+      if (this.settings()?.proxmox.configured) {
+        void this.loadStorages();
+      }
     } catch (error) {
       this.toast.error(error);
     }
@@ -112,6 +121,8 @@ export class SettingsPage implements OnInit {
       proxmoxUser: this.proxmoxUser.trim() || null,
       containerCheckCron: this.checkCron.trim() || null,
       containerCheckConcurrency: concurrency,
+      backupStorage: this.backupStorage.trim() || null,
+      backupBeforeUpdate: this.backupDefault,
     };
     // The key is never shown; an empty field keeps the saved one.
     if (this.sshKey.trim()) {
@@ -121,6 +132,34 @@ export class SettingsPage implements OnInit {
       this.nodeTest.set(null);
       void this.statusService.refresh();
     }
+  }
+
+  /** Lists the node's storages that accept backups. */
+  protected async loadStorages(): Promise<void> {
+    this.loadingStorages.set(true);
+    this.storagesError.set(null);
+    try {
+      this.storages.set(await firstValueFrom(this.api.getBackupStorages()));
+    } catch (error) {
+      this.storagesError.set(describeError(error));
+    } finally {
+      this.loadingStorages.set(false);
+    }
+  }
+
+  protected isListed(name: string): boolean {
+    return (this.storages() ?? []).some((st) => st.name === name);
+  }
+
+  protected storageLabel(st: BackupStorage): string {
+    const details = [st.type];
+    if (st.availableBytes !== null && st.status === 'active') {
+      details.push(`${formatBytes(st.availableBytes)} free`);
+    }
+    if (st.status !== 'active') {
+      details.push(st.status);
+    }
+    return `${st.name} (${details.join(', ')})`;
   }
 
   protected async resetSshKey(): Promise<void> {
@@ -222,5 +261,18 @@ export class SettingsPage implements OnInit {
     this.sshKey = '';
     this.checkCron = settings.proxmox.checkCron;
     this.checkConcurrency = settings.proxmox.checkConcurrency;
+    this.backupStorage = settings.proxmox.backupStorage ?? '';
+    this.backupDefault = settings.proxmox.backupBeforeUpdate;
   }
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }

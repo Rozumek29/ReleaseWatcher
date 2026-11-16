@@ -22,7 +22,24 @@
           <div class="switches">
             <app-switch label="Active (scheduled checks)" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
             <app-switch label="apt packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
-            <app-switch label="Snapshot before updates" [checked]="snapshotBeforeUpdate" (toggled)="snapshotBeforeUpdate = !snapshotBeforeUpdate" />
+          </div>
+
+          <div class="field">
+            <label for="ct-backup">Backup before updates</label>
+            <select id="ct-backup" class="input" name="backupChoice" [(ngModel)]="backupChoice">
+              <option value="default">Use default ({{ globalBackup() ? 'yes' : 'no' }})</option>
+              <option value="yes">Yes – back up first</option>
+              <option value="no">No</option>
+            </select>
+            <span class="hint">
+              A vzdump backup to
+              @if (backupStorage(); as storage) {
+                <code>{{ storage }}</code>
+              } @else {
+                the backup storage (not chosen yet – see Settings)
+              }
+              before apt upgrades and application updates. You can still change it for every single update.
+            </span>
           </div>
 
           <div class="field">

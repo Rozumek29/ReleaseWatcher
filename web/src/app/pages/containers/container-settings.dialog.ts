@@ -64,6 +64,9 @@ export class ContainerSettingsDialog {
   readonly container = input<Container | null>(null);
   /** Global check schedule, shown as the placeholder of the override. */
   readonly globalCron = input('');
+  /** Global "back up before updates" default and the backup storage, shown in the backup choice. */
+  readonly globalBackup = input(false);
+  readonly backupStorage = input<string | null>(null);
   readonly saved = output<Container>();
   readonly closed = output<void>();
 
@@ -72,7 +75,8 @@ export class ContainerSettingsDialog {
   protected name = '';
   protected isEnabled = true;
   protected aptEnabled = true;
-  protected snapshotBeforeUpdate = false;
+  /** 'default' = follow the global setting. */
+  protected backupChoice: 'default' | 'yes' | 'no' = 'default';
   protected checkCron = '';
 
   protected readonly apps = signal<ContainerApp[]>([]);
@@ -94,7 +98,8 @@ export class ContainerSettingsDialog {
           this.name = container.name;
           this.isEnabled = container.isEnabled;
           this.aptEnabled = container.aptEnabled;
-          this.snapshotBeforeUpdate = container.snapshotBeforeUpdate;
+          this.backupChoice =
+            container.backupBeforeUpdate === null ? 'default' : container.backupBeforeUpdate ? 'yes' : 'no';
           this.checkCron = container.checkCron ?? '';
           this.apps.set(container.apps);
           this.appForm.set(null);
@@ -125,7 +130,7 @@ export class ContainerSettingsDialog {
           name: this.name.trim(),
           isEnabled: this.isEnabled,
           aptEnabled: this.aptEnabled,
-          snapshotBeforeUpdate: this.snapshotBeforeUpdate,
+          backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
         }),
       );

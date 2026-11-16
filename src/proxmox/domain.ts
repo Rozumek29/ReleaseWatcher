@@ -10,8 +10,8 @@ export interface Container {
   isEnabled: boolean;
   /** Check (and allow upgrading) apt packages. */
   aptEnabled: boolean;
-  /** Take a `pct snapshot` before every update. */
-  snapshotBeforeUpdate: boolean;
+  /** Back up (vzdump) before updates by default; null = use the global setting. */
+  backupBeforeUpdate: boolean | null;
   /** Cron expression overriding the global check schedule; null = use the global one. */
   checkCron: string | null;
   /** Last status reported by `pct status` (running, stopped, …). */
@@ -96,10 +96,43 @@ export const shQuote = (value: string): string => `'${value.replaceAll("'", `'\\
 /** Command run on the node that executes `script` inside a container. */
 export const pctExec = (vmid: number, script: string): string => `pct exec ${vmid} -- sh -lc ${shQuote(script)}`;
 
-/** Proxmox snapshot name (letters, digits, `-`, `_`; must start with a letter). */
-export function snapshotName(date: Date): string {
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `rw-${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+/** Proxmox storage ID (`pvesm` naming rules). */
+export const STORAGE_ID_PATTERN = /^[A-Za-z][A-Za-z0-9_.-]{0,99}$/;
+
+/** A storage on the node that accepts backups (`pvesm status --content backup`). */
+export interface BackupStorage {
+  name: string;
+  type: string;
+  status: string;
+  /** Free space in bytes, when reported. */
+  availableBytes: number | null;
+}
+
+/** Parses `pvesm status` (Name, Type, Status, Total, Used, Available in KiB, %). */
+export function parsePvesmStatus(output: string): BackupStorage[] {
+  const storages: BackupStorage[] = [];
+  for (const line of output.split('\n')) {
+    const [name, type, status, , , available] = line.trim().split(/\s+/);
+    if (!name || !type || !status || name === 'Name' || !STORAGE_ID_PATTERN.test(name)) {
+      continue;
+    }
+    const kib = Number(available);
+    storages.push({ name, type, status, availableBytes: Number.isFinite(kib) && available ? kib * 1024 : null });
+  }
+  return storages;
+}
+
+/**
+ * Node command backing up a container with vzdump (snapshot mode – vzdump falls back to suspend mode when the
+ * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
+ * Retention follows the prune settings of the storage.
+ */
+export function vzdumpCommand(vmid: number, storage: string, note: string): string {
+  const id = shQuote(storage);
+  return [
+    `if pvesm status --storage ${id} 2>/dev/null | awk 'NR > 1 { print $2 }' | grep -qx pbs; then compress=''; else compress='--compress zstd'; fi`,
+    `vzdump ${vmid} --storage ${id} --mode snapshot $compress --notes-template ${shQuote(note)}`,
+  ].join('\n');
 }
 
 export interface DiscoveredContainer {

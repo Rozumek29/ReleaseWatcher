@@ -29,6 +29,8 @@ export interface Config {
     knownHostsFile: string;
     checkCron: string;
     checkConcurrency: number;
+    backupStorage: string | null;
+    backupBeforeUpdate: boolean;
   };
   /** Optional HTTP Basic auth for the UI and API (both must be set). */
   basicAuth: { username: string; password: string } | null;
@@ -69,6 +71,8 @@ export function loadConfig(env: Env = process.env): Config {
         join(databasePath === ':memory:' ? '.' : dirname(databasePath), 'known_hosts'),
       checkCron: str(env, 'CONTAINER_CHECK_CRON') ?? '0 */6 * * *',
       checkConcurrency: Math.min(10, Math.max(1, int(env, 'CONTAINER_CHECK_CONCURRENCY', 3))),
+      backupStorage: str(env, 'PROXMOX_BACKUP_STORAGE'),
+      backupBeforeUpdate: (str(env, 'BACKUP_BEFORE_UPDATE') ?? 'false').toLowerCase() === 'true',
     },
     basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
   };

@@ -152,6 +152,25 @@
   }
 }
 
+.backup-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+
+  input {
+    margin: 0;
+    accent-color: var(--accent);
+  }
+
+  &.disabled {
+    cursor: default;
+    opacity: 0.75;
+  }
+}
+
 .error-line {
   display: flex;
   gap: 6px;

@@ -279,3 +279,14 @@
     gap: 0.3rem;
   }
 }
+
+.storage-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+
+  select {
+    flex: 1;
+    min-width: 0;
+  }
+}

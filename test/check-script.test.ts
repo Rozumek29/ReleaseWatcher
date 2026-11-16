@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { buildCheckScript, cleanOutput, newCheckToken, parseCheckOutput, type CheckStep } from '../src/proxmox/domain.ts';
+import { buildCheckScript, cleanOutput, newCheckToken, parseCheckOutput, vzdumpCommand, type CheckStep } from '../src/proxmox/domain.ts';
 
 /**
  * Runs the generated node command in a real POSIX shell with a stub `pct` (no Proxmox, no network):
@@ -49,6 +49,32 @@ describe('batched check script', () => {
     const result = parseCheckOutput(output, token);
     assert.deepEqual(result.status, { exitCode: 0, output: 'status: stopped' });
     assert.equal(result.steps.size, 0);
+  });
+
+  it('backs up with zstd, except on Proxmox Backup Server', async () => {
+    const run = async (storage: string) => {
+      const stub = [
+        'pvesm() {',
+        '  echo "Name Type Status Total Used Available %"',
+        '  case "$3" in pbs) echo "pbs pbs active 1 1 1 1%" ;; *) echo "$3 dir active 1 1 1 1%" ;; esac',
+        '}',
+        'vzdump() { printf "vzdump"; printf " [%s]" "$@"; echo; }',
+      ].join('\n');
+      const proc = Bun.spawn(['sh', '-c', `${stub}\n${vzdumpCommand(101, storage, "before it's updated")}`], {
+        stdout: 'pipe',
+      });
+      const out = await new Response(proc.stdout).text();
+      await proc.exited;
+      return out.trim();
+    };
+    assert.equal(
+      await run('local'),
+      "vzdump [101] [--storage] [local] [--mode] [snapshot] [--compress] [zstd] [--notes-template] [before it's updated]",
+    );
+    assert.equal(
+      await run('pbs'),
+      "vzdump [101] [--storage] [pbs] [--mode] [snapshot] [--notes-template] [before it's updated]",
+    );
   });
 
   it('ignores markers with a different token', () => {

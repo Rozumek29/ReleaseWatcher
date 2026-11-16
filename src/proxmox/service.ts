@@ -17,13 +17,14 @@ import {
   parseAptUpgradable,
   parsePctList,
   parsePctStatus,
+  parsePvesmStatus,
+  type BackupStorage,
+  vzdumpCommand,
   pctExec,
   pendingSignature,
   type Run,
   type RunKind,
   type RunTrigger,
-  shQuote,
-  snapshotName,
 } from './domain.ts';
 import { type CommandResult, describeSshFailure, type NodeShell } from './ssh.ts';
 import type { ContainerStore } from './store.ts';
@@ -45,7 +46,7 @@ const NODE_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
 const APT_UPGRADE_TIMEOUT_MS = 60 * 60_000;
-const SNAPSHOT_TIMEOUT_MS = 10 * 60_000;
+const BACKUP_TIMEOUT_MS = 4 * 60 * 60_000;
 /** Output kept per run (the tail is preserved). */
 const MAX_OUTPUT_LENGTH = 256 * 1024;
 const OUTPUT_FLUSH_MS = 1000;
@@ -168,22 +169,24 @@ export class ContainerService {
     });
   }
 
-  startAptUpgrade(container: Container): Run {
+  /** @param backupStorage back up to this storage first (null = no backup) */
+  startAptUpgrade(container: Container, backupStorage: string | null): Run {
     return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
-      await this.snapshotIfEnabled(container, log, 'apt upgrade');
+      await this.backupFirst(container, backupStorage, log, 'apt upgrade');
       log.note(`apt-get update && apt-get upgrade in CT ${container.vmid}`);
       const result = await this.exec(container.vmid, APT_UPGRADE_SCRIPT, log, { timeoutMs: APT_UPGRADE_TIMEOUT_MS });
       return this.finishUpdate(container, log, result);
     });
   }
 
-  startAppUpdate(container: Container, app: ContainerApp): Run {
+  /** @param backupStorage back up to this storage first (null = no backup) */
+  startAppUpdate(container: Container, app: ContainerApp, backupStorage: string | null): Run {
     if (!app.updateCommand) {
       throw new Error(`No update command is configured for ${app.name}.`);
     }
     const command = app.updateCommand;
     return this.start(container, app.id, 'app-update', 'manual', async (log) => {
-      await this.snapshotIfEnabled(container, log, app.name);
+      await this.backupFirst(container, backupStorage, log, `update of ${app.name}`);
       log.note(`Updating ${app.name}: ${command}`);
       const result = await this.exec(container.vmid, command, log, {
         timeoutMs: app.timeoutSeconds * 1000,
@@ -256,19 +259,30 @@ export class ContainerService {
     return { ok, exitCode: result.exitCode };
   }
 
-  private async snapshotIfEnabled(container: Container, log: RunLog, reason: string): Promise<void> {
-    if (!container.snapshotBeforeUpdate) {
+  /** Lists storages on the node that accept backups. */
+  async backupStorages(): Promise<BackupStorage[]> {
+    const result = await this.deps.shell.run('pvesm status --content backup', { timeoutMs: NODE_TIMEOUT_MS });
+    if (result.exitCode !== 0) {
+      throw new Error(describeSshFailure(result));
+    }
+    return parsePvesmStatus(result.output);
+  }
+
+  /** Backs the container up with vzdump; a failed backup aborts the update. */
+  private async backupFirst(container: Container, storage: string | null, log: RunLog, reason: string): Promise<void> {
+    if (!storage) {
+      log.note('No backup before this update');
       return;
     }
-    const name = snapshotName(this.now());
-    log.note(`Creating snapshot ${name}`);
+    log.note(`Backing up CT ${container.vmid} to storage "${storage}" (vzdump)`);
     const result = await this.deps.shell.run(
-      `pct snapshot ${container.vmid} ${name} --description ${shQuote(`ReleaseWatcher: before ${reason}`)}`,
-      { timeoutMs: SNAPSHOT_TIMEOUT_MS, onOutput: (chunk) => log.write(chunk) },
+      vzdumpCommand(container.vmid, storage, `ReleaseWatcher: before ${reason} (${this.now().toISOString()})`),
+      { timeoutMs: BACKUP_TIMEOUT_MS, onOutput: (chunk) => log.write(chunk) },
     );
     if (result.exitCode !== 0) {
-      throw new Error(`Snapshot failed – update not started. ${describeSshFailure(result)}`);
+      throw new Error(`Backup failed – update not started. ${describeSshFailure(result)}`);
     }
+    log.note('Backup finished');
   }
 
   /**

@@ -1,5 +1,6 @@
 import type { Config } from './config.ts';
 import { validateCron } from './cron.ts';
+import { STORAGE_ID_PATTERN } from './proxmox/domain.ts';
 import type { RepositoryStore } from './db.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
@@ -18,6 +19,10 @@ export interface Settings {
   containerCheckCron: string;
   /** How many containers are checked at the same time. */
   containerCheckConcurrency: number;
+  /** Storage that receives backups made before updates. */
+  backupStorage: string | null;
+  /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
+  backupBeforeUpdate: boolean;
 }
 
 export const MIN_CHECK_CONCURRENCY = 1;
@@ -62,6 +67,8 @@ export class SettingsService {
       proxmoxSshKey: config.proxmox.privateKey,
       containerCheckCron: config.proxmox.checkCron,
       containerCheckConcurrency: config.proxmox.checkConcurrency,
+      backupStorage: config.proxmox.backupStorage,
+      backupBeforeUpdate: config.proxmox.backupBeforeUpdate,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
@@ -83,6 +90,9 @@ export class SettingsService {
         o.containerCheckConcurrency !== undefined
           ? Number(o.containerCheckConcurrency)
           : this.defaults.containerCheckConcurrency,
+      backupStorage: o.backupStorage ?? this.defaults.backupStorage,
+      backupBeforeUpdate:
+        o.backupBeforeUpdate !== undefined ? o.backupBeforeUpdate === 'true' : this.defaults.backupBeforeUpdate,
     };
   }
 
@@ -190,6 +200,16 @@ function validate(key: SettingKey, value: string): void {
       }
       if (/Proc-Type:\s*4,ENCRYPTED/.test(value)) {
         throw new SettingsValidationError(key, 'Keys protected with a passphrase are not supported.');
+      }
+      return;
+    case 'backupStorage':
+      if (!STORAGE_ID_PATTERN.test(value)) {
+        throw new SettingsValidationError(key, 'Enter a Proxmox storage ID, e.g. "local" or "pbs".');
+      }
+      return;
+    case 'backupBeforeUpdate':
+      if (value !== 'true' && value !== 'false') {
+        throw new SettingsValidationError(key, 'Must be true or false.');
       }
       return;
     case 'containerCheckConcurrency': {

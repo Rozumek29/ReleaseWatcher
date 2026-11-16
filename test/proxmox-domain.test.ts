@@ -9,7 +9,7 @@ import {
   parsePctList,
   parsePctStatus,
   pctExec,
-  snapshotName,
+  parsePvesmStatus,
 } from '../src/proxmox/domain.ts';
 import { SshShell } from '../src/proxmox/ssh.ts';
 
@@ -65,8 +65,18 @@ describe('proxmox domain', () => {
     assert.equal(firstLine('  \n'), null);
   });
 
-  it('builds valid snapshot names', () => {
-    assert.match(snapshotName(new Date(2026, 10, 16, 9, 5, 7)), /^rw-20261116-090507$/);
+  it('parses storages from pvesm status', () => {
+    const output = [
+      'Name             Type     Status           Total            Used       Available        %',
+      'local             dir     active        98497780        12345678        86152102   12.53%',
+      'pbs               pbs     active      1000000000       100000000       900000000   10.00%',
+      'nas              cifs   inactive               0               0               0    0.00%',
+    ].join('\n');
+    assert.deepEqual(parsePvesmStatus(output), [
+      { name: 'local', type: 'dir', status: 'active', availableBytes: 86152102 * 1024 },
+      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 900000000 * 1024 },
+      { name: 'nas', type: 'cifs', status: 'inactive', availableBytes: 0 },
+    ]);
   });
 
   it('only allows public-key SSH authentication', () => {

@@ -103,7 +103,21 @@ export interface AppSettings {
     checkConcurrencySource: SettingSource;
     minCheckConcurrency: number;
     maxCheckConcurrency: number;
+    /** Storage that receives backups (vzdump) made before updates. */
+    backupStorage: string | null;
+    backupStorageSource: SettingSource;
+    /** Back up before updates by default (containers can override, every update can change it). */
+    backupBeforeUpdate: boolean;
+    backupBeforeUpdateSource: SettingSource;
   };
+}
+
+/** A storage on the node that accepts backups. */
+export interface BackupStorage {
+  name: string;
+  type: string;
+  status: string;
+  availableBytes: number | null;
 }
 
 /** `undefined` keeps a value, `null` resets it to the environment default. */
@@ -119,6 +133,8 @@ export interface SettingsPatch {
   proxmoxSshKey?: string | null;
   containerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
+  backupStorage?: string | null;
+  backupBeforeUpdate?: boolean | null;
 }
 
 export interface AppStatus {
@@ -185,7 +201,10 @@ export interface Container {
   name: string;
   isEnabled: boolean;
   aptEnabled: boolean;
-  snapshotBeforeUpdate: boolean;
+  /** Back up before updates; null = use the global default. */
+  backupBeforeUpdate: boolean | null;
+  /** The value in effect for this container (own setting or the global default). */
+  effectiveBackupBeforeUpdate: boolean;
   /** Overrides the global schedule; null = global. */
   checkCron: string | null;
   nextCheckAt: string | null;
@@ -205,7 +224,7 @@ export interface UpdateContainerRequest {
   name: string;
   isEnabled: boolean;
   aptEnabled: boolean;
-  snapshotBeforeUpdate: boolean;
+  backupBeforeUpdate: boolean | null;
   checkCron: string | null;
 }
 

@@ -29,8 +29,12 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
 2. On the **Containers** page add containers found on the node (`pct list`). Commands run inside a container with
    `pct exec <vmid> -- sh -lc '…'`, so containers need no SSH server of their own.
 3. Per container you can enable the **apt** check (`apt-get update` + `apt list --upgradable`; upgrade =
-   `apt-get -y upgrade`, keeping existing config files), take a **snapshot before every update** (`pct snapshot`;
-   snapshots are not removed automatically) and override the global check schedule with a cron expression.
+   `apt-get -y upgrade`, keeping existing config files) and override the global check schedule with a cron
+   expression.
+   **Backups before updates:** choose a backup storage in Settings (listed from the node – e.g. a Proxmox Backup
+   Server or `local`) and whether to back up by default; a container can override the default, and every update
+   confirmation has a **Backup first** checkbox. The backup is a `vzdump` in snapshot mode (zstd, except on PBS),
+   retention follows the storage's prune settings, and a failed backup stops the update.
 4. Each container can have **applications**:
    - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
    - *latest version* – the newest release of a watched GitHub repository, a command, or none,
@@ -172,6 +176,8 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
 | `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default container check schedule (5-field cron, `@daily`, …). |
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | How many containers are checked at the same time (1–10). |
+| `PROXMOX_BACKUP_STORAGE` | – | Storage for backups (`vzdump`) made before updates. |
+| `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default (containers and single updates can change it). |
 | `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | When both are set, the UI and API (except `/health`) require HTTP Basic auth. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
@@ -196,16 +202,17 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
+| `GET` | `/api/proxmox/storages` | Storages that accept backups (`pvesm status --content backup`) |
 | `GET` | `/api/containers` | Added containers with their applications and pending updates |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "snapshotBeforeUpdate", "checkCron"?: "0 3 * * *" \| null }` |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "checkCron"?: "0 3 * * *" \| null }` – `null` = global default |
 | `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
-| `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run |
+| `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
-| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run |
+| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run; optional `{ "backup": true \| false }` |
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
 | `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`) |
 | `GET` | `/health` | Liveness |

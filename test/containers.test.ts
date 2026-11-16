@@ -38,7 +38,7 @@ describe('containers API', () => {
       .on(/apt list --upgradable/, { output: APT_OUTPUT })
       .on(/cat \/opt\/vw_version/, { output: '1.30.0\n' })
       .on(/pveversion/, { output: 'pve-manager/9.1.1\n' })
-      .on(/^pct snapshot /, { output: '' });
+      .on(/vzdump/, { output: 'INFO: Backup job finished successfully\n' });
     source = new FakeSource();
     source.releases = [release('v1.32.0', 1)];
     notifier = new RecordingNotifier();
@@ -141,10 +141,9 @@ describe('containers API', () => {
     return new ContainerStore(store.database).get(id)!;
   };
 
-  it('runs apt upgrade with a snapshot and refreshes the state', async () => {
+  it('runs apt upgrade after a backup and refreshes the state', async () => {
     const container = await addContainer();
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
-    await request('PUT', `/api/containers/${container.id}`, { ...dto, snapshotBeforeUpdate: true });
+    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
     shell.commands.length = 0;
     shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
     const upgrade = Promise.withResolvers<{ output: string }>();
@@ -159,9 +158,65 @@ describe('containers API', () => {
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
-    assert.match(shell.commands[0]!, /^pct snapshot 101 rw-\d{8}-\d{6} --description/);
+    assert.match(shell.commands[0]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
     assert.ok(shell.commands[1]!.includes('apt-get -y'));
     assert.deepEqual((await request('GET', `/api/containers/${container.id}`)).json().aptUpgradable, []);
+    assert.match(run?.output ?? '', /Backing up CT 101 to storage "pbs"/);
+  });
+
+  it('chooses whether to back up: per update, per container, then the global default', async () => {
+    const container = await addContainer();
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.backupBeforeUpdate, null);
+    assert.equal(dto.effectiveBackupBeforeUpdate, false);
+    const upgrade = async (body?: unknown) => {
+      shell.commands.length = 0;
+      const response = await request('POST', `/api/containers/${container.id}/apt-upgrade`, body);
+      if (response.status === 202) {
+        await app.containers.wait(container.id);
+      }
+      return { status: response.status, backedUp: shell.commands.some((c) => c.includes('vzdump')) };
+    };
+
+    // Global default off → no backup; asking for one without a storage is refused.
+    assert.deepEqual(await upgrade(), { status: 202, backedUp: false });
+    assert.equal((await upgrade({ backup: true })).status, 409);
+
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    assert.deepEqual(await upgrade(), { status: 202, backedUp: true });
+    assert.deepEqual(await upgrade({ backup: false }), { status: 202, backedUp: false });
+
+    // The container overrides the global default; a single update overrides the container.
+    const updated = await request('PUT', `/api/containers/${container.id}`, { ...dto, backupBeforeUpdate: false });
+    assert.equal(updated.json().effectiveBackupBeforeUpdate, false);
+    assert.deepEqual(await upgrade(), { status: 202, backedUp: false });
+    assert.deepEqual(await upgrade({ backup: true }), { status: 202, backedUp: true });
+  });
+
+  it('aborts the update when the backup fails', async () => {
+    const container = await addContainer();
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    shell.on(/vzdump/, { exitCode: 255, output: 'ERROR: Backup of VM 101 failed - no space left\n' });
+    shell.commands.length = 0;
+
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`);
+    const run = await app.containers.wait(container.id);
+    assert.equal(run?.status, 'failed');
+    assert.match(run?.output ?? '', /Backup failed – update not started/);
+    assert.equal(shell.commands.some((c) => c.includes('apt-get -y')), false);
+  });
+
+  it('lists backup storages and validates the backup settings', async () => {
+    shell.on(/^pvesm status --content backup$/, {
+      output: 'Name Type Status Total Used Available %\nlocal dir active 100 10 90 10%\n',
+    });
+    assert.deepEqual((await request('GET', '/api/proxmox/storages')).json(), [
+      { name: 'local', type: 'dir', status: 'active', availableBytes: 90 * 1024 },
+    ]);
+    assert.equal((await request('PUT', '/api/settings', { backupStorage: 'bad name' })).status, 400);
+    const saved = (await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true })).json();
+    assert.equal(saved.proxmox.backupStorage, 'pbs');
+    assert.equal(saved.proxmox.backupBeforeUpdate, true);
   });
 
   it('runs an application update and marks failures', async () => {

@@ -136,6 +136,10 @@ const MIGRATIONS: readonly string[] = [
    CREATE INDEX idx_container_runs_container ON container_runs (container_id, id DESC);
    CREATE INDEX idx_container_runs_app ON container_runs (app_id) WHERE app_id IS NOT NULL;
    CREATE INDEX idx_container_runs_running ON container_runs (status) WHERE status = 'running';`,
+  // Snapshots replaced by vzdump backups; NULL = use the global default.
+  `ALTER TABLE containers ADD COLUMN backup_before_update INTEGER;
+   UPDATE containers SET backup_before_update = 1 WHERE snapshot_before_update = 1;
+   ALTER TABLE containers DROP COLUMN snapshot_before_update;`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
