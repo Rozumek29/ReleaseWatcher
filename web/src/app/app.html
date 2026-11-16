@@ -93,6 +93,20 @@
         <app-icon name="logout" [size]="16" />
       </button>
     </section>
+
+    <footer class="sidebar-foot">
+      <span class="version mono">{{ version() }}</span>
+      <a
+        class="icon-btn"
+        [href]="repositoryUrl"
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label="ReleaseWatcher on GitHub"
+        title="ReleaseWatcher on GitHub"
+      >
+        <app-icon name="github" [size]="16" />
+      </a>
+    </footer>
   </aside>
 
   <main class="content">

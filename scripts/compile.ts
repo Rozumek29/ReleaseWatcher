@@ -1,8 +1,9 @@
 // Compiles the server and the built UI into a single self-contained executable (Bun runtime included,
 // nothing else needed on the target machine). Build the UI first (`bun run build`).
 //
-// Usage: bun scripts/compile.ts [--target=bun-linux-x64] [--outfile=dist/releasewatcher]
+// Usage: bun scripts/compile.ts [--target=bun-linux-x64] [--outfile=dist/releasewatcher] [--version=1.2.3]
 //   --target   any `bun build --compile` target; defaults to the current platform.
+//   --version  version shown in the UI (a leading `v` is dropped); defaults to package.json.
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -32,7 +33,11 @@ async function writeEntry(dir: string): Promise<string> {
   return entry;
 }
 
-export async function compile(options: { outfile: string; target?: string | undefined }): Promise<void> {
+export async function compile(options: {
+  outfile: string;
+  target?: string | undefined;
+  version?: string | undefined;
+}): Promise<void> {
   if (!existsSync(join(root, 'public', 'index.html'))) {
     console.error('public/index.html is missing, run `bun run build` first.');
     process.exit(1);
@@ -54,6 +59,10 @@ export async function compile(options: { outfile: string; target?: string | unde
       '--bytecode',
       `--outfile=${options.outfile}`,
       ...(options.target ? [`--target=${options.target}`] : []),
+      // Read by src/app-version.ts.
+      ...(options.version
+        ? ['--define', `process.env.RELEASEWATCHER_VERSION=${JSON.stringify(options.version.replace(/^v/, ''))}`]
+        : []),
     ];
     const result = Bun.spawnSync([process.execPath, ...args], { cwd: root, stdio: ['inherit', 'inherit', 'inherit'] });
     if (result.exitCode !== 0) {
@@ -70,5 +79,9 @@ export async function compile(options: { outfile: string; target?: string | unde
 
 if (import.meta.main) {
   const option = (name: string) => process.argv.find((arg) => arg.startsWith(`--${name}=`))?.slice(name.length + 3);
-  await compile({ outfile: option('outfile') ?? 'dist/releasewatcher', target: option('target') });
+  await compile({
+    outfile: option('outfile') ?? 'dist/releasewatcher',
+    target: option('target'),
+    version: option('version'),
+  });
 }

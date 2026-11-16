@@ -1,5 +1,6 @@
 // Bun loads `.env` from the working directory automatically; variables already set in the environment win.
 import { dirname, join, resolve } from 'node:path';
+import { APP_VERSION } from './app-version.ts';
 import { buildApp } from './app.ts';
 import { AuthStore } from './auth/store.ts';
 import { loadConfig } from './config.ts';
@@ -9,11 +10,20 @@ import { GitHubReleaseSource } from './github.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
 import { SshShell } from './proxmox/ssh.ts';
+import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 
 const config = loadConfig();
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
-const store = new RepositoryStore(config.databasePath);
+const dataDir = config.databasePath === ':memory:' ? null : dirname(resolve(config.databasePath));
+const secrets = loadSecretBox({ key: config.encryptionKey, dataDir });
+if (secrets.source === 'created') {
+  log.warn(
+    { file: join(dataDir!, KEY_FILE_NAME) },
+    'Created a new encryption key for secrets in the database – back it up together with the database',
+  );
+}
+const store = new RepositoryStore(config.databasePath, secrets.box);
 
 // Emergency reset when the password is forgotten and no passkey is at hand: removes the account (data stays),
 // the next visit of the UI shows the setup screen with a new setup code.
@@ -46,7 +56,7 @@ const app = await buildApp({
   auth: {
     publicUrl: config.publicUrl,
     trustProxy: config.trustProxy,
-    dataDir: config.databasePath === ':memory:' ? null : dirname(resolve(config.databasePath)),
+    dataDir,
     bootstrap: config.basicAuth,
   },
   // A compiled executable carries the UI inside (see scripts/compile.ts); from source it is read from disk.
@@ -72,6 +82,7 @@ if (!config.publicUrl && !config.trustProxy) {
 }
 log.info(
   {
+    version: APP_VERSION,
     url: server.url.href,
     intervalMinutes: settings.current.pollIntervalMinutes,
     notifiers: notifiers.filter((n) => n.isEnabled).map((n) => n.name),

@@ -6,6 +6,8 @@ export interface Config {
   port: number;
   host: string;
   databasePath: string;
+  /** Key for secrets stored in the database (base64/hex, 32 bytes); null = key file next to the database. */
+  encryptionKey: string | null;
   pollIntervalMs: number;
   initialDelayMs: number;
   github: {
@@ -51,6 +53,7 @@ export function loadConfig(env: Env = process.env): Config {
     port: int(env, 'PORT', 8080),
     host: str(env, 'HOST') ?? '0.0.0.0',
     databasePath,
+    encryptionKey: str(env, 'ENCRYPTION_KEY'),
     pollIntervalMs: int(env, 'POLL_INTERVAL_MINUTES', 15) * 60_000,
     initialDelayMs: int(env, 'POLL_INITIAL_DELAY_SECONDS', 10) * 1000,
     github: {

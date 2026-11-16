@@ -32,6 +32,14 @@ export class App {
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
 
+  /** Source code and releases of ReleaseWatcher itself. */
+  protected readonly repositoryUrl = 'https://github.com/Rozumek29/ReleaseWatcher';
+  /** Running version from the status ("v1.2.3"; pre-release tags like "beta-1.2.3" stay as they are). */
+  protected readonly version = computed(() => {
+    const version = this.statusService.status()?.version;
+    return version ? (/^\d/.test(version) ? `v${version}` : version) : '';
+  });
+
   protected readonly sidebarOpen = signal(false);
   /** Ticks every 30 s so relative times ("in 5 minutes") stay current. */
   protected readonly now = signal(Date.now());

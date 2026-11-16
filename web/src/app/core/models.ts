@@ -145,6 +145,8 @@ export interface SettingsPatch {
 }
 
 export interface AppStatus {
+  /** Version of the running server, e.g. "1.2.3". */
+  version: string;
   poller: {
     intervalMinutes: number;
     isRunning: boolean;

@@ -1,5 +1,13 @@
 import { Database } from 'bun:sqlite';
 import type { WatchedRepository } from './domain.ts';
+import { SecretBox, SecretDecryptionError } from './secret-box.ts';
+
+/** Settings whose values are secrets and are stored encrypted. */
+export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set(['discordWebhookUrl', 'githubToken', 'proxmoxSshKey']);
+
+/** Known plain text stored encrypted in `app_meta` to detect a wrong encryption key at startup. */
+const KEY_CHECK_NAME = 'secretsKeyCheck';
+const KEY_CHECK_VALUE = 'releasewatcher';
 
 interface Row {
   id: number;
@@ -22,7 +30,7 @@ interface Row {
   github_token: string | null;
 }
 
-const toEntity = (r: Row): WatchedRepository => ({
+const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   id: r.id,
   owner: r.owner,
   name: r.name,
@@ -36,11 +44,11 @@ const toEntity = (r: Row): WatchedRepository => ({
   createdAt: r.created_at,
   installedVersionUrl: r.installed_version_url,
   installedVersionField: r.installed_version_field,
-  installedVersionHeaders: parseHeaders(r.installed_version_headers),
+  installedVersionHeaders: parseHeaders(secrets.decryptNullable(r.installed_version_headers)),
   installedVersion: r.installed_version,
   installedVersionCheckedAt: r.installed_version_checked_at,
   installedVersionError: r.installed_version_error,
-  githubToken: r.github_token,
+  githubToken: secrets.decryptNullable(r.github_token),
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -176,17 +184,37 @@ const MIGRATIONS: readonly string[] = [
      expires_at   TEXT NOT NULL
    );
    CREATE INDEX idx_sessions_expires ON sessions (expires_at);`,
+  // Internal values of the app itself (e.g. the encryption key check); never exposed through the API.
+  `CREATE TABLE app_meta (
+     key   TEXT PRIMARY KEY,
+     value TEXT NOT NULL
+   );`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
   private readonly db: Database;
+  private readonly secrets: SecretBox;
 
-  constructor(path: string) {
+  /**
+   * `secrets` encrypts tokens, keys and header values. It may be omitted only for an in-memory database (tests):
+   * a file encrypted with a random key would lose its secrets on the next start.
+   */
+  constructor(path: string, secrets?: SecretBox) {
+    if (!secrets && path !== ':memory:') {
+      throw new Error('RepositoryStore needs the encryption key (SecretBox) for a database file.');
+    }
     this.db = new Database(path);
+    this.secrets = secrets ?? SecretBox.ephemeral();
     this.db.run('PRAGMA journal_mode = WAL');
     this.db.run('PRAGMA foreign_keys = ON');
-    this.migrate();
+    try {
+      this.migrate();
+      this.encryptSecrets();
+    } catch (error) {
+      this.db.close();
+      throw error;
+    }
   }
 
   /** The shared connection (used by other stores such as `ContainerStore`). */
@@ -195,16 +223,16 @@ export class RepositoryStore {
   }
 
   list(): WatchedRepository[] {
-    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY owner, name').all().map(toEntity);
+    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY owner, name').all().map((r) => toEntity(r, this.secrets));
   }
 
   listEnabled(): WatchedRepository[] {
-    return this.db.query<Row, []>('SELECT * FROM watched_repositories WHERE is_enabled = 1 ORDER BY id').all().map(toEntity);
+    return this.db.query<Row, []>('SELECT * FROM watched_repositories WHERE is_enabled = 1 ORDER BY id').all().map((r) => toEntity(r, this.secrets));
   }
 
   get(id: number): WatchedRepository | null {
     const row = this.db.query<Row, [number]>('SELECT * FROM watched_repositories WHERE id = ?').get(id);
-    return row ? toEntity(row) : null;
+    return row ? toEntity(row, this.secrets) : null;
   }
 
   /** Case-insensitive lookup (columns use NOCASE collation). */
@@ -240,11 +268,11 @@ export class RepositoryStore {
         repo.lastError,
         repo.installedVersionUrl,
         repo.installedVersionField,
-        repo.installedVersionHeaders.length > 0 ? JSON.stringify(repo.installedVersionHeaders) : null,
+        repo.installedVersionHeaders.length > 0 ? this.secrets.encrypt(JSON.stringify(repo.installedVersionHeaders)) : null,
         repo.installedVersion,
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
-        repo.githubToken,
+        this.secrets.encryptNullable(repo.githubToken),
         repo.id,
       );
   }
@@ -256,7 +284,9 @@ export class RepositoryStore {
   /** Returns all persisted settings as raw key/value pairs. */
   readSettings(): Record<string, string> {
     const rows = this.db.query<{ key: string; value: string }, []>('SELECT key, value FROM settings').all();
-    return Object.fromEntries(rows.map((r) => [r.key, r.value]));
+    return Object.fromEntries(
+      rows.map((r) => [r.key, SECRET_SETTING_KEYS.has(r.key) ? this.secrets.decrypt(r.value) : r.value]),
+    );
   }
 
   /** Upserts a setting; null removes it (the environment default applies again). */
@@ -266,12 +296,69 @@ export class RepositoryStore {
     } else {
       this.db
         .query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
-        .run(key, value);
+        .run(key, SECRET_SETTING_KEYS.has(key) ? this.secrets.encrypt(value) : value);
     }
   }
 
   close(): void {
     this.db.close();
+  }
+
+  /**
+   * Verifies the encryption key against the database and encrypts secrets still stored as plain text (written
+   * before encryption existed). Fails loudly on a wrong key instead of silently losing the secrets.
+   */
+  private encryptSecrets(): void {
+    const check = this.db
+      .query<{ value: string }, [string]>('SELECT value FROM app_meta WHERE key = ?')
+      .get(KEY_CHECK_NAME)?.value;
+    if (check !== undefined) {
+      let matches = false;
+      try {
+        matches = this.secrets.decrypt(check) === KEY_CHECK_VALUE;
+      } catch (error) {
+        if (!(error instanceof SecretDecryptionError)) {
+          throw error;
+        }
+      }
+      if (!matches) {
+        throw new Error(
+          'The encryption key does not match this database. Restore the original ENCRYPTION_KEY or the ' +
+            'encryption.key file next to the database – secrets saved with another key cannot be read.',
+        );
+      }
+    }
+
+    const plain = (value: string | null): value is string => value !== null && !SecretBox.isEncrypted(value);
+    this.db.transaction(() => {
+      const repos = this.db
+        .query<Pick<Row, 'id' | 'github_token' | 'installed_version_headers'>, []>(
+          'SELECT id, github_token, installed_version_headers FROM watched_repositories',
+        )
+        .all();
+      for (const r of repos) {
+        if (plain(r.github_token) || plain(r.installed_version_headers)) {
+          this.db
+            .query('UPDATE watched_repositories SET github_token = ?, installed_version_headers = ? WHERE id = ?')
+            .run(
+              plain(r.github_token) ? this.secrets.encrypt(r.github_token) : r.github_token,
+              plain(r.installed_version_headers) ? this.secrets.encrypt(r.installed_version_headers) : r.installed_version_headers,
+              r.id,
+            );
+        }
+      }
+      for (const key of SECRET_SETTING_KEYS) {
+        const row = this.db.query<{ value: string }, [string]>('SELECT value FROM settings WHERE key = ?').get(key);
+        if (row && plain(row.value)) {
+          this.db.query('UPDATE settings SET value = ? WHERE key = ?').run(this.secrets.encrypt(row.value), key);
+        }
+      }
+      if (check === undefined) {
+        this.db
+          .query('INSERT INTO app_meta (key, value) VALUES (?, ?)')
+          .run(KEY_CHECK_NAME, this.secrets.encrypt(KEY_CHECK_VALUE));
+      }
+    })();
   }
 
   private migrate(): void {

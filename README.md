@@ -120,7 +120,7 @@ the pinned host key of the node is stored next to it.
 - **Update:** replace `/opt/releasewatcher/releasewatcher` with the new executable and `systemctl restart releasewatcher`
   (database migrations run on start). Keep the old file to roll back.
 - **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all three `releasewatcher.db*`
-  files) and `/etc/releasewatcher`.
+  files, plus `encryption.key` that decrypts the secrets in it) and `/etc/releasewatcher`.
 - **Hardening:** the unit runs as an unprivileged user with a read-only system (`ProtectSystem=strict`, writes only
   to `/var/lib/releasewatcher`). In an unprivileged LXC this needs *nesting* (Proxmox enables it by default); if the
   service fails with `status=226/NAMESPACE`, enable *Options → Features → Nesting* or remove the hardening lines.
@@ -247,11 +247,12 @@ To run the published image instead of building locally, replace `build: .` in `d
   *Update available 1.31.0 → 1.32.0* / *Up to date*, Discord messages include the installed version, and
   releases you already run (installed ≥ release) are not announced. A **Test URL** button previews the result.
   Optional **request headers** (e.g. `Authorization: Bearer …`, `X-Api-Key`) are sent with the request; their
-  values are stored in SQLite and never returned by the API (the UI only sees header names).
+  values are stored encrypted in SQLite and never returned by the API (the UI only sees header names).
 - **Settings** – Discord webhook, mention and bot name (with a test message), GitHub token with live API quota,
   polling interval. Changes apply immediately; values saved in the UI are stored in SQLite and override
   the environment variables below (clearing a value falls back to the environment).
-- The sidebar shows when the next check runs and has a **Check all now** button.
+- The sidebar shows when the next check runs and has a **Check all now** button; its footer shows the running
+  version and links to the GitHub repository.
 
 ## Configuration (environment variables / `.env`)
 
@@ -266,6 +267,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
 | `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
+| `ENCRYPTION_KEY` | – | Key for secrets in the database: 32 bytes, base64 or hex (`openssl rand -base64 32`). Empty = `encryption.key` next to the database, generated on the first start. See *Security note*. |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
 | `PROXMOX_HOST` | – | Proxmox node for container checks. Empty = containers disabled. |
@@ -298,7 +300,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; `null` resets a value to the environment default |
-| `GET` | `/api/status` | Poller state (next/last run), repository and container counts |
+| `GET` | `/api/status` | App version, poller state (next/last run), repository and container counts |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
@@ -367,6 +369,7 @@ src/
   validation.ts      request body/param validation
   domain.ts          types, repository-name parsing, new-release selection
   db.ts              bun:sqlite store with simple versioned migrations
+  secret-box.ts      AES-256-GCM encryption of secrets stored in the database + key loading
   github.ts          GitHub REST client (ETag aware)
   checker.ts         checks one/all repositories, dispatches notifications
   poller.ts          interval scheduler (interval can change at runtime)
@@ -398,9 +401,15 @@ web/                 Angular UI (builds into public/)
 ## Security note
 
 The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
-Header values (API keys, tokens) are stored in plain text in the SQLite file – protect the data volume.
+Secrets in the SQLite file – the Discord webhook URL, GitHub tokens (global and per repository), the Proxmox SSH
+private key and installed-version header values – are **encrypted with AES-256-GCM**. The key comes from
+`ENCRYPTION_KEY` or, when it is not set, from `encryption.key`, generated next to the database on the first start
+(plain-text secrets of older versions are encrypted then). A copied database or backup alone does not reveal the
+secrets; to also protect against someone who can read the whole data directory, set `ENCRYPTION_KEY` in the
+environment (e.g. `/etc/releasewatcher/releasewatcher.env` or a Docker secret) instead of using the key file.
+**Back up the key** – without it the app refuses to start on that database (restore the key or delete the database).
 **The UI can run commands as root on your Proxmox node.** It requires a login (see Login); keep it on a private
 network or behind HTTPS (reverse proxy) – over plain HTTP the password and the session cookie travel in clear text.
-Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens. The SSH private key is stored in the SQLite file
+Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens. The SSH private key is stored encrypted in the SQLite file
 when pasted in the UI (or read from `PROXMOX_SSH_KEY_FILE`); it is never returned by the API. Consider a dedicated
 key used only by ReleaseWatcher.

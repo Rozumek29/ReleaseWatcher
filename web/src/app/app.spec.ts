@@ -8,6 +8,7 @@ import { AuthService } from './core/auth.service';
 import { settle } from './testing';
 
 const status = {
+  version: '1.4.0',
   poller: { intervalMinutes: 15, isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   repositories: { total: 3, enabled: 2, withErrors: 1, updatesAvailable: 2 },
   containers: { total: 4, enabled: 4, withErrors: 1, aptPending: 2, appUpdatesAvailable: 1 },
@@ -47,6 +48,10 @@ describe('App shell', () => {
     expect(el.querySelector('.containers-link')?.textContent).toContain('3 container update(s) waiting');
     expect(el.querySelector('.poller')?.textContent).toContain('1 container(s) with errors');
     expect(el.querySelector('.user-name')?.textContent).toContain('szymon');
+    expect(el.querySelector('.sidebar-foot .version')?.textContent?.trim()).toBe('v1.4.0');
+    const github = el.querySelector<HTMLAnchorElement>('.sidebar-foot a[aria-label="ReleaseWatcher on GitHub"]');
+    expect(github?.href).toBe('https://github.com/Rozumek29/ReleaseWatcher');
+    expect(github?.rel).toBe('noopener noreferrer');
   });
 
   it('does not poll the status while signed out', async () => {

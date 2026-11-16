@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
+import { APP_VERSION } from '../src/app-version.ts';
 import { buildApp, type App } from '../src/app.ts';
 import { silentLogger } from '../src/log.ts';
 import { RepositoryStore } from '../src/db.ts';
@@ -208,6 +209,7 @@ describe('HTTP API', () => {
 
     const status = (await inject('/api/status')).json();
     assert.equal(status.repositories.updatesAvailable, 1);
+    assert.equal(status.version, APP_VERSION);
 
     // Omitting the fields keeps them.
     const kept = await inject({

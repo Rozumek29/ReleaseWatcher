@@ -12,9 +12,11 @@ RUN bun run --cwd web build
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
+# Version shown in the UI (the release workflow passes the Git tag); empty = package.json.
+ARG VERSION=
 # Debian (glibc) build stage on purpose: when the target matches the host, Bun embeds its own runtime,
 # so an Alpine stage would produce a musl binary that cannot start on the glibc Debian image below.
-RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher \
+RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher ${VERSION:+--version=$VERSION} \
  && mkdir -p /data
 
 # --- Runtime: the executable + OpenSSH client (used to reach the Proxmox node) ---

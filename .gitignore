@@ -32,3 +32,5 @@ known_hosts
 .bun-cache/
 # One-time setup code written next to a local database
 setup-code
+# Key that encrypts secrets in a local database (created next to it)
+encryption.key

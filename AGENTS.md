@@ -105,6 +105,11 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   `hasOwnToken` + masked value). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.
+- Secrets are also **encrypted at rest** (AES-256-GCM, `SecretBox` in `src/secret-box.ts`; key from `ENCRYPTION_KEY`
+  or `encryption.key` next to the database). Stores encrypt on write and decrypt on read, so the rest of the code
+  sees plain values. A new secret setting goes into `SECRET_SETTING_KEYS` (`src/db.ts`); a new secret column is
+  encrypted in its store and added to `RepositoryStore.encryptSecrets()` so plain-text values of older databases
+  get migrated. Password hashes and session hashes are hashed, not encrypted.
 - Never log secret values.
 
 ## API contract (server ↔ UI)

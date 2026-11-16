@@ -1,5 +1,6 @@
 import { stat } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
+import { APP_VERSION } from './app-version.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
@@ -337,6 +338,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const statusDto = () => {
     const repositories = store.list();
     return {
+      version: APP_VERSION,
       poller: poller.status,
       repositories: {
         total: repositories.length,

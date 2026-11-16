@@ -325,6 +325,18 @@ nav {
   }
 }
 
+/* Version and link to the project; sits right under the account row. */
+.sidebar-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: -14px;
+  padding-left: 10px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
 /* Sign-in and setup pages: the page centers itself. */
 .auth-layout {
   min-height: 100vh;

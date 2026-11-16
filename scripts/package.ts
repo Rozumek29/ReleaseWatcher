@@ -51,7 +51,7 @@ if (install.exitCode !== 0) process.exit(install.exitCode ?? 1);
 
 // 2. Self-contained executable.
 rmSync(binary, { force: true });
-await compile({ outfile: binary, target: TARGET });
+await compile({ outfile: binary, target: TARGET, version });
 
 console.log(`\nRelease ready in release/:`);
 console.log(`  ${name}/                 run with: bun start   (needs Bun)`);
