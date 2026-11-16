@@ -57,7 +57,9 @@ install -m 644 "$SRC/releasewatcher.service" "$UNIT"
 PASSWORD=''
 if [ ! -f "$ENV_FILE" ]; then
   say "Creating $ENV_FILE with Basic auth (user: admin)"
-  PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 24)
+  # 18 random bytes → 24 base64 characters, minus the non-alphanumeric ones. No `tr </dev/urandom | head`:
+  # head closing the pipe early makes tr fail with "Broken pipe" when SIGPIPE is ignored (e.g. under pct exec).
+  PASSWORD=$(head -c 18 /dev/urandom | base64 | tr -d '+/=\n')
   if [ -f "$SRC/.env.example" ]; then
     sed -e "s/^BASIC_AUTH_USERNAME=.*/BASIC_AUTH_USERNAME=admin/" \
         -e "s/^BASIC_AUTH_PASSWORD=.*/BASIC_AUTH_PASSWORD=$PASSWORD/" "$SRC/.env.example" >"$ENV_FILE"
@@ -98,6 +100,7 @@ PORT=$(sed -n 's/^PORT=\([0-9][0-9]*\).*/\1/p' "$ENV_FILE" 2>/dev/null | tail -n
 IP=$(hostname -I 2>/dev/null | awk '{ print $1 }')
 printf '\n\033[1;32m✓ ReleaseWatcher is running:\033[0m http://%s:%s\n' "${IP:-<this machine>}" "${PORT:-8080}"
 if [ -n "$PASSWORD" ]; then
-  printf '  Login: \033[1madmin\033[0m / \033[1m%s\033[0m  (change it in %s)\n' "$PASSWORD" "$ENV_FILE"
+  printf '  Login: \033[1madmin\033[0m / \033[1m%s\033[0m\n' "$PASSWORD"
 fi
+printf '  Login is set in %s (BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD)\n' "$ENV_FILE"
 printf '  Logs:  journalctl -u releasewatcher -f\n'
