@@ -1,0 +1,243 @@
+<header class="page-header">
+  <div>
+    <h1>Containers</h1>
+    <p>LXC containers on your Proxmox node: pending apt packages and application updates.</p>
+  </div>
+  <div class="header-actions">
+    <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
+      <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
+      Check all
+    </button>
+    <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
+      <app-icon name="plus" [size]="16" />
+      Add container
+    </button>
+  </div>
+</header>
+
+@if (!loading() && !configured()) {
+  <div class="callout">
+    <app-icon name="alert" />
+    <div>
+      <strong>The Proxmox node is not configured.</strong>
+      Containers cannot be checked or updated until a host and an SSH key are set.
+      <a routerLink="/settings">Configure the node in Settings</a>.
+    </div>
+  </div>
+}
+
+@if (addOpen()) {
+  <section class="card add-card" aria-labelledby="add-title">
+    <div class="add-head">
+      <h2 id="add-title">Add a container</h2>
+      <button type="button" class="icon-btn" (click)="addOpen.set(false)" aria-label="Close">
+        <app-icon name="close" [size]="16" />
+      </button>
+    </div>
+    @if (discovering()) {
+      <p class="muted">Reading <code>pct list</code> from the node…</p>
+    } @else if (discoverError(); as e) {
+      <p class="error-line"><app-icon name="alert" [size]="14" /> <span>{{ e }}</span></p>
+    } @else if (available().length === 0) {
+      <p class="muted">All containers of the node have been added already.</p>
+    } @else {
+      <form class="add-form" (ngSubmit)="add()">
+        <label for="vmid" class="visually-hidden">Container</label>
+        <select id="vmid" class="input" name="vmid" [(ngModel)]="selectedVmid">
+          @for (c of available(); track c.vmid) {
+            <option [ngValue]="c.vmid">{{ c.vmid }} · {{ c.name }} ({{ c.status }})</option>
+          }
+        </select>
+        <button type="submit" class="btn" [disabled]="adding() || selectedVmid === null">
+          {{ adding() ? 'Adding…' : 'Add' }}
+        </button>
+      </form>
+    }
+  </section>
+}
+
+@if (loading()) {
+  <div class="list">
+    @for (i of [1, 2]; track i) {
+      <div class="card row skeleton"></div>
+    }
+  </div>
+} @else if (containers().length === 0) {
+  <div class="card empty">
+    <span class="empty-icon"><app-icon name="box" [size]="22" /></span>
+    <h2>No containers yet</h2>
+    <p>Configure the Proxmox node in Settings, then add the containers you want to keep up to date.</p>
+  </div>
+} @else {
+  <ul class="list">
+    @for (c of containers(); track c.id) {
+      <li class="card row" [class.paused]="!c.isEnabled" [class.has-error]="!!c.lastError">
+        <div class="row-head">
+          <div class="main">
+            <div class="title-line">
+              <span class="vmid mono">{{ c.vmid }}</span>
+              <span class="name">{{ c.name }}</span>
+              @if (c.status) {
+                <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
+              }
+              @if (!c.isEnabled) {
+                <span class="badge">Paused</span>
+              }
+              @if (isBusy(c)) {
+                <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
+              } @else if (c.updatesAvailable > 0) {
+                <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
+              } @else if (c.lastCheckedAt && !c.lastError) {
+                <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
+              }
+            </div>
+            <div class="meta">
+              <span class="meta-item" [title]="c.lastCheckedAt ? (c.lastCheckedAt | date: 'medium') : 'Never checked'">
+                <app-icon name="clock" [size]="14" />
+                checked {{ c.lastCheckedAt ? (c.lastCheckedAt | relativeTime: now()) : 'never' }}
+              </span>
+              @if (c.nextCheckAt) {
+                <span class="meta-item" [title]="'Schedule: ' + cronOf(c)">
+                  <app-icon name="timer" [size]="14" />
+                  next {{ c.nextCheckAt | relativeTime: now() }}
+                </span>
+              }
+              @if (c.snapshotBeforeUpdate) {
+                <span class="meta-item">snapshot before updates</span>
+              }
+            </div>
+          </div>
+
+          <div class="actions">
+            @if (confirming() === 'delete-' + c.id) {
+              <span class="confirm-text">Remove CT {{ c.vmid }}?</span>
+              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+            } @else {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
+                <app-icon name="refresh" [size]="14" />
+                Check
+              </button>
+              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of CT ' + c.vmid" title="History">
+                <app-icon name="history" [size]="16" />
+              </button>
+              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of CT ' + c.vmid" title="Settings">
+                <app-icon name="sliders" [size]="16" />
+              </button>
+              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove CT ' + c.vmid" title="Remove">
+                <app-icon name="trash" [size]="16" />
+              </button>
+            }
+          </div>
+        </div>
+
+        @if (c.lastError) {
+          <div class="error-line">
+            <app-icon name="alert" [size]="14" />
+            <span class="pre-line">{{ c.lastError }}</span>
+          </div>
+        }
+
+        <div class="items">
+          @if (c.aptEnabled) {
+            <div class="item">
+              <div class="item-main">
+                <span class="item-name"><app-icon name="download" [size]="14" /> apt</span>
+                @if (c.aptUpgradable.length > 0) {
+                  <button type="button" class="link-btn" (click)="toggleExpanded(c.id)" [attr.aria-expanded]="expanded().has(c.id)">
+                    {{ c.aptUpgradable.length }} upgradable package(s)
+                  </button>
+                } @else {
+                  <span class="muted">{{ c.lastCheckedAt ? 'no pending packages' : 'not checked yet' }}</span>
+                }
+              </div>
+              @if (c.aptUpgradable.length > 0) {
+                <div class="item-actions">
+                  @if (confirming() === 'apt-' + c.id) {
+                    <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
+                    <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
+                    <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                  } @else {
+                    <button type="button" class="btn btn-sm btn-secondary" (click)="confirming.set('apt-' + c.id)" [disabled]="isBusy(c) || !configured()">
+                      <app-icon name="arrowUp" [size]="14" /> Upgrade
+                    </button>
+                  }
+                </div>
+              }
+              @if (expanded().has(c.id)) {
+                <ul class="packages">
+                  @for (p of c.aptUpgradable; track p.name) {
+                    <li>
+                      <span class="mono">{{ p.name }}</span>
+                      <span class="muted mono">{{ p.currentVersion ?? '?' }} → {{ p.newVersion }}</span>
+                    </li>
+                  }
+                </ul>
+              }
+            </div>
+          }
+
+          @for (a of c.apps; track a.id) {
+            <div class="item">
+              <div class="item-main">
+                <span class="item-name"><app-icon name="server" [size]="14" /> {{ a.name }}</span>
+                <span class="versions mono">
+                  {{ a.installedVersion ?? '?' }}
+                  @if (a.latestVersion) {
+                    <span [class.arrow]="a.updateAvailable">→</span> {{ a.latestVersion }}
+                  }
+                </span>
+                @if (a.updateAvailable === true) {
+                  <span class="badge badge-warning">Update available</span>
+                } @else if (a.updateAvailable === false) {
+                  <span class="badge badge-success">Up to date</span>
+                }
+                @if (a.repositoryFullName) {
+                  <span class="muted small" title="Latest version from this watched repository">
+                    <app-icon name="github" [size]="12" /> {{ a.repositoryFullName }}
+                  </span>
+                }
+              </div>
+              <div class="item-actions">
+                @if (confirming() === 'app-' + c.id + '-' + a.id) {
+                  <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
+                  <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
+                  <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn btn-sm"
+                    [class.btn-secondary]="!a.updateAvailable"
+                    (click)="confirming.set('app-' + c.id + '-' + a.id)"
+                    [disabled]="isBusy(c) || !configured() || !a.updateCommand"
+                    [title]="a.updateCommand ? 'Run: ' + a.updateCommand : 'No update command configured'"
+                  >
+                    <app-icon name="arrowUp" [size]="14" /> Update
+                  </button>
+                }
+              </div>
+              @if (a.error) {
+                <div class="error-line warn"><app-icon name="alert" [size]="14" /> <span>{{ a.error }}</span></div>
+              }
+            </div>
+          } @empty {
+            <div class="item muted small">
+              No applications configured.
+              <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
+              to track its version and update it (e.g. <code>update</code> from community-scripts or <code>./pull.sh</code>).
+            </div>
+          }
+        </div>
+      </li>
+    }
+  </ul>
+}
+
+<app-container-settings-dialog
+  [container]="editing()"
+  [globalCron]="globalCron()"
+  (saved)="onSettingsSaved($event)"
+  (closed)="onSettingsClosed()"
+/>
+
+<app-run-log-dialog [target]="runTarget()" (finished)="onRunFinished($event)" (closed)="runTarget.set(null)" />

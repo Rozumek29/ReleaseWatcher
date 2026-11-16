@@ -45,6 +45,45 @@
     background: var(--success-soft);
     color: var(--success);
   }
+
+  &.proxmox {
+    background: var(--warning-soft);
+    color: var(--warning);
+  }
+}
+
+.grid-2.compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.key-input {
+  min-height: 92px;
+  resize: vertical;
+  font-size: 0.8rem;
+}
+
+.field > label app-icon {
+  vertical-align: -2px;
+}
+
+.node-test {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-family: ui-monospace, 'Cascadia Code', SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &.failed {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
 }
 
 .section-title {

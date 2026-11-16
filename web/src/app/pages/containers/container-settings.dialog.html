@@ -1,0 +1,179 @@
+<dialog #dialog class="dialog" (close)="close()" (click)="onDialogClick($event, dialog)" aria-labelledby="ct-settings-title">
+  @if (container(); as c) {
+    <div class="dialog-card">
+      <header class="dialog-head">
+        <span class="head-icon"><app-icon name="box" /></span>
+        <div class="head-text">
+          <h2 id="ct-settings-title">Container settings</h2>
+          <p class="mono">CT {{ c.vmid }}</p>
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <form id="ct-settings-form" class="ct-form" (ngSubmit)="save()">
+          <div class="field">
+            <label for="ct-name">Name</label>
+            <input id="ct-name" class="input" name="name" [(ngModel)]="name" autocomplete="off" required />
+          </div>
+
+          <div class="switches">
+            <app-switch label="Active (scheduled checks)" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
+            <app-switch label="apt packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
+            <app-switch label="Snapshot before updates" [checked]="snapshotBeforeUpdate" (toggled)="snapshotBeforeUpdate = !snapshotBeforeUpdate" />
+          </div>
+
+          <div class="field">
+            <label for="ct-cron">Check schedule <span class="optional">cron, optional</span></label>
+            <input
+              id="ct-cron"
+              class="input mono"
+              name="checkCron"
+              [(ngModel)]="checkCron"
+              [placeholder]="globalCron() ? globalCron() + ' (global)' : 'global schedule'"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <span class="hint">
+              Leave empty to use the global schedule. Format: <code>minute hour day month weekday</code>,
+              e.g. <code>30 4 * * *</code> (daily at 4:30) or <code>&#64;daily</code>.
+            </span>
+          </div>
+        </form>
+
+        <fieldset class="group">
+          <legend>
+            <app-icon name="server" [size]="16" />
+            Applications
+          </legend>
+          <p class="group-hint">
+            Commands run inside the container (<code>pct exec … -- sh -lc</code>). The version command prints the
+            installed version (first line), e.g. <code>cat /opt/vaultwarden_version.txt</code>.
+          </p>
+
+          @if (apps().length > 0) {
+            <ul class="apps">
+              @for (a of apps(); track a.id) {
+                <li class="app-row">
+                  <div class="app-text">
+                    <strong>{{ a.name }}</strong>
+                    <span class="muted small">
+                      {{ sourceLabel(a) }}
+                      @if (a.updateCommand) {
+                        · update: <code>{{ a.updateCommand }}</code>
+                      } @else {
+                        · no update command
+                      }
+                    </span>
+                  </div>
+                  <div class="app-actions">
+                    @if (confirmDeleteAppId() === a.id) {
+                      <span class="confirm-text">Remove?</span>
+                      <button type="button" class="btn btn-sm btn-danger-ghost" (click)="deleteApp(a)">Yes</button>
+                      <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteAppId.set(null)">No</button>
+                    } @else {
+                      <button type="button" class="icon-btn" (click)="editApp(a)" [attr.aria-label]="'Edit ' + a.name" title="Edit">
+                        <app-icon name="sliders" [size]="15" />
+                      </button>
+                      <button type="button" class="icon-btn" (click)="confirmDeleteAppId.set(a.id)" [attr.aria-label]="'Remove ' + a.name" title="Remove">
+                        <app-icon name="trash" [size]="15" />
+                      </button>
+                    }
+                  </div>
+                </li>
+              }
+            </ul>
+          }
+
+          @if (appForm(); as f) {
+            <div class="app-form" role="group" aria-label="Application">
+              <div class="field">
+                <label for="app-name">Name</label>
+                <input id="app-name" class="input" [ngModel]="f.name" (ngModelChange)="setField('name', $event)" placeholder="Vaultwarden" autocomplete="off" />
+              </div>
+              <div class="field">
+                <label for="app-version">Version command <span class="optional">optional</span></label>
+                <input id="app-version" class="input mono" [ngModel]="f.versionCommand" (ngModelChange)="setField('versionCommand', $event)" placeholder="cat /opt/vaultwarden_version.txt" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="field">
+                <label for="app-source">Latest version from</label>
+                <select id="app-source" class="input" [ngModel]="f.latestSource" (ngModelChange)="setField('latestSource', $event)">
+                  <option value="none">Nothing (no comparison)</option>
+                  <option value="github">A watched GitHub repository</option>
+                  <option value="command">A command</option>
+                </select>
+              </div>
+              @if (f.latestSource === 'github') {
+                <div class="field">
+                  <label for="app-repo">Repository</label>
+                  <select id="app-repo" class="input" [ngModel]="f.repositoryId" (ngModelChange)="setField('repositoryId', $event)">
+                    <option [ngValue]="null" disabled>Choose a repository…</option>
+                    @for (r of repositories(); track r.id) {
+                      <option [ngValue]="r.id">{{ r.fullName }}{{ r.lastSeenTag ? ' (' + r.lastSeenTag + ')' : '' }}</option>
+                    }
+                  </select>
+                  @if (repositories().length === 0) {
+                    <span class="hint">Watch the repository on the Repositories page first.</span>
+                  }
+                </div>
+              }
+              @if (f.latestSource === 'command') {
+                <div class="field">
+                  <label for="app-latest">Latest version command</label>
+                  <input id="app-latest" class="input mono" [ngModel]="f.latestCommand" (ngModelChange)="setField('latestCommand', $event)" placeholder="curl -fsSL https://… | jq -r .version" autocomplete="off" spellcheck="false" />
+                  <span class="hint">Runs inside the container; the first output line is the version.</span>
+                </div>
+              }
+              <div class="field">
+                <label for="app-update">Update command <span class="optional">optional</span></label>
+                <input id="app-update" class="input mono" [ngModel]="f.updateCommand" (ngModelChange)="setField('updateCommand', $event)" placeholder="update   or   cd /opt/app && ./pull.sh" autocomplete="off" spellcheck="false" />
+              </div>
+              <div class="form-row">
+                <app-switch label="Use a terminal (TTY)" [checked]="f.useTty" (toggled)="setField('useTty', !f.useTty)" />
+                <div class="field timeout-field">
+                  <label for="app-timeout">Timeout (s)</label>
+                  <input id="app-timeout" class="input" type="number" min="10" max="21600" [ngModel]="f.timeoutSeconds" (ngModelChange)="setField('timeoutSeconds', $event)" />
+                </div>
+              </div>
+              <span class="hint">
+                Enable the terminal for interactive scripts such as the community-scripts <code>update</code> command.
+                Updates are only started manually.
+              </span>
+              @if (appError(); as e) {
+                <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+              }
+              <div class="app-form-actions">
+                <button type="button" class="btn btn-ghost btn-sm" (click)="appForm.set(null)">Cancel</button>
+                <button type="button" class="btn btn-sm" (click)="saveApp()" [disabled]="savingApp() || !f.name.trim()">
+                  {{ savingApp() ? 'Saving…' : f.id === null ? 'Add application' : 'Save application' }}
+                </button>
+              </div>
+            </div>
+          } @else {
+            @if (appError(); as e) {
+              <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+            }
+            <div>
+              <button type="button" class="btn btn-secondary btn-sm" (click)="newApp()">
+                <app-icon name="plus" [size]="14" /> Add application
+              </button>
+            </div>
+          }
+        </fieldset>
+
+        @if (saveError(); as e) {
+          <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+        }
+      </div>
+
+      <footer class="dialog-foot">
+        <button type="button" class="btn btn-ghost" (click)="close()">Close</button>
+        <button type="submit" form="ct-settings-form" class="btn" [disabled]="saving() || !name.trim()">
+          {{ saving() ? 'Saving…' : 'Save container' }}
+        </button>
+      </footer>
+    </div>
+  }
+</dialog>

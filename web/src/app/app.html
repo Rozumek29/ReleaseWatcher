@@ -25,6 +25,11 @@
           @if (item.path === '/repositories' && statusService.status(); as s) {
             <span class="count">{{ s.repositories.total }}</span>
           }
+          @if (item.path === '/containers' && statusService.status()?.containers; as c) {
+            @if (c.total > 0) {
+              <span class="count">{{ c.total }}</span>
+            }
+          }
         </a>
       }
     </nav>
@@ -56,6 +61,16 @@
         }
         @if (s.repositories.withErrors > 0) {
           <div class="poller-meta warn-text">{{ s.repositories.withErrors }} repo(s) with errors</div>
+        }
+        @if (s.containers; as c) {
+          @if (c.aptPending + c.appUpdatesAvailable > 0) {
+            <a class="poller-meta update-link containers-link" routerLink="/containers">
+              {{ c.aptPending + c.appUpdatesAvailable }} container update(s) waiting
+            </a>
+          }
+          @if (c.withErrors > 0) {
+            <div class="poller-meta warn-text">{{ c.withErrors }} container(s) with errors</div>
+          }
         }
       }
       <button type="button" class="btn btn-secondary btn-block" (click)="statusService.checkAll()" [disabled]="statusService.checkingAll()">

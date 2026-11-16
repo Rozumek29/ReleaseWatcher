@@ -1,0 +1,96 @@
+.run-dialog {
+  width: min(860px, calc(100vw - 32px));
+}
+
+.head-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.run-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+  font-size: 0.85rem;
+}
+
+.output {
+  margin: 0;
+  height: min(55vh, 520px);
+  overflow: auto;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #0f1115;
+  color: #dfe3ea;
+  font-family: ui-monospace, 'Cascadia Code', SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.runs {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.run-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  width: 100%;
+  padding: 10px 8px;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+
+  &:hover {
+    background: var(--hover);
+  }
+}
+
+.run-kind {
+  font-weight: 600;
+}
+
+.run-time {
+  margin-left: auto;
+}
+
+.dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--border-strong);
+
+  &.succeeded {
+    background: var(--success);
+  }
+
+  &.failed {
+    background: var(--danger);
+  }
+
+  &.running {
+    background: var(--accent);
+  }
+}
+
+.spacer {
+  flex: 1;
+}

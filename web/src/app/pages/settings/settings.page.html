@@ -216,6 +216,110 @@
         </div>
       </form>
     </section>
+
+    <!-- Proxmox node -->
+    <section class="card section" aria-labelledby="proxmox-title">
+      <div class="section-head">
+        <span class="section-icon proxmox"><app-icon name="box" /></span>
+        <div class="section-title">
+          <h2 id="proxmox-title">Proxmox node</h2>
+          <p>SSH access used to check and update LXC containers (<code>pct exec</code>).</p>
+        </div>
+        @if (s.proxmox.configured) {
+          <span class="badge badge-success"><app-icon name="check" [size]="12" /> Configured</span>
+        } @else {
+          <span class="badge">Not configured</span>
+        }
+      </div>
+
+      <form class="section-body" (ngSubmit)="saveProxmox()">
+        <div class="grid-2">
+          <div class="field">
+            <label for="pve-host">Host</label>
+            <input id="pve-host" class="input mono" name="proxmoxHost" [(ngModel)]="proxmoxHost" placeholder="pve.lan or 192.168.1.10" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxHost']" />
+            @if (errors()['proxmoxHost']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">{{ sourceLabel(s.proxmox.hostSource) }}.</span>
+          </div>
+          <div class="grid-2 compact">
+            <div class="field">
+              <label for="pve-port">Port</label>
+              <input id="pve-port" class="input" type="number" name="proxmoxPort" min="1" max="65535" [(ngModel)]="proxmoxPort" [class.invalid]="errors()['proxmoxPort']" />
+              @if (errors()['proxmoxPort']; as e) {
+                <span class="error">{{ e }}</span>
+              }
+            </div>
+            <div class="field">
+              <label for="pve-user">User</label>
+              <input id="pve-user" class="input mono" name="proxmoxUser" [(ngModel)]="proxmoxUser" placeholder="root" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxUser']" />
+              @if (errors()['proxmoxUser']; as e) {
+                <span class="error">{{ e }}</span>
+              }
+            </div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="pve-key"><app-icon name="key" [size]="14" /> SSH private key</label>
+          <textarea
+            id="pve-key"
+            class="input mono key-input"
+            name="proxmoxSshKey"
+            rows="4"
+            [(ngModel)]="sshKey"
+            [placeholder]="s.proxmox.sshKeyConfigured ? 'A key is configured – paste a new one to replace it' : '-----BEGIN OPENSSH PRIVATE KEY-----'"
+            autocomplete="off"
+            spellcheck="false"
+            [class.invalid]="errors()['proxmoxSshKey']"
+          ></textarea>
+          @if (errors()['proxmoxSshKey']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            @if (s.proxmox.sshKeyConfigured) {
+              Configured ({{ s.proxmox.sshKeySource === 'ui' ? 'saved here' : 'from environment' }}) – never shown again.
+            } @else {
+              Not set.
+            }
+            Only key authentication is used (no passwords); keys protected with a passphrase are not supported.
+            The node's host key is trusted on the first connection and pinned afterwards. A user other than
+            <code>root</code> needs passwordless <code>sudo</code> for <code>pct</code>.
+          </span>
+        </div>
+
+        <div class="field">
+          <label for="pve-cron">Check schedule (cron)</label>
+          <input id="pve-cron" class="input mono" name="containerCheckCron" [(ngModel)]="checkCron" placeholder="0 */6 * * *" autocomplete="off" spellcheck="false" [class.invalid]="errors()['containerCheckCron']" />
+          @if (errors()['containerCheckCron']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.proxmox.checkCronSource) }}. <code>minute hour day month weekday</code> in the server's
+            time zone, e.g. <code>0 */6 * * *</code> (every 6 hours). Containers can override it. Updates are never
+            installed automatically.
+          </span>
+        </div>
+
+        @if (nodeTest(); as t) {
+          <pre class="node-test" [class.failed]="!t.ok" aria-label="Connection test result">{{ t.text }}</pre>
+        }
+
+        <div class="section-actions">
+          <button type="button" class="btn btn-secondary" (click)="testNode()" [disabled]="testingNode() || !s.proxmox.configured">
+            <app-icon name="terminal" [size]="16" />
+            {{ testingNode() ? 'Connecting…' : 'Test connection' }}
+          </button>
+          @if (s.proxmox.sshKeySource === 'ui') {
+            <button type="button" class="btn btn-danger-ghost" (click)="resetSshKey()" [disabled]="saving() === 'proxmox'">Remove key</button>
+          }
+          <span class="spacer"></span>
+          <button type="submit" class="btn" [disabled]="saving() === 'proxmox'">
+            {{ saving() === 'proxmox' ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </section>
   </div>
 } @else {
   <div class="sections">

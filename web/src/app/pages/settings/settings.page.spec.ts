@@ -9,6 +9,17 @@ const settings: AppSettings = {
   discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: 'ReleaseWatcher' },
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
   polling: { intervalMinutes: 15, intervalSource: 'env', minIntervalMinutes: 1, maxIntervalMinutes: 1440 },
+  proxmox: {
+    configured: true,
+    host: 'pve.lan',
+    hostSource: 'ui',
+    port: 22,
+    user: 'root',
+    sshKeyConfigured: true,
+    sshKeySource: 'ui',
+    checkCron: '0 */6 * * *',
+    checkCronSource: 'env',
+  },
 };
 
 describe('SettingsPage', () => {
@@ -45,5 +56,47 @@ describe('SettingsPage', () => {
     await settle(fixture);
 
     expect(el.querySelector('.error')?.textContent).toContain('valid URL');
+  });
+
+  it('saves the Proxmox node without sending an untouched SSH key and tests the connection', async () => {
+    await TestBed.configureTestingModule({
+      imports: [SettingsPage],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(SettingsPage);
+    fixture.detectChanges();
+    http.expectOne('/api/settings').flush(settings);
+    await settle(fixture);
+    http.expectOne('/api/github/rate-limit').flush(null);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const section = el.querySelector<HTMLElement>('section[aria-labelledby=proxmox-title]')!;
+    expect(section.querySelector<HTMLInputElement>('#pve-host')!.value).toBe('pve.lan');
+    expect(section.querySelector<HTMLTextAreaElement>('#pve-key')!.value).toBe('');
+    expect(section.textContent).toContain('Configured (saved here)');
+
+    const cron = section.querySelector<HTMLInputElement>('#pve-cron')!;
+    cron.value = '0 3 * * *';
+    cron.dispatchEvent(new Event('input'));
+    section.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const save = http.expectOne('/api/settings');
+    expect(save.request.method).toBe('PUT');
+    expect(save.request.body).toEqual({
+      proxmoxHost: 'pve.lan',
+      proxmoxPort: 22,
+      proxmoxUser: 'root',
+      containerCheckCron: '0 3 * * *',
+    });
+    save.flush(settings);
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    [...section.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Test connection'))!.click();
+    http.expectOne('/api/proxmox/test').flush({ output: 'pve-manager/9.1.1' });
+    await settle(fixture);
+    expect(section.querySelector('.node-test')?.textContent).toContain('pve-manager/9.1.1');
+    http.verify();
   });
 });

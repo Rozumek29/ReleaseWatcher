@@ -1,0 +1,60 @@
+import { AppSettings, Container } from '../../core/models';
+
+/** Test data shared by the specs of the containers page. */
+export const proxmoxSettings = (configured: boolean): AppSettings => ({
+  discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: null },
+  github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
+  polling: { intervalMinutes: 15, intervalSource: 'env', minIntervalMinutes: 1, maxIntervalMinutes: 1440 },
+  proxmox: {
+    configured,
+    host: configured ? 'pve.lan' : null,
+    hostSource: configured ? 'ui' : null,
+    port: 22,
+    user: 'root',
+    sshKeyConfigured: configured,
+    sshKeySource: configured ? 'ui' : null,
+    checkCron: '0 */6 * * *',
+    checkCronSource: 'env',
+  },
+});
+
+export const container = (overrides: Partial<Container> = {}): Container => ({
+  id: 1,
+  vmid: 101,
+  name: 'vaultwarden',
+  isEnabled: true,
+  aptEnabled: true,
+  snapshotBeforeUpdate: false,
+  checkCron: null,
+  nextCheckAt: '2030-01-01T06:00:00Z',
+  status: 'running',
+  aptUpgradable: [
+    { name: 'curl', currentVersion: '8.0', newVersion: '8.1' },
+    { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
+  ],
+  lastCheckedAt: '2026-01-01T00:00:00Z',
+  lastError: null,
+  createdAt: '2026-01-01T00:00:00Z',
+  isBusy: false,
+  apps: [
+    {
+      id: 7,
+      name: 'Vaultwarden',
+      versionCommand: 'cat /opt/vw_version.txt',
+      latestSource: 'github',
+      repositoryId: 3,
+      repositoryFullName: 'dani-garcia/vaultwarden',
+      latestCommand: null,
+      updateCommand: 'update',
+      useTty: true,
+      timeoutSeconds: 1800,
+      installedVersion: '1.30.0',
+      latestVersion: '1.32.0',
+      checkedAt: '2026-01-01T00:00:00Z',
+      error: null,
+      updateAvailable: true,
+    },
+  ],
+  updatesAvailable: 2,
+  ...overrides,
+});

@@ -2,14 +2,14 @@ import { DecimalPipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ApiService } from '../../core/api.service';
+import { ApiService, describeError } from '../../core/api.service';
 import { AppSettings, RateLimit, SettingSource, SettingsPatch } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 
-type Section = 'discord' | 'github' | 'polling';
+type Section = 'discord' | 'github' | 'polling' | 'proxmox';
 
 const INTERVAL_PRESETS = [5, 15, 30, 60, 180, 360, 1440];
 
@@ -33,6 +33,8 @@ export class SettingsPage implements OnInit {
   protected readonly loadingRateLimit = signal(false);
   protected readonly showWebhook = signal(false);
   protected readonly showToken = signal(false);
+  protected readonly testingNode = signal(false);
+  protected readonly nodeTest = signal<{ ok: boolean; text: string } | null>(null);
 
   // Form state. Secrets start empty: an empty field on save means "keep the current value".
   protected webhookUrl = '';
@@ -40,6 +42,11 @@ export class SettingsPage implements OnInit {
   protected username = '';
   protected token = '';
   protected intervalMinutes = 15;
+  protected proxmoxHost = '';
+  protected proxmoxPort: number | null = 22;
+  protected proxmoxUser = '';
+  protected sshKey = '';
+  protected checkCron = '';
 
   protected readonly presets = INTERVAL_PRESETS;
 
@@ -90,6 +97,42 @@ export class SettingsPage implements OnInit {
   protected async savePolling(): Promise<void> {
     if (await this.save('polling', { pollIntervalMinutes: Number(this.intervalMinutes) }, 'Polling interval saved.')) {
       void this.statusService.refresh();
+    }
+  }
+
+  protected async saveProxmox(): Promise<void> {
+    const port = this.proxmoxPort === null || `${this.proxmoxPort}` === '' ? null : Number(this.proxmoxPort);
+    const patch: SettingsPatch = {
+      // Empty values reset to the environment default.
+      proxmoxHost: this.proxmoxHost.trim() || null,
+      proxmoxPort: port,
+      proxmoxUser: this.proxmoxUser.trim() || null,
+      containerCheckCron: this.checkCron.trim() || null,
+    };
+    // The key is never shown; an empty field keeps the saved one.
+    if (this.sshKey.trim()) {
+      patch.proxmoxSshKey = this.sshKey.trim();
+    }
+    if (await this.save('proxmox', patch, 'Proxmox settings saved.')) {
+      this.nodeTest.set(null);
+      void this.statusService.refresh();
+    }
+  }
+
+  protected async resetSshKey(): Promise<void> {
+    await this.save('proxmox', { proxmoxSshKey: null }, 'SSH key removed.');
+  }
+
+  protected async testNode(): Promise<void> {
+    this.testingNode.set(true);
+    this.nodeTest.set(null);
+    try {
+      const { output } = await firstValueFrom(this.api.testProxmoxConnection());
+      this.nodeTest.set({ ok: true, text: output || 'Connected.' });
+    } catch (error) {
+      this.nodeTest.set({ ok: false, text: describeError(error) });
+    } finally {
+      this.testingNode.set(false);
     }
   }
 
@@ -169,5 +212,10 @@ export class SettingsPage implements OnInit {
     this.mention = settings.discord.mention ?? '';
     this.username = settings.discord.username ?? '';
     this.intervalMinutes = settings.polling.intervalMinutes;
+    this.proxmoxHost = settings.proxmox.host ?? '';
+    this.proxmoxPort = settings.proxmox.port;
+    this.proxmoxUser = settings.proxmox.user;
+    this.sshKey = '';
+    this.checkCron = settings.proxmox.checkCron;
   }
 }

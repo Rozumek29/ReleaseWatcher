@@ -26,6 +26,7 @@ export class App implements OnInit {
 
   protected readonly nav: NavItem[] = [
     { path: '/repositories', label: 'Repositories', icon: 'repo' },
+    { path: '/containers', label: 'Containers', icon: 'box' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];
 

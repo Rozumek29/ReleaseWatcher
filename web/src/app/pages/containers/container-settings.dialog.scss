@@ -1,0 +1,98 @@
+.head-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.ct-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+}
+
+.apps {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.app-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
+
+.app-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.app-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confirm-text {
+  font-size: 0.85rem;
+  color: var(--danger);
+  font-weight: 550;
+}
+
+.app-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px;
+  border-radius: 10px;
+  background: var(--surface-2);
+
+  .hint {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+  }
+}
+
+.form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 20px;
+}
+
+.timeout-field {
+  width: 140px;
+}
+
+.app-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.small {
+  font-size: 0.8rem;
+}

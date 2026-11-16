@@ -1,0 +1,88 @@
+<dialog #dialog class="dialog run-dialog" (close)="close()" (click)="onDialogClick($event, dialog)" aria-labelledby="run-title">
+  @if (target(); as t) {
+    <div class="dialog-card">
+      <header class="dialog-head">
+        <span class="head-icon"><app-icon name="terminal" /></span>
+        <div class="head-text">
+          @if (run(); as r) {
+            <h2 id="run-title">
+              {{ kindLabel(r.kind) }}
+              @if (appName(r); as name) {
+                · {{ name }}
+              }
+            </h2>
+            <p>CT {{ t.container.vmid }} ({{ t.container.name }}) · started {{ r.startedAt | date: 'medium' }}</p>
+          } @else {
+            <h2 id="run-title">History</h2>
+            <p>CT {{ t.container.vmid }} ({{ t.container.name }}) · latest checks and updates</p>
+          }
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        @if (error(); as e) {
+          <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+        }
+
+        @if (run(); as r) {
+          <div class="run-status">
+            @switch (r.status) {
+              @case ('running') {
+                <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Running…</span>
+              }
+              @case ('succeeded') {
+                <span class="badge badge-success"><app-icon name="check" [size]="12" /> Succeeded</span>
+              }
+              @case ('failed') {
+                <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Failed</span>
+              }
+            }
+            @if (r.exitCode !== null && r.status !== 'running') {
+              <span class="muted">exit code <span class="mono">{{ r.exitCode }}</span></span>
+            }
+            @if (duration(r); as d) {
+              <span class="muted">took {{ d }}</span>
+            }
+            <span class="muted">{{ r.trigger === 'schedule' ? 'scheduled' : 'manual' }}</span>
+          </div>
+          <pre #output class="output" (scroll)="onScroll(output)" aria-label="Command output">{{ r.output || (r.status === 'running' ? 'Waiting for output…' : 'No output.') }}</pre>
+        } @else if (history(); as runs) {
+          @if (runs.length === 0) {
+            <p class="muted">Nothing has run in this container yet.</p>
+          } @else {
+            <ul class="runs">
+              @for (r of runs; track r.id) {
+                <li>
+                  <button type="button" class="run-row" (click)="open(r.id)">
+                    <span class="dot" [class]="'dot ' + r.status"></span>
+                    <span class="run-kind">
+                      {{ kindLabel(r.kind) }}
+                      @if (appName(r); as name) {
+                        · {{ name }}
+                      }
+                    </span>
+                    <span class="muted">{{ r.trigger === 'schedule' ? 'scheduled' : 'manual' }}</span>
+                    <span class="muted run-time" [title]="r.startedAt | date: 'medium'">{{ r.startedAt | relativeTime }}</span>
+                  </button>
+                </li>
+              }
+            </ul>
+          }
+        } @else if (!error()) {
+          <p class="muted">Loading…</p>
+        }
+      </div>
+
+      <footer class="dialog-foot">
+        @if (run() && t.runId === null) {
+          <button type="button" class="btn btn-ghost" (click)="backToHistory()">← History</button>
+        }
+        <span class="spacer"></span>
+        <button type="button" class="btn btn-secondary" (click)="close()">Close</button>
+      </footer>
+    </div>
+  }
+</dialog>
