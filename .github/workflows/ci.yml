@@ -16,7 +16,7 @@ jobs:
       # The Angular CLI (build + Vitest) still runs on Node.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test

@@ -19,6 +19,7 @@
     "test:api": "bun test",
     "test:web": "bun run --cwd web test --watch=false",
     "typecheck": "tsc --noEmit",
+    "compile": "bun scripts/compile.ts",
     "package": "bun scripts/package.ts"
   },
   "devDependencies": {

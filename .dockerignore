@@ -5,3 +5,4 @@ public
 .git
 .env
 release
+dist

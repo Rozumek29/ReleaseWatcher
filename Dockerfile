@@ -1,6 +1,7 @@
-# --- Angular UI (the Angular CLI runs on Node; Bun is only the package manager here) ---
-FROM node:24-alpine AS web
-COPY --from=oven/bun:1.4.4-alpine /usr/local/bin/bun /usr/local/bin/bun
+# --- Build: Angular UI + self-contained server executable ---
+# The Angular CLI runs on Node; Bun is the package manager and compiles the server.
+FROM node:26-trixie-slim AS build
+COPY --from=oven/bun:1.4.4-debian /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app
 COPY package.json bun.lock ./
 COPY web/package.json ./web/
@@ -8,18 +9,22 @@ RUN bun install --frozen-lockfile
 COPY web/ ./web/
 # angular.json writes the bundle to /app/public
 RUN bun run --cwd web build
+COPY tsconfig.json ./
+COPY scripts ./scripts
+COPY src ./src
+# Debian (glibc) build stage on purpose: when the target matches the host, Bun embeds its own runtime,
+# so an Alpine stage would produce a musl binary that cannot start on the glibc distroless image below.
+RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher \
+ && mkdir -p /data
 
-# --- Runtime (Bun runs TypeScript natively; the server has no runtime dependencies) ---
-FROM oven/bun:1.4.4-alpine
-ENV NODE_ENV=production \
-    PORT=8080 \
+# --- Runtime: just the executable and the UI (no Bun, no Node, no shell) ---
+FROM gcr.io/distroless/cc-debian13:nonroot
+ENV PORT=8080 \
     DATABASE_PATH=/data/releasewatcher.db
 WORKDIR /app
-RUN mkdir -p /data && chown bun:bun /data
-COPY package.json ./
-COPY src ./src
-COPY --from=web /app/public ./public
-USER bun
+COPY --from=build /app/dist/releasewatcher ./releasewatcher
+COPY --from=build /app/public ./public
+COPY --from=build --chown=nonroot:nonroot /data /data
 VOLUME /data
 EXPOSE 8080
-CMD ["bun", "src/main.ts"]
+ENTRYPOINT ["/app/releasewatcher"]

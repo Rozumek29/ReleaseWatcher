@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag to publish a release:
-#   v1.2.3        -> GitHub Release + Docker image :1.2.3, :1.2 and :latest
+#   v1.2.3        -> GitHub Release (Linux x64 executable + UI) + Docker image :1.2.3, :1.2 and :latest
 #   beta-1.2.3    -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
 on:
   push:
@@ -25,7 +25,7 @@ jobs:
       # The Angular CLI (build + Vitest) still runs on Node.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 26
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
       - run: bun run test
@@ -34,10 +34,11 @@ jobs:
         id: pkg
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
+          NAME="releasewatcher-$VERSION-linux-x64"
           bun run package "$VERSION"
-          cd release
-          zip -qr "releasewatcher-$VERSION.zip" "releasewatcher-$VERSION"
-          echo "file=release/releasewatcher-$VERSION.zip" >> "$GITHUB_OUTPUT"
+          # tar keeps the executable bit of the compiled binary
+          tar -czf "release/$NAME.tar.gz" -C release "$NAME"
+          echo "file=release/$NAME.tar.gz" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:

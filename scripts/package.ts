@@ -1,19 +1,23 @@
-// Creates a ready-to-run release folder: server sources and the production UI build, so the target machine
-// only needs Bun (no `bun install`, no Angular build – the server has no runtime dependencies).
+// Creates a ready-to-run release folder: a self-contained Linux x64 executable (Bun runtime included) plus the
+// production UI, so the target machine needs nothing installed.
 //
 // Usage: bun scripts/package.ts [version] [--skip-build]   (version defaults to package.json "version")
-// Output: release/releasewatcher-<version>/
+// Output: release/releasewatcher-<version>-linux-x64/
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../package.json';
+import { compile } from './compile.ts';
+
+/** `bun build --compile` target; the folder name uses it without the `bun-` prefix. */
+const TARGET = 'bun-linux-x64';
 
 const root = join(import.meta.dir, '..');
-const versionArg = process.argv.slice(2).find((arg) => !arg.startsWith('--'));
-const version = (versionArg ?? pkg.version).replace(/^v/, '');
-const name = `releasewatcher-${version}`;
+const args = process.argv.slice(2);
+const version = (args.find((arg) => !arg.startsWith('--')) ?? pkg.version).replace(/^v/, '');
+const name = `releasewatcher-${version}-${TARGET.replace(/^bun-/, '')}`;
 const out = join(root, 'release', name);
 
-if (!process.argv.includes('--skip-build')) {
+if (!args.includes('--skip-build')) {
   const result = Bun.spawnSync([process.execPath, 'run', 'build'], { cwd: root, stdio: ['inherit', 'inherit', 'inherit'] });
   if (result.exitCode !== 0) process.exit(result.exitCode ?? 1);
 }
@@ -25,21 +29,13 @@ if (!existsSync(join(root, 'public', 'index.html'))) {
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
 
-for (const entry of ['src', 'public', 'README.md', '.env.example', 'Dockerfile', 'docker-compose.yml']) {
+const binary = join(out, 'releasewatcher');
+compile({ outfile: binary, target: TARGET });
+rmSync(`${binary}.map`, { force: true }); // the source map is also embedded in the binary
+
+for (const entry of ['public', 'README.md', '.env.example']) {
   cpSync(join(root, entry), join(out, entry), { recursive: true });
 }
 
-// Runtime-only package.json: no workspaces, no dev tooling, no dependencies.
-const runtimePkg = {
-  name: pkg.name,
-  version,
-  private: true,
-  description: pkg.description,
-  type: pkg.type,
-  engines: pkg.engines,
-  scripts: { start: 'bun src/main.ts', serve: 'bun src/main.ts' },
-};
-await Bun.write(join(out, 'package.json'), JSON.stringify(runtimePkg, null, 2) + '\n');
-
 console.log(`\nRelease folder ready: release/${name}`);
-console.log('Run it with: bun start   (or: bun src/main.ts)');
+console.log('Run ./releasewatcher inside it; it serves the UI from the public/ folder next to it.');

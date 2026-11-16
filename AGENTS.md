@@ -37,6 +37,7 @@ app does, the API, configuration and project layout – this file covers only wh
 | `bun run test:api`   | server tests (`bun test`, limited to `test/` by `bunfig.toml`) |
 | `bun run test:web`   | UI tests (Vitest via `ng test`)                            |
 | `bun run build`      | production UI build into `public/`                         |
+| `bun run compile`    | single-file server executable into `dist/` (`scripts/compile.ts`) |
 
 A single server test file: `bun test test/checker.test.ts`. Use `bun run test` (not `bun test`) for
 the full suite. The Angular CLI runs on Node.js; Bun is only its package manager.
@@ -52,6 +53,10 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - The server has **no runtime dependencies**. Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
+- Releases and the Docker image run the server as a `bun build --compile` executable (ESM + bytecode). Code
+  must work there too: `import.meta.dir` points into Bun's virtual FS (`/$bunfs/…`), so locate files on disk
+  relative to `process.execPath` (see `appRoot` in `main.ts`), and avoid runtime-only `import()` of paths
+  the bundler cannot see.
 
 ### Architecture notes
 

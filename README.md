@@ -6,7 +6,8 @@ Watches selected GitHub repositories for new releases and sends a notification (
   built-in `bun:sqlite`
 - **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
 - **Notifications:** Discord webhook; new channels plug in through the `Notifier` interface
-- No runtime dependencies – everything the server needs is built into Bun
+- No runtime dependencies – everything the server needs is built into Bun; releases and the Docker image ship
+  it as a single self-contained executable (`bun build --compile`)
 
 ## How it works
 
@@ -28,7 +29,7 @@ Open http://localhost:8080. The SQLite database lives in the `releasewatcher-dat
 
 ## Local development
 
-Requirements: Bun 1.4.4+ and Node.js 24 (the Angular CLI still runs on Node; Bun is only its package
+Requirements: Bun 1.4.4+ and Node.js 26 (the Angular CLI still runs on Node; Bun is only its package
 manager). The server and the Angular UI are one Bun workspace, so a single `bun install` in the repository
 root installs both.
 
@@ -59,27 +60,35 @@ adjust it if you change `PORT`).
 | `bun run serve`     | start the app without touching the UI build                          |
 | `bun run test`      | server tests (`bun test`) + UI tests (Vitest)                        |
 | `bun run typecheck` | type-check the server (TypeScript 7)                                 |
-| `bun run package`   | ready-to-run release folder in `release/` (see Releases)             |
+| `bun run compile`   | compile the server into `dist/releasewatcher` for the current platform |
+| `bun run package`   | ready-to-run Linux x64 release folder in `release/` (see Releases)   |
 
 Use `bun run test`, not plain `bun test` – the latter runs only the server tests (`bunfig.toml` limits
 it to `test/`).
 
 ## Releases
 
-`bun run package` builds a ready-to-run folder in `release/releasewatcher-<version>/` with the server
-and the production UI (there are no runtime dependencies). The target machine only needs Bun:
+`bun run package` builds `release/releasewatcher-<version>-linux-x64/`: the server compiled into one
+self-contained executable (`bun build --compile --bytecode`, Bun runtime included) plus the production UI in
+`public/`. The target machine needs nothing installed:
 
 ```bash
 cp .env.example .env   # optional, settings can also be changed in the UI
-bun start              # http://localhost:8080
+./releasewatcher       # http://localhost:8080
 ```
+
+The executable serves `public/` from its own directory and reads `.env` from the working directory.
+Compile flags live in `scripts/compile.ts`; to ship another platform, change `TARGET` in
+`scripts/package.ts` (e.g. `bun-linux-arm64`).
+
+The Docker image uses the same executable on a distroless base (no Bun, Node or shell inside).
 
 Pushing a tag runs `.github/workflows/release.yml`:
 
 | Tag          | GitHub Release                         | Docker image (`ghcr.io/<owner>/releasewatcher`) |
 | ------------ | -------------------------------------- | ----------------------------------------------- |
-| `v1.2.3`     | release with `releasewatcher-1.2.3.zip` | `1.2.3`, `1.2`, `latest`                        |
-| `beta-1.2.3` | pre-release with the zip               | `beta-1.2.3`                                    |
+| `v1.2.3`     | release with `releasewatcher-1.2.3-linux-x64.tar.gz` | `1.2.3`, `1.2`, `latest`          |
+| `beta-1.2.3` | pre-release with the archive           | `beta-1.2.3`                                    |
 
 ```bash
 git tag v1.0.0 && git push origin v1.0.0
@@ -185,6 +194,7 @@ src/
 test/                bun:test tests
 scripts/
   ensure-web.ts      builds the UI for `bun start` when needed
+  compile.ts         `bun build --compile` flags, used by `bun run compile`, packaging and the Dockerfile
   package.ts         builds the release folder for `bun run package`
 web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
