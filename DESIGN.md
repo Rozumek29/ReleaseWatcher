@@ -15,8 +15,9 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 ```
                  ┌────────────────────────── Bun process (src/main.ts) ──────────────────────────┐
- Browser ──HTTP──▶ app.ts  Bun.serve({ routes })  ── Basic auth guard ── /health is public      │
- (Angular UI)    │   ├─ /api/repositories, /api/settings, /api/status, /api/notifiers …           │
+ Browser ──HTTP──▶ app.ts  Bun.serve({ routes })  ── Origin check + session guard (PUBLIC_ROUTES) │
+ (Angular UI)    │   ├─ auth/routes.ts  /api/auth/… (login, passkeys, sessions, account)            │
+                 │   ├─ /api/repositories, /api/settings, /api/status, /api/notifiers …           │
                  │   ├─ proxmox/routes.ts  /api/containers…, /api/proxmox…, /api/runs/:id         │
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
@@ -24,7 +25,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord   │
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
                  │                                                                                │
-                 │ RepositoryStore / ContainerStore (bun:sqlite) · SettingsService (DB over env)   │
+                 │ RepositoryStore / ContainerStore / AuthStore (bun:sqlite) · SettingsService     │
                  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -32,7 +33,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
   Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
-- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`. A feature folder owns its
+- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `auth/`. A feature folder owns its
   `domain.ts` (pure logic), `store.ts` (SQL), `service.ts` (orchestration), `routes.ts` (HTTP) – follow
   `src/proxmox/` as the template for any new large feature instead of growing `app.ts`.
 
@@ -41,9 +42,20 @@ This file does not repeat those; it describes the **shape** of the system, the *
 | Layer | Files | May depend on | Must not |
 | --- | --- | --- | --- |
 | Domain | `domain.ts`, `version.ts`, `cron.ts`, `proxmox/domain.ts` | nothing with I/O | touch DB, network, clock (`Date.now()` is passed in) |
-| Store | `db.ts`, `proxmox/store.ts` | domain types | contain business rules |
-| Service | `checker.ts`, `poller.ts`, `proxmox/service.ts`, `proxmox/scheduler.ts` | domain, stores, interfaces (`ReleaseSource`, `Notifier`, `NodeShell`) | know about HTTP |
-| HTTP | `app.ts`, `proxmox/routes.ts`, `http.ts`, `validation.ts` | everything above | hold logic beyond validation, mapping and status codes |
+| Store | `db.ts`, `proxmox/store.ts`, `auth/store.ts` | domain types | contain business rules |
+| Service | `checker.ts`, `poller.ts`, `proxmox/service.ts`, `proxmox/scheduler.ts`, `auth/service.ts` | domain, stores, interfaces (`ReleaseSource`, `Notifier`, `NodeShell`) | know about HTTP |
+| HTTP | `app.ts`, `proxmox/routes.ts`, `auth/routes.ts`, `http.ts`, `validation.ts` | everything above | hold logic beyond validation, mapping and status codes |
+
+### Authentication
+
+- One account (password hashed with `Bun.password`, optional passkeys via `@simplewebauthn/server`) and
+  browser sessions in an `HttpOnly; SameSite=Strict` cookie; only a SHA-256 of the token is stored.
+- `buildApp` wraps **every** route: unsafe methods with a foreign `Origin` get `403`, routes outside
+  `PUBLIC_ROUTES` (`src/auth/routes.ts`) need a session (`401`). New endpoints are protected automatically –
+  add to `PUBLIC_ROUTES` only what must work signed out, and never bypass `protect()`.
+- Request-derived values (client IP, origin, WebAuthn RP ID) come from `requestContext()`; forwarded headers are
+  honoured only with `PUBLIC_URL` / `TRUST_PROXY`. Failed logins are throttled per client key (`429` +
+  `Retry-After`).
 
 ### Background work
 
@@ -63,8 +75,8 @@ Full endpoint list: `README.md` → *API*. Rules for new endpoints:
   Actions that do something (check, test, update) are `POST` to a verb sub-path.
 - **JSON in camelCase**, dates as ISO 8601 strings, missing values as `null` (not omitted) in responses.
 - **Status codes:** `200` read/update, `201` create, `202` background run started, `204` delete,
-  `400` validation, `401` auth, `404` unknown id, `409` conflict with current state (e.g. task already running,
-  feature disabled), `502` upstream failure (GitHub, node) when it is the point of the request, `500` only for unexpected errors.
+  `400` validation, `401` not signed in / wrong credentials, `403` cross-site write, `404` unknown id, `409` conflict with current state (e.g. task already running,
+  feature disabled), `502` upstream failure (GitHub, node) when it is the point of the request, `429` login throttle (with `Retry-After`), `500` only for unexpected errors.
 - **Errors** are always problem details via `problem()` / `validationProblem()` (`src/http.ts`):
   `{ status, title, detail?, errors?: { field: [message] } }`. Messages are full English sentences meant for the
   user – the UI shows them as they are (`describeError()` in `api.service.ts`).
@@ -122,6 +134,8 @@ always used in pairs: text in `--x`, background in `--x-soft`.
 
 - **Shell** (`app.html` / `app.scss`): 248px sticky sidebar (brand, nav with counters, poller status,
   *Check all now*) + fluid content (`padding: 32px clamp(16px, 4vw, 48px) 64px`, full width – no max-width).
+- **Auth layout:** `/login` and `/setup` render without the shell (`authLayout()` in `app.ts`): a centred
+  400px `.card.auth-card` with the brand block (`pages/auth/auth.scss`). Use it for any future signed-out screen.
 - **≤ 860px:** sidebar becomes an off-canvas drawer with a backdrop and a sticky mobile bar; it closes on navigation.
 - **Page anatomy** (copy an existing page):
   1. `<header class="page-header">` with `h1` + one-line `p` description, optional actions on the right;
@@ -210,7 +224,10 @@ Shared components in `web/src/app/shared/`:
   only for tiny shared components). Selector prefix `app-`.
 - Component styles stay under the 8 kB budget (`angular.json`); anything used by two pages belongs in
   `styles.scss` or `shared/`.
-- New page checklist: route in `app.routes.ts`, nav item (+ icon) in `app.ts`, `page-header`, loading/empty/error
+- Auth on the client: `AuthService` (`core/auth.service.ts`) holds the session state, `authGuard` /
+  `loginGuard` / `setupGuard` protect routes, and `authInterceptor` sends the user to `/login?returnUrl=…` on any
+  `401`. `returnUrl` must stay an in-app path (see `LoginPage.safeReturnUrl`).
+- New page checklist: route in `app.routes.ts` with `canActivate: [authGuard]`, nav item (+ icon) in `app.ts`, `page-header`, loading/empty/error
   states, spec file, README *UI* section.
 
 ---
@@ -252,7 +269,10 @@ These exist today; do not copy them into new code:
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own
   `routes.ts` like `proxmox/routes.ts`, and repositories can be moved out the same way.
 - README → *UI* does not describe the Containers page yet.
-- Unsafe requests (`POST`/`PUT`/`DELETE`) have no CSRF protection: with Basic auth enabled the browser re-sends
-  cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/apt-upgrade` accepts an empty
-  body. Planned fix: reject unsafe requests whose `Sec-Fetch-Site`/`Origin` is cross-site. New endpoints must not
-  rely on “nobody can reach it” as protection.
+- With `TRUST_PROXY=true` the client IP is the **leftmost** `X-Forwarded-For` entry, which the client can set
+  (nginx, Caddy and Traefik append to it), so the per-IP login throttle can be dodged. It should take the entry
+  added by the trusted proxy (rightmost).
+- `package.json` has a second runtime dependency, `reflect-metadata` (polyfill loaded by `scripts/compile.ts`),
+  while `AGENTS.md` names `@simplewebauthn/server` as the only one.
+- `requestContext()` and the Origin check read `X-Forwarded-Host` / `X-Forwarded-Proto` even without
+  `TRUST_PROXY`; they should be honoured only when a proxy is trusted (or `PUBLIC_URL` is set).
