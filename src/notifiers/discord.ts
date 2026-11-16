@@ -140,7 +140,10 @@ export function buildContainerPayload(
     ...(options.avatarUrl ? { avatar_url: options.avatarUrl } : {}),
     embeds: [
       {
-        title: truncate(`CT ${notification.vmid} (${notification.containerName}): updates available`, 256),
+        title: truncate(
+          `${notification.isNode ? 'Proxmox host' : `CT ${notification.vmid}`} (${notification.containerName}): updates available`,
+          256,
+        ),
         description: truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)),
         color: CONTAINER_COLOR,
         timestamp: new Date().toISOString(),

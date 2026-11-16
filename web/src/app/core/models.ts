@@ -206,6 +206,8 @@ export interface ContainerApp {
 
 export interface Container {
   id: number;
+  /** `node` = the Proxmox host itself (apt only, vmid 0). */
+  kind: 'lxc' | 'node';
   vmid: number;
   name: string;
   isEnabled: boolean;
@@ -214,6 +216,8 @@ export interface Container {
   backupBeforeUpdate: boolean | null;
   /** The value in effect for this container (own setting or the global default). */
   effectiveBackupBeforeUpdate: boolean;
+  /** Started temporarily for checks and updates when stopped, shut down again afterwards. */
+  startWhenStopped: boolean;
   /** Overrides the global schedule; null = global. */
   checkCron: string | null;
   nextCheckAt: string | null;
@@ -234,6 +238,7 @@ export interface UpdateContainerRequest {
   isEnabled: boolean;
   aptEnabled: boolean;
   backupBeforeUpdate: boolean | null;
+  startWhenStopped: boolean;
   checkCron: string | null;
 }
 

@@ -184,8 +184,13 @@ const MIGRATIONS: readonly string[] = [
      expires_at   TEXT NOT NULL
    );
    CREATE INDEX idx_sessions_expires ON sessions (expires_at);`,
+  // Start a stopped container temporarily for checks and updates (shut down again afterwards).
+  `ALTER TABLE containers ADD COLUMN start_when_stopped INTEGER NOT NULL DEFAULT 0;`,
+  // The Proxmox host itself as a check/update target (apt only), stored with vmid 0.
+  `ALTER TABLE containers ADD COLUMN kind TEXT NOT NULL DEFAULT 'lxc';`,
   // Internal values of the app itself (e.g. the encryption key check); never exposed through the API.
-  `CREATE TABLE app_meta (
+  // IF NOT EXISTS: development databases of the encryption branch created it before the two migrations above.
+  `CREATE TABLE IF NOT EXISTS app_meta (
      key   TEXT PRIMARY KEY,
      value TEXT NOT NULL
    );`,
@@ -223,7 +228,10 @@ export class RepositoryStore {
   }
 
   list(): WatchedRepository[] {
-    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY owner, name').all().map((r) => toEntity(r, this.secrets));
+    return this.db
+      .query<Row, []>('SELECT * FROM watched_repositories ORDER BY name COLLATE NOCASE, owner COLLATE NOCASE')
+      .all()
+      .map((r) => toEntity(r, this.secrets));
   }
 
   listEnabled(): WatchedRepository[] {

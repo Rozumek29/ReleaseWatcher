@@ -111,10 +111,15 @@ export class FakeShell implements NodeShell {
   /**
    * Emulates the batched check script (`buildCheckScript`): answers `pct status <vmid>` and – for a running
    * container – every step as `pct exec <vmid> -- sh -lc '<step>'`, so handlers can match single commands.
+   * A script for the node itself (no `pct status`) answers every step as the plain command.
    */
   private async runCheckBatch(command: string, token: string): Promise<CommandResult> {
-    const vmid = Number(command.match(/pct status (\d+)/)?.[1]);
-    const status = await this.answer(`pct status ${vmid}`);
+    const vmidText = command.match(/pct status (\d+)/)?.[1];
+    const vmid = vmidText === undefined ? null : Number(vmidText);
+    const status =
+      vmid === null
+        ? { exitCode: 0, output: 'status: running', timedOut: false }
+        : await this.answer(`pct status ${vmid}`);
     if (status.exitCode === 255) {
       return status; // connection failure: no sections at all
     }
@@ -127,7 +132,7 @@ export class FakeShell implements NodeShell {
       // Steps are single-quoted with shQuote (a quote inside is written as '\'').
       for (const match of inner.matchAll(/^rw_step (\S+) \d+ ('(?:[^']|'\\'')*')/gm)) {
         const script = match[2]!.slice(1, -1).replaceAll("'\\''", "'");
-        const result = await this.answer(pctExec(vmid, script));
+        const result = await this.answer(vmid === null ? script : pctExec(vmid, script));
         output += section(match[1]!, result.output, result.exitCode);
       }
     }

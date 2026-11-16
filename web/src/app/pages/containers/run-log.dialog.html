@@ -11,10 +11,10 @@
                 · {{ name }}
               }
             </h2>
-            <p>CT {{ t.container.vmid }} ({{ t.container.name }}) · started {{ r.startedAt | date: 'medium' }}</p>
+            <p>{{ label(t.container) }} ({{ t.container.name }}) · started {{ r.startedAt | date: 'medium' }}</p>
           } @else {
             <h2 id="run-title">History</h2>
-            <p>CT {{ t.container.vmid }} ({{ t.container.name }}) · latest checks and updates</p>
+            <p>{{ label(t.container) }} ({{ t.container.name }}) · latest checks and updates</p>
           }
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close">

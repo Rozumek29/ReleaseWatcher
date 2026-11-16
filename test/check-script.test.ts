@@ -51,6 +51,17 @@ describe('batched check script', () => {
     assert.equal(result.steps.size, 0);
   });
 
+  it('runs the steps on the node itself for the host (no pct at all)', async () => {
+    const token = newCheckToken();
+    const script = buildCheckScript(null, steps, token);
+    assert.equal(script.includes('pct'), false);
+    // The stub `pct` would report "stopped" – the host script must not ask it.
+    const result = parseCheckOutput(await runOnStubNode(script, 'stopped'), token);
+    assert.deepEqual(result.status, { exitCode: 0, output: 'status: running' });
+    assert.deepEqual(result.steps.get('v1'), { exitCode: 0, output: "it's 1.2.3" });
+    assert.equal(result.steps.get('v2')?.exitCode, 3);
+  });
+
   it('backs up with zstd, except on Proxmox Backup Server', async () => {
     const run = async (storage: string) => {
       const stub = [

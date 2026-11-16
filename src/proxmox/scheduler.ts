@@ -91,6 +91,14 @@ export class ContainerScheduler {
     return this.idle();
   }
 
+  /** Queues a manual check of the given containers (e.g. after adding several at once). */
+  checkMany(containerIds: readonly number[]): Promise<void> {
+    for (const id of containerIds) {
+      this.enqueue(id, 'manual');
+    }
+    return this.idle();
+  }
+
   /** Resolves when nothing is queued or running. */
   idle(): Promise<void> {
     if (this.pending.size === 0 && this.inFlight.size === 0) {

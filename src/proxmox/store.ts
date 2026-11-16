@@ -1,13 +1,26 @@
 import type { Database } from 'bun:sqlite';
-import type { AptPackage, Container, ContainerApp, LatestSource, Run, RunKind, RunStatus, RunTrigger } from './domain.ts';
+import {
+  type AptPackage,
+  type Container,
+  type ContainerApp,
+  type LatestSource,
+  NODE_VMID,
+  type Run,
+  type RunKind,
+  type RunStatus,
+  type RunTrigger,
+  type TargetKind,
+} from './domain.ts';
 
 interface ContainerRow {
   id: number;
+  kind: string;
   vmid: number;
   name: string;
   is_enabled: number;
   apt_enabled: number;
   backup_before_update: number | null;
+  start_when_stopped: number;
   check_cron: string | null;
   status: string | null;
   apt_upgradable: string | null;
@@ -62,11 +75,13 @@ function parsePackages(json: string | null): AptPackage[] {
 
 const toContainer = (r: ContainerRow): Container => ({
   id: r.id,
+  kind: r.kind as TargetKind,
   vmid: r.vmid,
   name: r.name,
   isEnabled: r.is_enabled === 1,
   aptEnabled: r.apt_enabled === 1,
   backupBeforeUpdate: r.backup_before_update === null ? null : r.backup_before_update === 1,
+  startWhenStopped: r.start_when_stopped === 1,
   checkCron: r.check_cron,
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
@@ -138,7 +153,21 @@ export class ContainerStore {
   }
 
   existsVmid(vmid: number): boolean {
-    return this.db.query('SELECT 1 FROM containers WHERE vmid = ?').get(vmid) !== null;
+    return this.db.query("SELECT 1 FROM containers WHERE vmid = ? AND kind = 'lxc'").get(vmid) !== null;
+  }
+
+  /** The Proxmox host entry, when it has been added. */
+  getNode(): Container | null {
+    const row = this.db.query<ContainerRow, []>("SELECT * FROM containers WHERE kind = 'node'").get();
+    return row ? toContainer(row) : null;
+  }
+
+  /** Adds the Proxmox host as a target (apt only). */
+  addNode(name: string): Container {
+    const result = this.db
+      .query("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('node', ?, ?, ?)")
+      .run(NODE_VMID, name, new Date().toISOString());
+    return this.get(Number(result.lastInsertRowid))!;
   }
 
   add(vmid: number, name: string): Container {
@@ -152,7 +181,8 @@ export class ContainerStore {
     this.db
       .query(
         `UPDATE containers SET
-           name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, check_cron = ?, status = ?,
+           name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
+           status = ?,
            apt_upgradable = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
@@ -161,6 +191,7 @@ export class ContainerStore {
         c.isEnabled ? 1 : 0,
         c.aptEnabled ? 1 : 0,
         c.backupBeforeUpdate === null ? null : c.backupBeforeUpdate ? 1 : 0,
+        c.startWhenStopped ? 1 : 0,
         c.checkCron,
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,

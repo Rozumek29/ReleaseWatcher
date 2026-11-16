@@ -172,4 +172,98 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('jellyfin');
     expect(el.querySelector('.add-card')).toBeNull();
   });
+
+  it('adds all containers of the node at once', async () => {
+    const { fixture, el } = await create([]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    http.expectOne('/api/proxmox/containers').flush([
+      { vmid: 101, status: 'running', name: 'vaultwarden', added: false },
+      { vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
+    ]);
+    await settle(fixture);
+
+    const addAll = [...el.querySelectorAll<HTMLButtonElement>('.add-form button')].find((b) =>
+      b.textContent?.includes('Add all'),
+    )!;
+    expect(addAll.textContent?.trim()).toBe('Add all (2)');
+    addAll.click();
+    const request = http.expectOne('/api/containers/add-all');
+    expect(request.request.method).toBe('POST');
+    const added = [container({ isBusy: true }), container({ id: 2, vmid: 102, name: 'jellyfin' })];
+    request.flush(added, { status: 201, statusText: 'Created' });
+    await settle(fixture);
+    http.expectOne('/api/containers').flush(added);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    expect(el.querySelectorAll('.list > li').length).toBe(2);
+    expect(el.querySelector('.add-card')).toBeNull();
+  });
+
+  it('explains stopped containers and blocks their updates', async () => {
+    const { el } = await create([container({ status: 'stopped' })]);
+
+    expect(el.querySelector('.stopped-line')?.textContent).toContain('not started automatically');
+    expect(el.textContent).not.toContain('Up to date');
+    const updateButtons = [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) =>
+      ['Upgrade', 'Update'].includes(b.textContent?.trim() ?? ''),
+    );
+    expect(updateButtons.length).toBe(2);
+    expect(updateButtons.every((b) => b.disabled)).toBe(true);
+    // Checking stays possible – it reads the status without starting the container.
+    const check = [...el.querySelectorAll<HTMLButtonElement>('.actions button')].find(
+      (b) => b.textContent?.trim() === 'Check',
+    )!;
+    expect(check.disabled).toBe(false);
+  });
+
+  it('adds the Proxmox host and upgrades it without a backup', async () => {
+    const { fixture, el } = await create([container()]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    http.expectOne('/api/proxmox/containers').flush([{ vmid: 101, status: 'running', name: 'vaultwarden', added: true }]);
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('.node-row button')!.click();
+    const request = http.expectOne('/api/containers/node');
+    expect(request.request.method).toBe('POST');
+    const node = container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], updatesAvailable: 1 });
+    request.flush(node, { status: 201, statusText: 'Created' });
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    const row = el.querySelector('.list > li')!;
+    expect(row.querySelector('.title-line')?.textContent).toContain('Host');
+    expect(row.querySelector('.vmid')).toBeNull();
+    expect(row.textContent).not.toContain('No applications configured');
+    expect(row.querySelector('[title=Remove]')?.getAttribute('aria-label')).toBe('Remove Proxmox host');
+
+    [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.includes('Upgrade'))!.click();
+    await settle(fixture);
+    expect(row.querySelector('.backup-check')).toBeNull();
+    expect(row.textContent).toContain('dist-upgrade, no backup');
+    [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const upgrade = http.expectOne('/api/containers/5/apt-upgrade');
+    expect(upgrade.request.body).toEqual({ backup: false });
+    upgrade.flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
+      status: 202,
+      statusText: 'Accepted',
+    });
+    await settle(fixture);
+    http.expectOne('/api/runs/9').flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null }));
+    await settle(fixture);
+    expect(el.querySelector('app-run-log-dialog')?.textContent).toContain('Proxmox host (pve)');
+  });
+
+  it('keeps updates of a stopped container available when it may be started temporarily', async () => {
+    const { el } = await create([container({ status: 'stopped', startWhenStopped: true })]);
+
+    expect(el.querySelector('.stopped-line')?.textContent).toContain('start it temporarily');
+    const updateButtons = [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) =>
+      ['Upgrade', 'Update'].includes(b.textContent?.trim() ?? ''),
+    );
+    expect(updateButtons.length).toBe(2);
+    expect(updateButtons.some((b) => b.disabled)).toBe(false);
+  });
 });

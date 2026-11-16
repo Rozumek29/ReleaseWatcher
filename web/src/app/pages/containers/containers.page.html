@@ -51,7 +51,22 @@
         <button type="submit" class="btn" [disabled]="adding() || selectedVmid === null">
           {{ adding() ? 'Adding…' : 'Add' }}
         </button>
+        @if (available().length > 1) {
+          <button type="button" class="btn btn-secondary" (click)="addAll()" [disabled]="adding()">
+            Add all ({{ available().length }})
+          </button>
+        }
       </form>
+    }
+    @if (!hasNode() && !discovering()) {
+      <div class="node-row">
+        <span>
+          <app-icon name="server" [size]="14" />
+          <strong>Proxmox host</strong>
+          <span class="muted">– apt updates of the node itself (no applications)</span>
+        </span>
+        <button type="button" class="btn btn-secondary" (click)="addNode()" [disabled]="adding()">Add host</button>
+      </div>
     }
   </section>
 }
@@ -75,7 +90,11 @@
         <div class="row-head">
           <div class="main">
             <div class="title-line">
-              <span class="vmid mono">{{ c.vmid }}</span>
+              @if (c.kind === 'node') {
+                <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
+              } @else {
+                <span class="vmid mono">{{ c.vmid }}</span>
+              }
               <span class="name">{{ c.name }}</span>
               @if (c.status) {
                 <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
@@ -87,7 +106,7 @@
                 <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
               } @else if (c.updatesAvailable > 0) {
                 <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
-              } @else if (c.lastCheckedAt && !c.lastError) {
+              } @else if (c.lastCheckedAt && !c.lastError && !blockedWhileStopped(c)) {
                 <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
               }
             </div>
@@ -112,7 +131,7 @@
 
           <div class="actions">
             @if (confirming() === 'delete-' + c.id) {
-              <span class="confirm-text">Remove CT {{ c.vmid }}?</span>
+              <span class="confirm-text">Remove {{ label(c) }}?</span>
               <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
             } @else {
@@ -120,13 +139,13 @@
                 <app-icon name="refresh" [size]="14" />
                 Check
               </button>
-              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of CT ' + c.vmid" title="History">
+              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of ' + label(c)" title="History">
                 <app-icon name="history" [size]="16" />
               </button>
-              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of CT ' + c.vmid" title="Settings">
+              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of ' + label(c)" title="Settings">
                 <app-icon name="sliders" [size]="16" />
               </button>
-              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove CT ' + c.vmid" title="Remove">
+              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove ' + label(c)" title="Remove">
                 <app-icon name="trash" [size]="16" />
               </button>
             }
@@ -138,6 +157,22 @@
             <app-icon name="alert" [size]="14" />
             <span class="pre-line">{{ c.lastError }}</span>
           </div>
+        }
+        @if (c.status === 'stopped') {
+          <p class="stopped-line muted small">
+            <app-icon name="power" [size]="14" />
+            @if (c.startWhenStopped) {
+              <span>
+                The container is stopped. Checks and updates start it temporarily and shut it down again afterwards.
+              </span>
+            } @else {
+              <span>
+                The container is stopped, so apt and applications are not checked and updates cannot run – it is not
+                started automatically. Results below are from the last check while it was running.
+                <button type="button" class="link-btn" (click)="editing.set(c)">Allow a temporary start</button>
+              </span>
+            }
+          </p>
         }
 
         <div class="items">
@@ -157,6 +192,9 @@
                 <div class="item-actions">
                   @if (confirming() === 'apt-' + c.id) {
                     <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
+                    @if (c.kind === 'node') {
+                      <span class="muted small">apt-get dist-upgrade, no backup</span>
+                    } @else {
                     <label class="backup-check" [class.disabled]="!backupStorage()">
                     <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
                     Backup first
@@ -166,10 +204,11 @@
                       <span class="muted">(choose a storage in Settings)</span>
                     }
                   </label>
+                    }
                   <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                   } @else {
-                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured()">
+                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
                       <app-icon name="arrowUp" [size]="14" /> Upgrade
                     </button>
                   }
@@ -223,8 +262,8 @@
                     class="btn btn-sm"
                     [class.btn-secondary]="!a.updateAvailable"
                     (click)="ask('app-' + c.id + '-' + a.id, c)"
-                    [disabled]="isBusy(c) || !configured()"
-                    [title]="'Run: ' + a.updateCommand"
+                    [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                    [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
                   >
                     <app-icon name="arrowUp" [size]="14" /> Update
                   </button>
@@ -235,11 +274,13 @@
               }
             </div>
           } @empty {
+            @if (c.kind !== 'node') {
             <div class="item muted small">
               No applications configured.
               <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
               to track its version and update it (e.g. <code>update</code> from community-scripts or <code>./pull.sh</code>).
             </div>
+            }
           }
         </div>
       </li>

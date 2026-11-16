@@ -19,6 +19,7 @@ import {
   LatestSource,
   WatchedRepository,
 } from '../../core/models';
+import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
 
@@ -75,10 +76,12 @@ export class ContainerSettingsDialog {
   protected name = '';
   protected isEnabled = true;
   protected aptEnabled = true;
+  protected startWhenStopped = false;
   /** 'default' = follow the global setting. */
   protected backupChoice: 'default' | 'yes' | 'no' = 'default';
   protected checkCron = '';
 
+  protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
   protected readonly repositories = signal<WatchedRepository[]>([]);
   protected readonly appForm = signal<AppForm | null>(null);
@@ -98,6 +101,7 @@ export class ContainerSettingsDialog {
           this.name = container.name;
           this.isEnabled = container.isEnabled;
           this.aptEnabled = container.aptEnabled;
+          this.startWhenStopped = container.startWhenStopped;
           this.backupChoice =
             container.backupBeforeUpdate === null ? 'default' : container.backupBeforeUpdate ? 'yes' : 'no';
           this.checkCron = container.checkCron ?? '';
@@ -130,6 +134,7 @@ export class ContainerSettingsDialog {
           name: this.name.trim(),
           isEnabled: this.isEnabled,
           aptEnabled: this.aptEnabled,
+          startWhenStopped: this.startWhenStopped,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
         }),

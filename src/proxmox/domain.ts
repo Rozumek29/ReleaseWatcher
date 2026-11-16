@@ -1,9 +1,17 @@
 import { compareVersions } from '../version.ts';
 
-/** An LXC container on the Proxmox node, managed through `pct exec`. */
+export const TARGET_KINDS = ['lxc', 'node'] as const;
+/** `lxc` = a container managed through `pct exec`; `node` = the Proxmox host itself (apt only). */
+export type TargetKind = (typeof TARGET_KINDS)[number];
+
+/** vmid stored for the Proxmox host entry (real container IDs start at 100). */
+export const NODE_VMID = 0;
+
+/** An LXC container on the Proxmox node, managed through `pct exec` – or the node itself (`kind: 'node'`). */
 export interface Container {
   id: number;
-  /** Proxmox container ID (e.g. 101). */
+  kind: TargetKind;
+  /** Proxmox container ID (e.g. 101); {@link NODE_VMID} for the host. */
   vmid: number;
   name: string;
   /** Disabled containers are skipped by scheduled checks. */
@@ -12,6 +20,8 @@ export interface Container {
   aptEnabled: boolean;
   /** Back up (vzdump) before updates by default; null = use the global setting. */
   backupBeforeUpdate: boolean | null;
+  /** Start the container for checks and updates when it is stopped, and shut it down again afterwards. */
+  startWhenStopped: boolean;
   /** Cron expression overriding the global check schedule; null = use the global one. */
   checkCron: string | null;
   /** Last status reported by `pct status` (running, stopped, …). */
@@ -81,10 +91,21 @@ export const DEFAULT_APP_TIMEOUT_SECONDS = 30 * 60;
 export const MIN_APP_TIMEOUT_SECONDS = 10;
 export const MAX_APP_TIMEOUT_SECONDS = 6 * 60 * 60;
 
-/** True/false when both versions are known, otherwise null. Non-comparable versions differ → update. */
+/** A git commit hash (full or abbreviated, at least 7 hex digits). */
+const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,40}$/i;
+
+/**
+ * True/false when both versions are known, otherwise null. Non-comparable versions differ → update.
+ * Two commit hashes are compared as opaque values (an abbreviated hash matches the full one).
+ */
 export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 'latestVersion'>): boolean | null {
   if (!app.installedVersion || !app.latestVersion) {
     return null;
+  }
+  const installed = app.installedVersion.trim().toLowerCase();
+  const latest = app.latestVersion.trim().toLowerCase();
+  if (COMMIT_HASH_PATTERN.test(installed) && COMMIT_HASH_PATTERN.test(latest)) {
+    return !(installed.startsWith(latest) || latest.startsWith(installed));
   }
   const diff = compareVersions(app.latestVersion, app.installedVersion);
   return diff === null ? app.latestVersion.trim() !== app.installedVersion.trim() : diff > 0;
@@ -127,6 +148,31 @@ export function parsePvesmStatus(output: string): BackupStorage[] {
  * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
  * Retention follows the prune settings of the storage.
  */
+/** Seconds to wait for a default route after `pct start` (services need the network, e.g. apt). */
+export const START_NETWORK_WAIT_SECONDS = 60;
+/** Seconds `pct shutdown` waits for a clean shutdown before the container is stopped forcibly. */
+export const SHUTDOWN_TIMEOUT_SECONDS = 120;
+
+/**
+ * Starts a stopped container and waits until it has a default route (read from /proc, so no tools are needed
+ * inside). Without a network after the wait it continues anyway – the following commands report their errors.
+ */
+export function startContainerCommand(vmid: number): string {
+  const networkReady = shQuote(`awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route`);
+  return [
+    `pct start ${vmid} || exit $?`,
+    `for i in $(seq 1 ${START_NETWORK_WAIT_SECONDS}); do`,
+    `  pct exec ${vmid} -- sh -c ${networkReady} >/dev/null 2>&1 && exit 0`,
+    `  sleep 1`,
+    `done`,
+    `echo 'No network after ${START_NETWORK_WAIT_SECONDS} s – continuing anyway.'`,
+  ].join('\n');
+}
+
+/** Shuts a container down cleanly, stopping it forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}. */
+export const shutdownContainerCommand = (vmid: number): string =>
+  `pct shutdown ${vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} --forceStop 1`;
+
 export function vzdumpCommand(vmid: number, storage: string, note: string): string {
   const id = shQuote(storage);
   return [
@@ -168,6 +214,20 @@ export const APT_CHECK_SCRIPT = [
   `echo '${APT_LIST_MARKER}'`,
   'apt list --upgradable 2>/dev/null',
 ].join('\n');
+
+/**
+ * Upgrade of the Proxmox host. Proxmox VE must be upgraded with `dist-upgrade` (= `full-upgrade`): a plain
+ * `upgrade` holds back packages with new dependencies and can leave PVE half-upgraded.
+ */
+export const NODE_APT_UPGRADE_SCRIPT = [
+  'export DEBIAN_FRONTEND=noninteractive',
+  'apt-get update',
+  'apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade',
+].join(' && ');
+
+/** Human-readable name of a check/update target in logs and notifications. */
+export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
+  c.kind === 'node' ? 'the Proxmox host' : `CT ${c.vmid}`;
 
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
@@ -251,9 +311,10 @@ export const newCheckToken = (): string => `@@RW-${crypto.randomUUID().replaceAl
  * `<token> begin <id>` / `<token> end <id> <exit code>` lines. The container script travels base64-encoded, so
  * user commands are quoted only once.
  */
-export function buildCheckScript(vmid: number, steps: readonly CheckStep[], token: string): string {
+export function buildCheckScript(vmid: number | null, steps: readonly CheckStep[], token: string): string {
   const node = [
-    `s=$(pct status ${vmid} 2>&1); rc=$?`,
+    // null = the steps run on the node itself, which is running when this script runs at all.
+    vmid === null ? `s='status: running'; rc=0` : `s=$(pct status ${vmid} 2>&1); rc=$?`,
     `printf '%s begin status\n%s\n%s end status %s\n' '${token}' "$s" '${token}' "$rc"`,
   ];
   if (steps.length > 0) {
@@ -267,8 +328,11 @@ export function buildCheckScript(vmid: number, steps: readonly CheckStep[], toke
       ...steps.map((s) => `rw_step ${s.id} ${Math.max(1, Math.round(s.timeoutSeconds))} ${shQuote(s.script)}`),
     ].join('\n');
     const encoded = Buffer.from(inner, 'utf8').toString('base64');
+    const decoded = `"$(printf %s '${encoded}' | base64 -d)"`;
     node.push(
-      `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc "$(printf %s '${encoded}' | base64 -d)" ;; esac`,
+      vmid === null
+        ? `sh -lc ${decoded}`
+        : `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc ${decoded} ;; esac`,
     );
   }
   return node.join('\n');

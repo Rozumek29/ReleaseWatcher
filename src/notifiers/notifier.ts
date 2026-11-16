@@ -12,6 +12,8 @@ export interface ReleaseNotification {
 /** Pending updates found in a Proxmox LXC container. */
 export interface ContainerUpdatesNotification {
   vmid: number;
+  /** The Proxmox host itself rather than a container. */
+  isNode?: boolean;
   containerName: string;
   /** Upgradable apt packages (all of them, not only new ones). */
   aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];

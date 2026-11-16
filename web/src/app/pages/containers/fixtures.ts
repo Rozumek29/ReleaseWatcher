@@ -28,11 +28,13 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
 
 export const container = (overrides: Partial<Container> = {}): Container => ({
   id: 1,
+  kind: 'lxc',
   vmid: 101,
   name: 'vaultwarden',
   isEnabled: true,
   aptEnabled: true,
   backupBeforeUpdate: null,
+  startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
   checkCron: null,
   nextCheckAt: '2030-01-01T06:00:00Z',

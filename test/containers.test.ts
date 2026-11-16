@@ -158,8 +158,10 @@ describe('containers API', () => {
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
-    assert.match(shell.commands[0]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
-    assert.ok(shell.commands[1]!.includes('apt-get -y'));
+    // The live status is read first – updates never run in a stopped container.
+    assert.equal(shell.commands[0], 'pct status 101');
+    assert.match(shell.commands[1]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
+    assert.ok(shell.commands[2]!.includes('apt-get -y'));
     assert.deepEqual((await request('GET', `/api/containers/${container.id}`)).json().aptUpgradable, []);
     assert.match(run?.output ?? '', /Backing up CT 101 to storage "pbs"/);
   });
@@ -255,12 +257,189 @@ describe('containers API', () => {
     assert.equal(ok.json().checkCron, '30 4 * * *');
   });
 
-  it('reports stopped containers as errors without running commands inside', async () => {
-    const response = await request('POST', '/api/containers', { vmid: 102 });
-    const run = await app.containers.wait(response.json().id);
+  it('skips stopped containers without an error, keeps their last results and never starts them', async () => {
+    const container = await addContainer();
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().aptUpgradable.length, 1);
+    const sent = notifier.containerSent.length;
+
+    shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
+    shell.commands.length = 0;
+    await request('POST', `/api/containers/${container.id}/check`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded');
+    assert.match(run?.output ?? '', /stopped – apt and application checks skipped/);
+    assert.equal(shell.commands.some((c) => c.startsWith('pct exec') || c.startsWith('pct start')), false);
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.status, 'stopped');
+    assert.equal(dto.lastError, null);
+    assert.equal(dto.aptUpgradable.length, 1, 'results of the last check are kept');
+    assert.equal(notifier.containerSent.length, sent);
+  });
+
+  it('refuses to update a container that is stopped now', async () => {
+    const container = await addContainer();
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
+    shell.commands.length = 0;
+
+    assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
-    assert.equal(shell.commands.some((c) => c.startsWith('pct exec 102')), false);
-    assert.match((await request('GET', `/api/containers/${response.json().id}`)).json().lastError, /stopped/);
+    assert.match(run?.output ?? '', /CT 101 is stopped – start it, then run the update again/);
+    assert.deepEqual(shell.commands, ['pct status 101'], 'no backup, no update');
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().status, 'stopped');
+  });
+
+  /** Makes CT 101 stopped; `pct start`/`pct shutdown` change its state like on a real node. */
+  const stoppableContainer = async () => {
+    const container = await addContainer();
+    let state = 'stopped';
+    shell
+      .on(/^pct status 101$/, () => ({ output: `status: ${state}\n` }))
+      .on(/^pct start 101/, () => {
+        state = 'running';
+        return { output: '' };
+      })
+      .on(/^pct shutdown 101 /, () => {
+        state = 'stopped';
+        return { output: '' };
+      });
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const saved = await request('PUT', `/api/containers/${container.id}`, { ...dto, startWhenStopped: true });
+    assert.equal(saved.json().startWhenStopped, true);
+    shell.commands.length = 0;
+    return { container, state: () => state };
+  };
+
+  it('starts a stopped container temporarily for a check when allowed and shuts it down again', async () => {
+    const { container, state } = await stoppableContainer();
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+
+    await request('POST', `/api/containers/${container.id}/check`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded');
+    const started = shell.commands.findIndex((c) => c.startsWith('pct start 101'));
+    const checked = shell.commands.findIndex((c) => c.startsWith('pct exec 101'));
+    const stopped = shell.commands.findIndex((c) => c.startsWith('pct shutdown 101 --timeout 120 --forceStop 1'));
+    assert.ok(started >= 0 && started < checked && checked < stopped, shell.commands.join('\n'));
+    // It waits for the network inside the container (apt needs it).
+    assert.match(shell.commands[started]!, /\/proc\/net\/route/);
+    assert.equal(state(), 'stopped');
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.status, 'stopped');
+    assert.deepEqual(dto.aptUpgradable, [], 'fresh results from the temporary start');
+    assert.equal(dto.lastError, null);
+  });
+
+  it('starts a stopped container temporarily for an update, after the backup', async () => {
+    const { container, state } = await stoppableContainer();
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
+
+    assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    const order = ['pct start 101', 'vzdump', 'apt-get -y', 'pct shutdown 101'].map((part) =>
+      shell.commands.findIndex((c) => c.includes(part)),
+    );
+    assert.deepEqual([...order].sort((a, b) => a - b), order, shell.commands.join('\n'));
+    assert.ok(order.every((i) => i >= 0));
+    assert.equal(state(), 'stopped');
+  });
+
+  it('leaves a running container running when the option is on', async () => {
+    const { container, state } = await stoppableContainer();
+    shell.on(/^pct status 101$/, { output: 'status: running\n' });
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    assert.equal(shell.commands.some((c) => /^pct (start|shutdown)/.test(c)), false);
+    assert.equal(state(), 'stopped', 'the fake state was never touched');
+  });
+
+  it('fails the update when the container cannot be started', async () => {
+    const { container } = await stoppableContainer();
+    shell.on(/^pct start 101/, { exitCode: 255, output: 'startup for container 101 failed\n' });
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`);
+    const run = await app.containers.wait(container.id);
+    assert.equal(run?.status, 'failed');
+    assert.match(run?.output ?? '', /Starting CT 101 failed/);
+    assert.equal(shell.commands.some((c) => c.includes('apt-get -y') || c.startsWith('pct shutdown')), false);
+  });
+
+  it('checks and upgrades apt on the Proxmox host itself', async () => {
+    shell.on(/^hostname$/, { output: 'pve\n' });
+    const response = await request('POST', '/api/containers/node');
+    assert.equal(response.status, 201);
+    const node = response.json();
+    assert.equal(node.kind, 'node');
+    assert.equal(node.name, 'pve');
+    assert.equal((await request('POST', '/api/containers/node')).status, 409);
+    await app.containers.wait(node.id);
+
+    // The apt check ran directly on the node – no pct status/exec.
+    assert.ok(shell.commands.some((c) => c.includes('apt list --upgradable') && !c.startsWith('pct')));
+    assert.equal(shell.commands.some((c) => c.startsWith('pct')), false);
+    let dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    assert.equal(dto.status, 'running');
+    assert.equal(dto.aptUpgradable.length, 1);
+    assert.equal(dto.effectiveBackupBeforeUpdate, false);
+    assert.equal(notifier.containerSent.at(-1)?.isNode, true);
+
+    // The host has no applications, backups or temporary starts.
+    const app1 = await request('POST', `/api/containers/${node.id}/apps`, { name: 'x', latestSource: 'none' });
+    assert.equal(app1.status, 409);
+    const saved = await request('PUT', `/api/containers/${node.id}`, {
+      ...dto,
+      aptEnabled: false,
+      startWhenStopped: true,
+      backupBeforeUpdate: true,
+    });
+    assert.deepEqual(
+      [saved.json().aptEnabled, saved.json().startWhenStopped, saved.json().backupBeforeUpdate],
+      [true, false, null],
+    );
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`, { backup: true })).status, 409);
+
+    // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
+    shell.on(/dist-upgrade/, { output: 'Setting up pve-manager (9.1.2) ...\n' });
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.commands.length = 0;
+    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(node.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(shell.commands[0]!, /^export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y .* dist-upgrade$/);
+    assert.equal(shell.commands.some((c) => c.includes('vzdump') || c.startsWith('pct')), false);
+    dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    assert.deepEqual(dto.aptUpgradable, []);
+
+    // Listed first; "add all" does not add it again and the vmid of a real container is unaffected.
+    await request('POST', '/api/containers/add-all');
+    const list = (await request('GET', '/api/containers')).json();
+    assert.deepEqual(list.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['node:0', 'lxc:101', 'lxc:102']);
+  });
+
+  it('adds all containers of the node at once and checks them', async () => {
+    await addContainer();
+    const response = await request('POST', '/api/containers/add-all');
+    assert.equal(response.status, 201);
+    assert.deepEqual(
+      response.json().map((c: { vmid: number; name: string }) => [c.vmid, c.name]),
+      [[102, 'old']],
+    );
+    await app.scheduler.idle();
+    const list = (await request('GET', '/api/containers')).json();
+    assert.deepEqual(list.map((c: { vmid: number }) => c.vmid), [101, 102]);
+    assert.equal(list[1].status, 'stopped');
+    assert.ok(list[1].lastCheckedAt);
+
+    // Nothing left to add.
+    const again = await request('POST', '/api/containers/add-all');
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.json(), []);
   });
 
   it('checks containers in parallel up to the configured limit, one batch command each', async () => {

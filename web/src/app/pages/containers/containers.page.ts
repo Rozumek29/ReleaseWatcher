@@ -13,6 +13,7 @@ import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
 import { ContainerSettingsDialog } from './container-settings.dialog';
 import { RunLogDialog, RunLogTarget } from './run-log.dialog';
+import { targetLabel } from './target';
 
 /** How often the list is refreshed while a container reports a running task. */
 const BUSY_REFRESH_MS = 3000;
@@ -70,6 +71,8 @@ export class ContainersPage {
   /** "Backup first" checkbox of the open update confirmation. */
   protected readonly backupFirst = signal(false);
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
+  protected readonly hasNode = computed(() => this.containers().some((c) => c.kind === 'node'));
+  protected readonly label = targetLabel;
 
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -154,6 +157,52 @@ export class ContainersPage {
     }
   }
 
+  protected async addAll(): Promise<void> {
+    if (this.adding()) {
+      return;
+    }
+    this.adding.set(true);
+    try {
+      const created = await firstValueFrom(this.api.addAllContainers());
+      const vmids = new Set(created.map((c) => c.vmid));
+      this.discovered.update((list) => list.map((c) => (vmids.has(c.vmid) ? { ...c, added: true } : c)));
+      this.addOpen.set(false);
+      this.toast.success(
+        created.length > 0
+          ? `Added ${created.length} container(s) – checking them now.`
+          : 'All containers of the node have been added already.',
+      );
+      // Checks are queued on the server; reload to pick up their progress.
+      await this.load();
+      void this.statusService.refresh();
+    } catch (error) {
+      this.handleNotConfigured(error);
+      this.toast.error(error);
+    } finally {
+      this.adding.set(false);
+    }
+  }
+
+  protected async addNode(): Promise<void> {
+    if (this.adding()) {
+      return;
+    }
+    this.adding.set(true);
+    try {
+      const created = await firstValueFrom(this.api.addNode());
+      this.containers.update((list) => [created, ...list]);
+      this.scheduleRefresh();
+      this.addOpen.set(false);
+      this.toast.success(`Added the Proxmox host (${created.name}) – checking it now.`);
+      void this.statusService.refresh();
+    } catch (error) {
+      this.handleNotConfigured(error);
+      this.toast.error(error);
+    } finally {
+      this.adding.set(false);
+    }
+  }
+
   protected async checkAll(): Promise<void> {
     this.checkingAll.set(true);
     try {
@@ -175,7 +224,10 @@ export class ContainersPage {
 
   /** Opens an update confirmation; "Backup first" starts with the container's default. */
   protected ask(key: string, container: Container): void {
-    this.backupFirst.set(container.effectiveBackupBeforeUpdate && this.backupStorage() !== null);
+    // The host cannot be backed up with vzdump.
+    this.backupFirst.set(
+      container.kind !== 'node' && container.effectiveBackupBeforeUpdate && this.backupStorage() !== null,
+    );
     this.confirming.set(key);
   }
 
@@ -196,7 +248,7 @@ export class ContainersPage {
     await this.withBusy(container.id, async () => {
       await firstValueFrom(this.api.deleteContainer(container.id));
       this.containers.update((list) => list.filter((c) => c.id !== container.id));
-      this.toast.success(`Removed CT ${container.vmid}.`);
+      this.toast.success(`Removed ${targetLabel(container)}.`);
       void this.statusService.refresh();
     });
   }
@@ -218,7 +270,7 @@ export class ContainersPage {
   protected onSettingsSaved(updated: Container): void {
     this.replace(updated);
     this.editing.set(null);
-    this.toast.success(`Settings of CT ${updated.vmid} saved.`);
+    this.toast.success(`Settings of ${targetLabel(updated)} saved.`);
   }
 
   protected onSettingsClosed(): void {
@@ -242,11 +294,13 @@ export class ContainersPage {
   }
 
   protected statusClass(container: Container): string {
-    return container.status === 'running'
-      ? 'badge-success'
-      : container.status === 'stopped'
-        ? 'badge-danger'
-        : '';
+    // Stopped is a normal state (skipped, not an error) – a neutral badge.
+    return container.status === 'running' ? 'badge-success' : '';
+  }
+
+  /** Stopped and not allowed to be started temporarily – commands cannot run in it. */
+  protected blockedWhileStopped(container: Container): boolean {
+    return container.status === 'stopped' && !container.startWhenStopped;
   }
 
   protected cronOf(container: Container): string {

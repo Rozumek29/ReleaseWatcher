@@ -26,8 +26,13 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent,
    keys with a passphrase are not supported). The node's host key is trusted on the first connection and pinned in
    `known_hosts` next to the database. Use **Test connection** to verify.
-2. On the **Containers** page add containers found on the node (`pct list`). Commands run inside a container with
+2. On the **Containers** page add containers found on the node (`pct list`) – one by one or all at once with
+   **Add all**. Commands run inside a container with
    `pct exec <vmid> -- sh -lc '…'`, so containers need no SSH server of their own.
+   **Add host** adds the Proxmox node itself (apt only, no applications): it is checked like a container
+   (`apt list --upgradable`, on its own schedule, with notifications) and upgraded with `apt-get dist-upgrade` – the
+   upgrade Proxmox VE requires. There is no backup before host upgrades and the host is never rebooted; reboot it
+   yourself after a kernel update.
 3. Per container you can enable the **apt** check (`apt-get update` + `apt list --upgradable`; upgrade =
    `apt-get -y upgrade`, keeping existing config files) and override the global check schedule with a cron
    expression.
@@ -45,8 +50,12 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
    timeout; up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. **Updates never run
    automatically** – start them from the UI; the console output is shown live and kept in the run history
-   (last 50 runs per container). Only one task runs in a container at a time; a stopped container is reported, not
-   started.
+   (last 50 runs per container). Only one task runs in a container at a time.
+   **Stopped containers** are not started by default: a check only reads their status (not an error, no
+   notification) and keeps the results of the last check made while it was running; updates are refused until the
+   container runs again (the live status is read before the backup and the update). Enable **Start temporarily when
+   stopped** in the container settings to have checks (scheduled ones too) and updates start it with `pct start`, wait
+   up to a minute for its network and shut it down again afterwards (`pct shutdown`, forced after 2 minutes).
 
 > Interactive scripts (whiptail dialogs) cannot be answered from the UI – a script that waits for input ends with a
 > timeout. Prefer non-interactive update commands.
@@ -308,8 +317,10 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/proxmox/storages` | Storages that accept backups (`pvesm status --content backup`) |
 | `GET` | `/api/containers` | Added containers with their applications and pending updates |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "checkCron"?: "0 3 * * *" \| null }` – `null` = global default |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null }` – `null` = global default |
 | `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
+| `POST` | `/api/containers/node` | Add the Proxmox host itself (`kind: "node"`, `vmid: 0`, named after `hostname`) and start a check → `201`; `409` when already added. apt-upgrade of the host runs `dist-upgrade` without a backup (`{ "backup": true }` → `409`) |
+| `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |

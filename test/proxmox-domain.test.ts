@@ -59,6 +59,19 @@ describe('proxmox domain', () => {
     assert.equal(appUpdateAvailable({ installedVersion: null, latestVersion: '1.0' }), null);
   });
 
+  it('compares commit hashes as opaque values, not as version numbers', () => {
+    // Digits inside hashes must not be read as versions ("abc1234" is not version 1234).
+    assert.equal(appUpdateAvailable({ installedVersion: 'def5678', latestVersion: 'abc1234' }), true);
+    assert.equal(appUpdateAvailable({ installedVersion: '9f00aa1', latestVersion: '2abcf2f' }), true);
+    assert.equal(appUpdateAvailable({ installedVersion: '2abcf2f', latestVersion: '2abcf2f' }), false);
+    // A short hash matches the full one (e.g. `rev-parse --short` vs `ls-remote`).
+    assert.equal(
+      appUpdateAvailable({ installedVersion: '2abcf2f', latestVersion: '2ABCF2F9d0e1c2b3a4f5e6d7c8b9a0f1e2d3c4b5' }),
+      false,
+    );
+    assert.equal(appUpdateAvailable({ installedVersion: '3720662152', latestVersion: '3720662152aa' }), false);
+  });
+
   it('cleans terminal output', () => {
     assert.equal(cleanOutput('\u001b[32mOK\u001b[0m\r\nprogress 10%\rprogress 100%\n'), 'OK\nprogress 100%\n');
     assert.equal(firstLine('\n  1.2.3 \nnext'), '1.2.3');
