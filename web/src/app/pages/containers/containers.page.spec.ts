@@ -97,13 +97,24 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('no pending packages');
   });
 
-  it('disables the update button without an update command', async () => {
-    const base = container();
-    const { el } = await create([container({ apps: [{ ...base.apps[0]!, updateCommand: null }] })]);
-    const update = [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) =>
-      b.textContent?.includes('Update'),
-    )!;
-    expect(update.disabled).toBe(true);
+  it('shows the update button only when an update is available or unknown', async () => {
+    const base = container().apps[0]!;
+    const { el } = await create([
+      container({
+        apps: [
+          { ...base, id: 1, name: 'NoCommand', updateCommand: null },
+          { ...base, id: 2, name: 'Current', updateAvailable: false },
+          { ...base, id: 3, name: 'Outdated', updateAvailable: true },
+          { ...base, id: 4, name: 'Unknown', updateAvailable: null },
+        ],
+      }),
+    ]);
+    const withButton = [...el.querySelectorAll('.item')]
+      .filter((item) =>
+        [...item.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Update'),
+      )
+      .map((item) => item.querySelector('.item-name')?.textContent?.trim());
+    expect(withButton).toEqual(['Outdated', 'Unknown']);
   });
 
   it('adds a container picked from the node', async () => {

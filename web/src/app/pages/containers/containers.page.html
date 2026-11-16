@@ -203,14 +203,15 @@
                   <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
                   <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
                   <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-                } @else {
+                } @else if (a.updateCommand && a.updateAvailable !== false) {
+                  <!-- Hidden when up to date; shown when an update is available or the state is unknown. -->
                   <button
                     type="button"
                     class="btn btn-sm"
                     [class.btn-secondary]="!a.updateAvailable"
                     (click)="confirming.set('app-' + c.id + '-' + a.id)"
-                    [disabled]="isBusy(c) || !configured() || !a.updateCommand"
-                    [title]="a.updateCommand ? 'Run: ' + a.updateCommand : 'No update command configured'"
+                    [disabled]="isBusy(c) || !configured()"
+                    [title]="'Run: ' + a.updateCommand"
                   >
                     <app-icon name="arrowUp" [size]="14" /> Update
                   </button>
