@@ -157,7 +157,15 @@ export function pendingUpdates(container: Container, apps: readonly ContainerApp
 export const shQuote = (value: string): string => `'${value.replaceAll("'", `'\\''`)}'`;
 
 /** Command run on the node that executes `script` inside a container. */
-export const pctExec = (vmid: number, script: string): string => `pct exec ${vmid} -- sh -lc ${shQuote(script)}`;
+export const pctExec = (vmid: number, script: string): string =>
+  `pct exec ${vmid} -- sh -c ${shQuote(`${QUIET_PROFILE}\n${script}`)}`;
+
+/**
+ * Loads the login environment (PATH etc.) like `sh -l`, but without its output: Proxmox community-script
+ * containers print a banner from `/etc/profile.d` (with `echo -e`, shown as "-e …" by dash) on every login shell.
+ */
+const QUIET_PROFILE =
+  '{ if [ -r /etc/profile ]; then . /etc/profile; fi; if [ -r "$HOME/.profile" ]; then . "$HOME/.profile"; fi; } </dev/null >/dev/null 2>&1';
 
 /** Directory on the node holding the output and exit code of detached commands (removed after reading). */
 export const DETACHED_DIR = '/var/tmp/releasewatcher';
@@ -461,6 +469,43 @@ export function cleanOutput(text: string): string {
       .map((line) => line.split('\r').filter(Boolean).at(-1) ?? '')
       .join('\n')
   );
+}
+
+/** Unfinished line kept by {@link OutputCleaner} above which only its last redraw is kept. */
+const MAX_PENDING_LINE = 16 * 1024;
+
+/**
+ * {@link cleanOutput} for output that arrives in chunks: a spinner redraws its line with `\r` across many chunks,
+ * so lines are passed on only once they are complete (or at {@link flush}) – cleaning each chunk on its own would
+ * keep one frame per chunk ("⠋ Working⠙ Working⠹ Working…").
+ */
+export class OutputCleaner {
+  private pending = '';
+
+  /** Adds raw output; returns the cleaned lines it completed (empty while the line is still being drawn). */
+  push(raw: string): string {
+    this.pending += raw;
+    const end = this.pending.lastIndexOf('\n');
+    if (end === -1) {
+      if (this.pending.length > MAX_PENDING_LINE) {
+        const redraw = this.pending.lastIndexOf('\r');
+        if (redraw > 0) {
+          this.pending = this.pending.slice(redraw);
+        }
+      }
+      return '';
+    }
+    const complete = this.pending.slice(0, end + 1);
+    this.pending = this.pending.slice(end + 1);
+    return cleanOutput(complete);
+  }
+
+  /** Returns the cleaned rest of an unfinished line (end of the output). */
+  flush(): string {
+    const rest = cleanOutput(this.pending);
+    this.pending = '';
+    return rest;
+  }
 }
 
 /** Fingerprint of everything pending in a container; null when nothing is pending. */

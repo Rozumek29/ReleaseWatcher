@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cleanOutput, shQuote } from './domain.ts';
+import { OutputCleaner, shQuote } from './domain.ts';
 
 export interface CommandResult {
   exitCode: number;
@@ -130,11 +130,18 @@ export class SshShell implements NodeShell {
 
     const pump = async (stream: ReadableStream<Uint8Array>) => {
       const decoder = new TextDecoder();
+      const cleaner = new OutputCleaner();
+      const emit = (text: string) => {
+        if (text) {
+          output += text;
+          options.onOutput?.(text);
+        }
+      };
       for await (const chunk of stream) {
-        const text = cleanOutput(decoder.decode(chunk, { stream: true }));
-        output += text;
-        options.onOutput?.(text);
+        emit(cleaner.push(decoder.decode(chunk, { stream: true })));
       }
+      emit(cleaner.push(decoder.decode()));
+      emit(cleaner.flush());
     };
     try {
       await Promise.all([pump(proc.stdout), pump(proc.stderr)]);

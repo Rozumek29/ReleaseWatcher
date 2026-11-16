@@ -1,6 +1,6 @@
 import type { ReleaseInfo } from '../src/domain.ts';
 import type { ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
-import { pctExec } from '../src/proxmox/domain.ts';
+import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
 import type { ContainerUpdatesNotification, Notifier, ReleaseNotification } from '../src/notifiers/notifier.ts';
 
@@ -179,7 +179,7 @@ export class FakeShell implements NodeShell {
       // Steps are single-quoted with shQuote (a quote inside is written as '\'').
       for (const match of inner.matchAll(/^rw_step (\S+) \d+ ('(?:[^']|'\\'')*')/gm)) {
         const script = match[2]!.slice(1, -1).replaceAll("'\\''", "'");
-        const result = await this.answer(vmid === null ? script : pctExec(vmid, script));
+        const result = await this.answer(vmid === null ? script : `pct exec ${vmid} -- sh -lc ${shQuote(script)}`);
         output += section(match[1]!, result.output, result.exitCode);
       }
     }

@@ -4,6 +4,7 @@ import {
   APT_LIST_MARKER,
   appUpdateAvailable,
   cleanOutput,
+  OutputCleaner,
   detachedFollowCommand,
   detachedStartCommand,
   detachedUnit,
@@ -59,7 +60,11 @@ describe('proxmox domain', () => {
   });
 
   it('quotes scripts for pct exec', () => {
-    assert.equal(pctExec(101, "echo 'hi' && ./pull.sh"), `pct exec 101 -- sh -lc 'echo '\\''hi'\\'' && ./pull.sh'`);
+    const command = pctExec(101, "echo 'hi' && ./pull.sh");
+    assert.match(command, /^pct exec 101 -- sh -c '/);
+    assert.ok(command.endsWith(`\necho '\\''hi'\\'' && ./pull.sh'`), command);
+    // The login environment is loaded without its output (community-script banners).
+    assert.match(command, /\. \/etc\/profile;.*\. "\$HOME\/\.profile";.*} <\/dev\/null >\/dev\/null 2>&1\n/);
   });
 
   it('decides whether an application update is available', () => {
@@ -139,6 +144,29 @@ describe('proxmox domain', () => {
   it('cleans terminal output', () => {
     assert.equal(cleanOutput('\u001b[32mOK\u001b[0m\r\nprogress 10%\rprogress 100%\n'), 'OK\nprogress 100%\n');
     assert.equal(firstLine('\n  1.2.3 \nnext'), '1.2.3');
+  });
+
+  it('cleans spinner redraws that arrive in many chunks', () => {
+    const cleaner = new OutputCleaner();
+    const chunks = [
+      '\u001b[?25l⠋ Update Node.js',
+      '\r\u001b[2K⠙ Update Node.js',
+      '\r\u001b[2K⠹ Update',
+      ' Node.js\r\u001b[2K  ✔️  Update Node.js (npm 1',
+      '1.0)\r',
+      '\n⠋ Starting\r\u001b[2K  ✔️  Started\nDone',
+    ];
+    const out = chunks.map((c) => cleaner.push(c)).join('') + cleaner.flush();
+    assert.equal(out, '  ✔️  Update Node.js (npm 11.0)\n  ✔️  Started\nDone');
+    // Nothing is passed on until a line is complete.
+    assert.equal(new OutputCleaner().push('⠋ Working'), '');
+
+    // A line redrawn for a long time without a newline keeps only its last redraw.
+    const long = new OutputCleaner();
+    for (let i = 0; i < 5000; i++) {
+      long.push(`\r⠋ frame ${i}`);
+    }
+    assert.equal(long.push('\n'), '⠋ frame 4999\n');
     assert.equal(firstLine('  \n'), null);
   });
 

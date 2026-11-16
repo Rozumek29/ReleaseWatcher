@@ -254,7 +254,7 @@ describe('containers API', () => {
       updateCommand: 'update',
       useTty: true,
     });
-    shell.on(/'update'$/, { output: 'Updated.\n' });
+    shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
     assert.equal((await app.containers.wait(container.id))?.status, 'succeeded');
     await request('POST', `/api/containers/${container.id}/apt-upgrade`);
@@ -263,8 +263,8 @@ describe('containers API', () => {
     assert.deepEqual(
       shell.detached.map((d) => [d.command.replace(/'.*/s, ''), d.tty]),
       [
-        ['pct exec 101 -- sh -lc ', true],
-        ['pct exec 101 -- sh -lc ', false],
+        ['pct exec 101 -- sh -c ', true],
+        ['pct exec 101 -- sh -c ', false],
       ],
     );
     assert.equal(shell.units.size, 0, 'finished units are cleaned up on the node');
@@ -277,7 +277,7 @@ describe('containers API', () => {
       latestSource: 'none',
       updateCommand: 'update',
     });
-    shell.on(/'update'$/, { output: 'Compiling vaultwarden\nUpdated to 1.32.0\n' });
+    shell.on(/\nupdate'$/, { output: 'Compiling vaultwarden\nUpdated to 1.32.0\n' });
     shell.dropFollows = 2;
 
     await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
@@ -327,7 +327,7 @@ describe('containers API', () => {
     assert.deepEqual(relevant.map((c) => c.replace(/'.*/s, '')), [
       'pct config 101',
       'pct set 101 --cores 4 --memory 4096',
-      'pct exec 101 -- sh -lc ',
+      'pct exec 101 -- sh -c ',
       'pct set 101 --cores 1 --memory 1024',
     ]);
     assert.match(run?.output ?? '', /Raising resources for the update: 4 cores, 4096 MiB memory/);
@@ -651,7 +651,7 @@ describe('containers API', () => {
     await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
-    shell.on(/'update'$/, { output: 'Updated.\n' });
+    shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     shell.commands.length = 0;
 
     const response = await request('POST', '/api/containers/update-all', { backup: true });
@@ -662,11 +662,11 @@ describe('containers API', () => {
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     await app.updater.idle();
 
-    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|dist-upgrade|'update'$/.test(c));
+    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|dist-upgrade|\nupdate'$/.test(c));
     assert.equal(updates.length, 3, updates.join('\n'));
     assert.match(updates[0]!, /vzdump 101/, 'backed up once, before the first update');
     assert.ok(updates[1]!.includes('apt-get -y'));
-    assert.match(updates[2]!, /pct exec 101 .*'update'$/);
+    assert.match(updates[2]!, /pct exec 101 [\s\S]*\nupdate'$/);
     const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
     assert.deepEqual(runs.slice(0, 2).map((r: { kind: string; status: string }) => [r.kind, r.status]), [
       ['app-update', 'succeeded'],
@@ -685,7 +685,7 @@ describe('containers API', () => {
     await app.updater.idle();
 
     assert.equal(shell.commands.some((c) => c.includes('vzdump')), false);
-    assert.equal(shell.commands.some((c) => /'update'$/.test(c)), false);
+    assert.equal(shell.commands.some((c) => /\nupdate'$/.test(c)), false);
     const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
     assert.equal(runs[0].kind, 'apt-upgrade');
     assert.equal(runs[0].status, 'failed');
@@ -696,7 +696,7 @@ describe('containers API', () => {
     await request('PUT', '/api/settings', { backupStorage: 'pbs' });
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
-    shell.on(/'update'$/, { output: 'Updated.\n' });
+    shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     shell.commands.length = 0;
 
     const response = await request('POST', `/api/containers/${container.id}/update-all`, { backup: true });
@@ -709,11 +709,11 @@ describe('containers API', () => {
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     await app.updater.idle();
 
-    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|'update'$/.test(c));
+    const updates = shell.commands.filter((c) => /vzdump|apt-get -y|\nupdate'$/.test(c));
     assert.equal(updates.length, 3, updates.join('\n'));
     assert.match(updates[0]!, /vzdump 101 .*pbs/);
     assert.ok(updates[1]!.includes('apt-get -y'));
-    assert.match(updates[2]!, /pct exec 101 .*'update'$/);
+    assert.match(updates[2]!, /pct exec 101 [\s\S]*\nupdate'$/);
     assert.equal((await request('POST', '/api/containers/999/update-all')).status, 404);
   });
 
@@ -723,7 +723,7 @@ describe('containers API', () => {
     const second = (await request('POST', '/api/containers', { vmid: 102 })).json();
     await app.containers.wait(second.id);
     const upgrade = Promise.withResolvers<{ output: string }>();
-    shell.on(/pct exec 101 .*apt-get -y/, () => upgrade.promise);
+    shell.on(/pct exec 101 [\s\S]*apt-get -y/, () => upgrade.promise);
     shell.commands.length = 0;
 
     assert.equal((await request('POST', `/api/containers/${first.id}/update-all`, { backup: false })).status, 202);
@@ -731,7 +731,7 @@ describe('containers API', () => {
     assert.equal((await request('GET', `/api/containers/${second.id}`)).json().isBusy, true);
     upgrade.resolve({ output: 'done\n' });
     await app.updater.idle();
-    assert.ok(shell.commands.some((c) => /pct exec 102 .*apt-get -y/.test(c)), shell.commands.join('\n'));
+    assert.ok(shell.commands.some((c) => /pct exec 102 [\s\S]*apt-get -y/.test(c)), shell.commands.join('\n'));
   });
 
   it('lists applications in alphabetical order', async () => {
