@@ -73,16 +73,6 @@ export class ContainersPage {
       this.statusService.revision();
       untracked(() => void this.load());
     });
-    // Poll while something runs in the background (scheduled checks, "check all").
-    effect(() => {
-      const busy = this.anyBusy();
-      untracked(() => {
-        this.clearRefresh();
-        if (busy) {
-          this.refreshTimer = setTimeout(() => void this.load(), BUSY_REFRESH_MS);
-        }
-      });
-    });
     const ticker = setInterval(() => this.now.set(Date.now()), 30_000);
     inject(DestroyRef).onDestroy(() => {
       clearInterval(ticker);
@@ -103,6 +93,19 @@ export class ContainersPage {
       this.toast.error(error);
     } finally {
       this.loading.set(false);
+      this.scheduleRefresh();
+    }
+  }
+
+  /**
+   * Polls while something runs in the background (new container, scheduled checks, "check all"). Re-armed after
+   * every load – an effect on `anyBusy` would fire only when it changes, so a check longer than one interval
+   * would stop the polling.
+   */
+  private scheduleRefresh(): void {
+    this.clearRefresh();
+    if (this.anyBusy()) {
+      this.refreshTimer = setTimeout(() => void this.load(), BUSY_REFRESH_MS);
     }
   }
 
@@ -131,6 +134,7 @@ export class ContainersPage {
     try {
       const created = await firstValueFrom(this.api.addContainer(vmid));
       this.containers.update((list) => [...list, created].sort((a, b) => a.vmid - b.vmid));
+      this.scheduleRefresh(); // the first check of the new container runs in the background
       this.discovered.update((list) =>
         list.map((c) => (c.vmid === vmid ? { ...c, added: true } : c)),
       );

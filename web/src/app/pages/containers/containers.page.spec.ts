@@ -97,6 +97,31 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('no pending packages');
   });
 
+  it('keeps polling while a container stays busy and stops afterwards', async () => {
+    const { fixture } = await create([container()]);
+    vi.useFakeTimers();
+    try {
+      const respond = async (isBusy: boolean) => {
+        http.expectOne('/api/containers').flush([container({ isBusy })]);
+        http.expectOne('/api/settings').flush(proxmoxSettings(true));
+        await vi.advanceTimersByTimeAsync(0);
+      };
+      // A check that outlasts several refresh intervals (e.g. a slow apt-get update).
+      void (fixture.componentInstance as unknown as { load(): Promise<void> }).load();
+      await respond(true);
+      for (let i = 0; i < 3; i++) {
+        await vi.advanceTimersByTimeAsync(3000);
+        await respond(true);
+      }
+      await vi.advanceTimersByTimeAsync(3000);
+      await respond(false);
+      await vi.advanceTimersByTimeAsync(30_000);
+      http.expectNone('/api/containers');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('shows the update button only when an update is available or unknown', async () => {
     const base = container().apps[0]!;
     const { el } = await create([
