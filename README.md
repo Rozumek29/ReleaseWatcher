@@ -140,13 +140,21 @@ To run the published image instead of building locally, replace `build: .` in `d
 ## Adding a new notifier (e.g. Slack, Teams, e-mail)
 
 1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()`).
-2. Register it in `src/notifiers/index.ts`:
+2. Register it in `src/notifiers/index.ts`. Notifiers receive their options through a callback, so values
+   changed in the UI (`settings.current`) apply without a restart:
 
 ```ts
-export function createNotifiers(config: Config): Notifier[] {
-  return [new DiscordNotifier(config.discord), new SlackNotifier(config.slack)];
+export function createNotifiers(config: Config, settings: SettingsService): Notifier[] {
+  return [
+    new DiscordNotifier(() => ({ ...config.discord, webhookUrl: settings.current.discordWebhookUrl /* … */ })),
+    new SlackNotifier(() => ({ ...config.slack, webhookUrl: settings.current.slackWebhookUrl })),
+  ];
 }
 ```
+
+3. If the channel should be configurable from the UI, add its fields to `Settings` in `src/settings.ts`
+   (with validation), to the settings DTO and `PUT /api/settings` schema in `src/app.ts`, and to the
+   Settings page in `web/`.
 
 `NotificationDispatcher` sends every release to all enabled notifiers; a failure in one channel
 does not block the others. The UI picks up the new channel automatically.
@@ -166,7 +174,9 @@ src/
   version.ts         version parsing/comparison, reading the installed version of a self-hosted app
   notifiers/         Notifier interface, dispatcher, Discord
 test/                node:test tests
-scripts/             ensure-web.ts: builds the UI for `npm start` when needed
+scripts/
+  ensure-web.ts      builds the UI for `npm start` when needed
+  package.ts         builds the release folder for `npm run package`
 web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
   src/app/pages/repositories watched repositories
