@@ -50,6 +50,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',
   isBusy: false,
+  activeRunId: null,
   apps: [
     {
       id: 7,

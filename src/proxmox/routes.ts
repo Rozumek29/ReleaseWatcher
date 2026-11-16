@@ -176,6 +176,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       createdAt: c.createdAt,
       /** A task runs or the container waits for its turn in "update all". */
       isBusy: service.isBusy(c.id) || updater.isQueued(c.id),
+      /** The check/update running right now (its live log: `GET /api/runs/:id`); null while waiting in "update all". */
+      activeRunId: service.activeRunId(c.id),
       apps: appDtos,
       /** apt counts as one pending update. */
       updatesAvailable: (c.aptUpgradable.length > 0 ? 1 : 0) + appDtos.filter((a) => a.updateAvailable).length,

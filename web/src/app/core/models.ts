@@ -234,6 +234,8 @@ export interface Container {
   createdAt: string;
   /** A check or update is running right now. */
   isBusy: boolean;
+  /** The check/update running right now (its live log); null while waiting for its turn in "update all". */
+  activeRunId: number | null;
   apps: ContainerApp[];
   /** apt counts as one. */
   updatesAvailable: number;

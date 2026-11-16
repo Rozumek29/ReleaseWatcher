@@ -173,6 +173,8 @@ export class ContainerService {
   private readonly active = new Map<number, Promise<Run>>();
   /** Most recent task per container (kept after it finished, for {@link wait}). */
   private readonly latest = new Map<number, Promise<Run>>();
+  /** Run ID of the task in {@link active}. */
+  private readonly activeRuns = new Map<number, number>();
 
   constructor(deps: ContainerServiceDeps) {
     this.deps = deps;
@@ -186,6 +188,11 @@ export class ContainerService {
 
   isBusy(containerId: number): boolean {
     return this.active.has(containerId);
+  }
+
+  /** ID of the run in progress in a container (null = none), so its live log can be shown. */
+  activeRunId(containerId: number): number | null {
+    return this.activeRuns.get(containerId) ?? null;
   }
 
   /** Waits for all running tasks (used on shutdown and in tests). */
@@ -360,9 +367,11 @@ export class ContainerService {
         return log.finish(false, null);
       } finally {
         this.active.delete(container.id);
+        this.activeRuns.delete(container.id);
       }
     })();
     this.active.set(container.id, promise);
+    this.activeRuns.set(container.id, run.id);
     this.latest.set(container.id, promise);
   }
 

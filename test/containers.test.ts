@@ -706,8 +706,18 @@ describe('containers API', () => {
     assert.equal((await request('POST', `/api/containers/${container.id}/update-all`)).status, 409);
     assert.equal((await request('POST', '/api/containers/update-all')).status, 409);
     assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    // The run in progress is exposed, so the UI can show its live log.
+    let activeRunId: number | null = null;
+    for (let i = 0; i < 50 && activeRunId === null; i++) {
+      activeRunId = (await request('GET', `/api/containers/${container.id}`)).json().activeRunId;
+      await Bun.sleep(5);
+    }
+    assert.notEqual(activeRunId, null);
+    const active = (await request('GET', `/api/runs/${activeRunId}`)).json();
+    assert.deepEqual([active.kind, active.status], ['apt-upgrade', 'running']);
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     await app.updater.idle();
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().activeRunId, null);
 
     const updates = shell.commands.filter((c) => /vzdump|apt-get -y|\nupdate'$/.test(c));
     assert.equal(updates.length, 3, updates.join('\n'));

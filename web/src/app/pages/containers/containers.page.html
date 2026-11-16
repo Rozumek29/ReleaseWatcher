@@ -127,7 +127,13 @@
               @if (!c.isEnabled) {
                 <span class="badge">Paused</span>
               }
-              @if (isBusy(c)) {
+              @if (c.activeRunId !== null) {
+                <button type="button" class="badge badge-accent badge-btn" (click)="showActiveRun(c)" title="Show the live log">
+                  <app-icon name="refresh" [size]="12" class="spin" /> Working… <app-icon name="terminal" [size]="12" />
+                </button>
+              } @else if (c.isBusy && !busyIds().has(c.id)) {
+                <span class="badge badge-accent" title="Waits for its turn in “Update all”"><app-icon name="clock" [size]="12" /> Queued</span>
+              } @else if (isBusy(c)) {
                 <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
               } @else if (c.updatesAvailable > 0) {
                 <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>

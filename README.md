@@ -44,6 +44,8 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    another: apt first, then applications with a newer version and an update command. The Proxmox host and
    stopped containers that may not be started are left out. With **Backup first** each container is backed up
    once, before its first update, if it is set to back up; a failed update skips the rest of that container.
+   While a container is busy, its **Working…** badge opens the live log of the update in progress (the log moves on
+   to the next update by itself); containers still waiting for their turn show **Queued**.
    A container with more than one pending update also has its own **Update all (n)** button that runs just its
    updates the same way (it waits in the queue when another "update all" is running). Applications are listed
    alphabetically.
@@ -332,7 +334,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups (`pvesm status --content backup`) |
-| `GET` | `/api/containers` | Added containers with their applications and pending updates |
+| `GET` | `/api/containers` | Added containers with their applications and pending updates; `isBusy` and `activeRunId` (the run in progress – its live log is `GET /api/runs/:id`) |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
 | `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null, "updateCores"?: 4 \| null, "updateMemoryMb"?: 4096 \| null }` – `null` = global default (resources: unchanged), omitted = keep |
 | `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |

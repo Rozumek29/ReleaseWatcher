@@ -293,6 +293,13 @@ export class ContainersPage {
     this.runTarget.set({ container, runId: null });
   }
 
+  /** Opens the live log of the check/update running in the container. */
+  protected showActiveRun(container: Container): void {
+    if (container.activeRunId !== null) {
+      this.runTarget.set({ container, runId: container.activeRunId });
+    }
+  }
+
   protected toggleExpanded(id: number): void {
     this.expanded.update((ids) => {
       const next = new Set(ids);
@@ -315,13 +322,27 @@ export class ContainersPage {
     void this.load();
   }
 
-  protected onRunFinished(run: Run): void {
-    void this.load();
+  protected async onRunFinished(run: Run): Promise<void> {
     void this.statusService.refresh();
+    const reloaded = this.load().then(() => this.followNextRun(run));
     if (run.status === 'failed') {
       this.toast.error(`${kindLabel(run.kind)} failed – see the log for details.`);
     } else {
       this.toast.success(`${kindLabel(run.kind)} finished.`);
+    }
+    await reloaded;
+  }
+
+  /**
+   * "Update all" runs the updates of a container one after another: when the log of one of them is open and it
+   * finishes, the log switches to the next one.
+   */
+  private followNextRun(finished: Run): void {
+    const target = this.runTarget();
+    const container = this.containers().find((c) => c.id === finished.containerId);
+    const next = container?.activeRunId ?? null;
+    if (container && target?.runId === finished.id && next !== null && next !== finished.id) {
+      this.runTarget.set({ container, runId: next });
     }
   }
 
@@ -365,6 +386,11 @@ export class ContainersPage {
       // The container reports isBusy while its updates run, so the list keeps refreshing.
       await this.load();
       void this.statusService.refresh();
+      // Like a single update: show the live log (it moves on to the next update by itself).
+      const updated = this.containers().find((c) => c.id === container.id);
+      if (updated) {
+        this.showActiveRun(updated);
+      }
     });
   }
 

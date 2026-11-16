@@ -156,13 +156,50 @@ describe('ContainersPage', () => {
     expect(request.request.body).toEqual({ backup: false });
     request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
     await settle(fixture);
-    http.expectOne('/api/containers').flush([container({ isBusy: true }), single]);
+    http.expectOne('/api/containers').flush([container({ isBusy: true, activeRunId: 9 }), single]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     await settle(fixture);
     http.expectOne('/api/status').flush({});
+    // Like a single update, the live log of the running update opens.
+    http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
     await settle(fixture);
     expect(el.querySelector('li.row')?.textContent).toContain('Working…');
     expect(rowButton(el.querySelector<HTMLElement>('li.row')!, 'Update all')!.disabled).toBe(true);
+    expect(el.querySelector('.run-dialog h2')?.textContent).toContain('apt upgrade');
+  });
+
+  it('opens the live log from the "Working…" badge and follows the next update of "Update all"', async () => {
+    const { fixture, el } = await create([container({ isBusy: true, activeRunId: 9 }), container({ id: 2, vmid: 102, name: 'queued', isBusy: true })]);
+    vi.useFakeTimers();
+    try {
+      const rows = el.querySelectorAll<HTMLElement>('li.row');
+      // Waiting for its turn in "update all" – nothing to show yet.
+      expect(rows[1]!.querySelector('.badge-btn')).toBeNull();
+      expect(rows[1]!.textContent).toContain('Queued');
+
+      rows[0]!.querySelector<HTMLButtonElement>('.badge-btn')!.click();
+      await vi.advanceTimersByTimeAsync(0);
+      http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(el.querySelector('.run-dialog h2')?.textContent).toContain('apt upgrade');
+
+      // The apt upgrade finishes; the application update starts as the next run.
+      await vi.advanceTimersByTimeAsync(1000);
+      http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade' }));
+      await vi.advanceTimersByTimeAsync(0);
+      http.expectOne('/api/status').flush({});
+      http.expectOne('/api/containers').flush([container({ isBusy: true, activeRunId: 10 })]);
+      http.expectOne('/api/settings').flush(proxmoxSettings(true));
+      await vi.advanceTimersByTimeAsync(0);
+      http
+        .expectOne('/api/runs/10')
+        .flush(run({ id: 10, kind: 'app-update', appId: 7, status: 'running', finishedAt: null, exitCode: null }));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(el.querySelector('.run-dialog h2')?.textContent).toContain('Application update');
+    } finally {
+      vi.useRealTimers();
+    }
+    fixture.destroy();
   });
 
   it('keeps polling while a container stays busy and stops afterwards', async () => {
