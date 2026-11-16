@@ -30,3 +30,5 @@ known_hosts
 
 # Bun cache created by some local setups
 .bun-cache/
+# One-time setup code written next to a local database
+setup-code
