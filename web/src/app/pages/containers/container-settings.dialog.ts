@@ -19,6 +19,7 @@ import {
   LatestSource,
   WatchedRepository,
 } from '../../core/models';
+import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
 
@@ -80,6 +81,7 @@ export class ContainerSettingsDialog {
   protected backupChoice: 'default' | 'yes' | 'no' = 'default';
   protected checkCron = '';
 
+  protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
   protected readonly repositories = signal<WatchedRepository[]>([]);
   protected readonly appForm = signal<AppForm | null>(null);

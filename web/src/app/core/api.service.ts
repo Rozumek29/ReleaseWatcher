@@ -125,6 +125,11 @@ export class ApiService {
     return this.http.delete<void>(`${this.baseUrl}/containers/${id}`);
   }
 
+  /** Adds the Proxmox host itself as a target (apt check and dist-upgrade). */
+  addNode(): Observable<Container> {
+    return this.http.post<Container>(`${this.baseUrl}/containers/node`, {});
+  }
+
   /** Adds every container of the node that has not been added yet; returns the added ones. */
   addAllContainers(): Observable<Container[]> {
     return this.http.post<Container[]>(`${this.baseUrl}/containers/add-all`, {});

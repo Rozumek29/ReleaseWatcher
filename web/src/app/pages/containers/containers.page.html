@@ -58,6 +58,16 @@
         }
       </form>
     }
+    @if (!hasNode() && !discovering()) {
+      <div class="node-row">
+        <span>
+          <app-icon name="server" [size]="14" />
+          <strong>Proxmox host</strong>
+          <span class="muted">– apt updates of the node itself (no applications)</span>
+        </span>
+        <button type="button" class="btn btn-secondary" (click)="addNode()" [disabled]="adding()">Add host</button>
+      </div>
+    }
   </section>
 }
 
@@ -80,7 +90,11 @@
         <div class="row-head">
           <div class="main">
             <div class="title-line">
-              <span class="vmid mono">{{ c.vmid }}</span>
+              @if (c.kind === 'node') {
+                <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
+              } @else {
+                <span class="vmid mono">{{ c.vmid }}</span>
+              }
               <span class="name">{{ c.name }}</span>
               @if (c.status) {
                 <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
@@ -117,7 +131,7 @@
 
           <div class="actions">
             @if (confirming() === 'delete-' + c.id) {
-              <span class="confirm-text">Remove CT {{ c.vmid }}?</span>
+              <span class="confirm-text">Remove {{ label(c) }}?</span>
               <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
             } @else {
@@ -125,13 +139,13 @@
                 <app-icon name="refresh" [size]="14" />
                 Check
               </button>
-              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of CT ' + c.vmid" title="History">
+              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of ' + label(c)" title="History">
                 <app-icon name="history" [size]="16" />
               </button>
-              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of CT ' + c.vmid" title="Settings">
+              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of ' + label(c)" title="Settings">
                 <app-icon name="sliders" [size]="16" />
               </button>
-              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove CT ' + c.vmid" title="Remove">
+              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove ' + label(c)" title="Remove">
                 <app-icon name="trash" [size]="16" />
               </button>
             }
@@ -178,6 +192,9 @@
                 <div class="item-actions">
                   @if (confirming() === 'apt-' + c.id) {
                     <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
+                    @if (c.kind === 'node') {
+                      <span class="muted small">apt-get dist-upgrade, no backup</span>
+                    } @else {
                     <label class="backup-check" [class.disabled]="!backupStorage()">
                     <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
                     Backup first
@@ -187,6 +204,7 @@
                       <span class="muted">(choose a storage in Settings)</span>
                     }
                   </label>
+                    }
                   <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                   } @else {
@@ -263,11 +281,13 @@
               }
             </div>
           } @empty {
+            @if (c.kind !== 'node') {
             <div class="item muted small">
               No applications configured.
               <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
               to track its version and update it (e.g. <code>update</code> from community-scripts or <code>./pull.sh</code>).
             </div>
+            }
           }
         </div>
       </li>

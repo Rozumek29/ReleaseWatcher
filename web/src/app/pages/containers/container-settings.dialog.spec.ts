@@ -66,6 +66,18 @@ describe('ContainerSettingsDialog', () => {
     expect(saved[0]?.checkCron).toBe('30 4 * * *');
   });
 
+  it('shows only the settings that apply to the Proxmox host', async () => {
+    const { el } = await open(container({ kind: 'node', vmid: 0, name: 'pve', apps: [] }));
+
+    expect(el.querySelector('#ct-settings-title')?.textContent).toContain('Host settings');
+    expect(el.querySelector('.head-text p')?.textContent).toContain('Proxmox host');
+    expect(el.querySelector('#ct-backup')).toBeNull();
+    expect(el.querySelector('[aria-label="Start temporarily when stopped"]')).toBeNull();
+    expect(el.querySelector('[aria-label="apt packages"]')).toBeNull();
+    expect(el.textContent).not.toContain('Add application');
+    expect(el.textContent).toContain('dist-upgrade');
+  });
+
   it('adds an application whose latest version comes from a watched repository', async () => {
     const { fixture, el } = await open(container({ apps: [] }));
 

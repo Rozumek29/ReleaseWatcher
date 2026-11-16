@@ -219,6 +219,43 @@ describe('ContainersPage', () => {
     expect(check.disabled).toBe(false);
   });
 
+  it('adds the Proxmox host and upgrades it without a backup', async () => {
+    const { fixture, el } = await create([container()]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    http.expectOne('/api/proxmox/containers').flush([{ vmid: 101, status: 'running', name: 'vaultwarden', added: true }]);
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('.node-row button')!.click();
+    const request = http.expectOne('/api/containers/node');
+    expect(request.request.method).toBe('POST');
+    const node = container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], updatesAvailable: 1 });
+    request.flush(node, { status: 201, statusText: 'Created' });
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    const row = el.querySelector('.list > li')!;
+    expect(row.querySelector('.title-line')?.textContent).toContain('Host');
+    expect(row.querySelector('.vmid')).toBeNull();
+    expect(row.textContent).not.toContain('No applications configured');
+    expect(row.querySelector('[title=Remove]')?.getAttribute('aria-label')).toBe('Remove Proxmox host');
+
+    [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.includes('Upgrade'))!.click();
+    await settle(fixture);
+    expect(row.querySelector('.backup-check')).toBeNull();
+    expect(row.textContent).toContain('dist-upgrade, no backup');
+    [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const upgrade = http.expectOne('/api/containers/5/apt-upgrade');
+    expect(upgrade.request.body).toEqual({ backup: false });
+    upgrade.flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
+      status: 202,
+      statusText: 'Accepted',
+    });
+    await settle(fixture);
+    http.expectOne('/api/runs/9').flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null }));
+    await settle(fixture);
+    expect(el.querySelector('app-run-log-dialog')?.textContent).toContain('Proxmox host (pve)');
+  });
+
   it('keeps updates of a stopped container available when it may be started temporarily', async () => {
     const { el } = await create([container({ status: 'stopped', startWhenStopped: true })]);
 

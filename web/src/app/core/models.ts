@@ -204,6 +204,8 @@ export interface ContainerApp {
 
 export interface Container {
   id: number;
+  /** `node` = the Proxmox host itself (apt only, vmid 0). */
+  kind: 'lxc' | 'node';
   vmid: number;
   name: string;
   isEnabled: boolean;

@@ -29,6 +29,10 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
 2. On the **Containers** page add containers found on the node (`pct list`) – one by one or all at once with
    **Add all**. Commands run inside a container with
    `pct exec <vmid> -- sh -lc '…'`, so containers need no SSH server of their own.
+   **Add host** adds the Proxmox node itself (apt only, no applications): it is checked like a container
+   (`apt list --upgradable`, on its own schedule, with notifications) and upgraded with `apt-get dist-upgrade` – the
+   upgrade Proxmox VE requires. There is no backup before host upgrades and the host is never rebooted; reboot it
+   yourself after a kernel update.
 3. Per container you can enable the **apt** check (`apt-get update` + `apt list --upgradable`; upgrade =
    `apt-get -y upgrade`, keeping existing config files) and override the global check schedule with a cron
    expression.
@@ -313,6 +317,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
 | `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null }` – `null` = global default |
 | `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
+| `POST` | `/api/containers/node` | Add the Proxmox host itself (`kind: "node"`, `vmid: 0`, named after `hostname`) and start a check → `201`; `409` when already added. apt-upgrade of the host runs `dist-upgrade` without a backup (`{ "backup": true }` → `409`) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |

@@ -28,6 +28,7 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
 
 export const container = (overrides: Partial<Container> = {}): Container => ({
   id: 1,
+  kind: 'lxc',
   vmid: 101,
   name: 'vaultwarden',
   isEnabled: true,

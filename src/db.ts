@@ -178,6 +178,8 @@ const MIGRATIONS: readonly string[] = [
    CREATE INDEX idx_sessions_expires ON sessions (expires_at);`,
   // Start a stopped container temporarily for checks and updates (shut down again afterwards).
   `ALTER TABLE containers ADD COLUMN start_when_stopped INTEGER NOT NULL DEFAULT 0;`,
+  // The Proxmox host itself as a check/update target (apt only), stored with vmid 0.
+  `ALTER TABLE containers ADD COLUMN kind TEXT NOT NULL DEFAULT 'lxc';`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */

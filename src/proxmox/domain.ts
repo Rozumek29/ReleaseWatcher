@@ -1,9 +1,17 @@
 import { compareVersions } from '../version.ts';
 
-/** An LXC container on the Proxmox node, managed through `pct exec`. */
+export const TARGET_KINDS = ['lxc', 'node'] as const;
+/** `lxc` = a container managed through `pct exec`; `node` = the Proxmox host itself (apt only). */
+export type TargetKind = (typeof TARGET_KINDS)[number];
+
+/** vmid stored for the Proxmox host entry (real container IDs start at 100). */
+export const NODE_VMID = 0;
+
+/** An LXC container on the Proxmox node, managed through `pct exec` – or the node itself (`kind: 'node'`). */
 export interface Container {
   id: number;
-  /** Proxmox container ID (e.g. 101). */
+  kind: TargetKind;
+  /** Proxmox container ID (e.g. 101); {@link NODE_VMID} for the host. */
   vmid: number;
   name: string;
   /** Disabled containers are skipped by scheduled checks. */
@@ -196,6 +204,20 @@ export const APT_CHECK_SCRIPT = [
   'apt list --upgradable 2>/dev/null',
 ].join('\n');
 
+/**
+ * Upgrade of the Proxmox host. Proxmox VE must be upgraded with `dist-upgrade` (= `full-upgrade`): a plain
+ * `upgrade` holds back packages with new dependencies and can leave PVE half-upgraded.
+ */
+export const NODE_APT_UPGRADE_SCRIPT = [
+  'export DEBIAN_FRONTEND=noninteractive',
+  'apt-get update',
+  'apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade',
+].join(' && ');
+
+/** Human-readable name of a check/update target in logs and notifications. */
+export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
+  c.kind === 'node' ? 'the Proxmox host' : `CT ${c.vmid}`;
+
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
   'apt-get update',
@@ -278,9 +300,10 @@ export const newCheckToken = (): string => `@@RW-${crypto.randomUUID().replaceAl
  * `<token> begin <id>` / `<token> end <id> <exit code>` lines. The container script travels base64-encoded, so
  * user commands are quoted only once.
  */
-export function buildCheckScript(vmid: number, steps: readonly CheckStep[], token: string): string {
+export function buildCheckScript(vmid: number | null, steps: readonly CheckStep[], token: string): string {
   const node = [
-    `s=$(pct status ${vmid} 2>&1); rc=$?`,
+    // null = the steps run on the node itself, which is running when this script runs at all.
+    vmid === null ? `s='status: running'; rc=0` : `s=$(pct status ${vmid} 2>&1); rc=$?`,
     `printf '%s begin status\n%s\n%s end status %s\n' '${token}' "$s" '${token}' "$rc"`,
   ];
   if (steps.length > 0) {
@@ -294,8 +317,11 @@ export function buildCheckScript(vmid: number, steps: readonly CheckStep[], toke
       ...steps.map((s) => `rw_step ${s.id} ${Math.max(1, Math.round(s.timeoutSeconds))} ${shQuote(s.script)}`),
     ].join('\n');
     const encoded = Buffer.from(inner, 'utf8').toString('base64');
+    const decoded = `"$(printf %s '${encoded}' | base64 -d)"`;
     node.push(
-      `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc "$(printf %s '${encoded}' | base64 -d)" ;; esac`,
+      vmid === null
+        ? `sh -lc ${decoded}`
+        : `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc ${decoded} ;; esac`,
     );
   }
   return node.join('\n');

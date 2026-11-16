@@ -337,3 +337,20 @@
     margin-top: 3px;
   }
 }
+
+.node-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  font-size: 0.88rem;
+
+  app-icon {
+    vertical-align: -2px;
+    color: var(--text-muted);
+  }
+}

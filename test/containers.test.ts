@@ -369,6 +369,59 @@ describe('containers API', () => {
     assert.equal(shell.commands.some((c) => c.includes('apt-get -y') || c.startsWith('pct shutdown')), false);
   });
 
+  it('checks and upgrades apt on the Proxmox host itself', async () => {
+    shell.on(/^hostname$/, { output: 'pve\n' });
+    const response = await request('POST', '/api/containers/node');
+    assert.equal(response.status, 201);
+    const node = response.json();
+    assert.equal(node.kind, 'node');
+    assert.equal(node.name, 'pve');
+    assert.equal((await request('POST', '/api/containers/node')).status, 409);
+    await app.containers.wait(node.id);
+
+    // The apt check ran directly on the node – no pct status/exec.
+    assert.ok(shell.commands.some((c) => c.includes('apt list --upgradable') && !c.startsWith('pct')));
+    assert.equal(shell.commands.some((c) => c.startsWith('pct')), false);
+    let dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    assert.equal(dto.status, 'running');
+    assert.equal(dto.aptUpgradable.length, 1);
+    assert.equal(dto.effectiveBackupBeforeUpdate, false);
+    assert.equal(notifier.containerSent.at(-1)?.isNode, true);
+
+    // The host has no applications, backups or temporary starts.
+    const app1 = await request('POST', `/api/containers/${node.id}/apps`, { name: 'x', latestSource: 'none' });
+    assert.equal(app1.status, 409);
+    const saved = await request('PUT', `/api/containers/${node.id}`, {
+      ...dto,
+      aptEnabled: false,
+      startWhenStopped: true,
+      backupBeforeUpdate: true,
+    });
+    assert.deepEqual(
+      [saved.json().aptEnabled, saved.json().startWhenStopped, saved.json().backupBeforeUpdate],
+      [true, false, null],
+    );
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`, { backup: true })).status, 409);
+
+    // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
+    shell.on(/dist-upgrade/, { output: 'Setting up pve-manager (9.1.2) ...\n' });
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.commands.length = 0;
+    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(node.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(shell.commands[0]!, /^export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y .* dist-upgrade$/);
+    assert.equal(shell.commands.some((c) => c.includes('vzdump') || c.startsWith('pct')), false);
+    dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    assert.deepEqual(dto.aptUpgradable, []);
+
+    // Listed first; "add all" does not add it again and the vmid of a real container is unaffected.
+    await request('POST', '/api/containers/add-all');
+    const list = (await request('GET', '/api/containers')).json();
+    assert.deepEqual(list.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['node:0', 'lxc:101', 'lxc:102']);
+  });
+
   it('adds all containers of the node at once and checks them', async () => {
     await addContainer();
     const response = await request('POST', '/api/containers/add-all');

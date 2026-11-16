@@ -15,6 +15,7 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import { Container, Run, RunKind, RunSummary } from '../../core/models';
+import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 
@@ -45,6 +46,7 @@ export class RunLogDialog {
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
   private readonly outputEl = viewChild<ElementRef<HTMLPreElement>>('output');
 
+  protected readonly label = targetLabel;
   protected readonly run = signal<Run | null>(null);
   protected readonly history = signal<RunSummary[] | null>(null);
   protected readonly error = signal<string | null>(null);

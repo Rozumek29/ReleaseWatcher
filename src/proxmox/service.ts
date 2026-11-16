@@ -18,6 +18,8 @@ import {
   parsePctList,
   parsePctStatus,
   parsePvesmStatus,
+  NODE_APT_UPGRADE_SCRIPT,
+  targetLabel,
   SHUTDOWN_TIMEOUT_SECONDS,
   shutdownContainerCommand,
   START_NETWORK_WAIT_SECONDS,
@@ -156,6 +158,15 @@ export class ContainerService {
     return result.output.trim();
   }
 
+  /** Host name of the node (`hostname`). */
+  async nodeHostname(): Promise<string> {
+    const result = await this.deps.shell.run('hostname', { timeoutMs: NODE_TIMEOUT_MS });
+    if (result.exitCode !== 0) {
+      throw new Error(describeSshFailure(result));
+    }
+    return firstLine(result.output) ?? 'Proxmox host';
+  }
+
   /** Lists containers on the node (`pct list`). */
   async discover(): Promise<DiscoveredContainer[]> {
     const result = await this.deps.shell.run('pct list', { timeoutMs: NODE_TIMEOUT_MS });
@@ -179,8 +190,18 @@ export class ContainerService {
     });
   }
 
-  /** @param backupStorage back up to this storage first (null = no backup) */
+  /** @param backupStorage back up to this storage first (null = no backup; always null for the host) */
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
+    if (container.kind === 'node') {
+      return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
+        log.note('apt-get update && apt-get dist-upgrade on the Proxmox host (no backup – vzdump backs up guests only)');
+        const result = await this.deps.shell.run(NODE_APT_UPGRADE_SCRIPT, {
+          timeoutMs: APT_UPGRADE_TIMEOUT_MS,
+          onOutput: (chunk) => log.write(chunk),
+        });
+        return this.finishUpdate(container, log, result);
+      });
+    }
     return this.start(container, null, 'apt-upgrade', 'manual', (log) =>
       this.whileRunning(container, log, async () => {
         await this.backupFirst(container, backupStorage, log, 'apt upgrade');
@@ -395,8 +416,9 @@ export class ContainerService {
     const token = newCheckToken();
     const totalSeconds = steps.reduce((sum, step) => sum + step.timeoutSeconds, 0);
 
-    log.note(`Checking CT ${container.vmid} (${container.name})`);
-    const result = await this.deps.shell.run(buildCheckScript(container.vmid, steps, token), {
+    log.note(`Checking ${targetLabel(container)} (${container.name})`);
+    const target = container.kind === 'node' ? null : container.vmid;
+    const result = await this.deps.shell.run(buildCheckScript(target, steps, token), {
       timeoutMs: NODE_TIMEOUT_MS + totalSeconds * 1000,
     });
     const batch = parseCheckOutput(result.output, token);
@@ -514,6 +536,7 @@ export class ContainerService {
     }
     const result = await this.deps.dispatcher.dispatchContainerUpdates({
       vmid: container.vmid,
+      isNode: container.kind === 'node',
       containerName: container.name,
       aptPackages: container.aptUpgradable,
       apps: apps

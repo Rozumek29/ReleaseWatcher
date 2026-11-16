@@ -1,8 +1,20 @@
 import type { Database } from 'bun:sqlite';
-import type { AptPackage, Container, ContainerApp, LatestSource, Run, RunKind, RunStatus, RunTrigger } from './domain.ts';
+import {
+  type AptPackage,
+  type Container,
+  type ContainerApp,
+  type LatestSource,
+  NODE_VMID,
+  type Run,
+  type RunKind,
+  type RunStatus,
+  type RunTrigger,
+  type TargetKind,
+} from './domain.ts';
 
 interface ContainerRow {
   id: number;
+  kind: string;
   vmid: number;
   name: string;
   is_enabled: number;
@@ -63,6 +75,7 @@ function parsePackages(json: string | null): AptPackage[] {
 
 const toContainer = (r: ContainerRow): Container => ({
   id: r.id,
+  kind: r.kind as TargetKind,
   vmid: r.vmid,
   name: r.name,
   isEnabled: r.is_enabled === 1,
@@ -140,7 +153,21 @@ export class ContainerStore {
   }
 
   existsVmid(vmid: number): boolean {
-    return this.db.query('SELECT 1 FROM containers WHERE vmid = ?').get(vmid) !== null;
+    return this.db.query("SELECT 1 FROM containers WHERE vmid = ? AND kind = 'lxc'").get(vmid) !== null;
+  }
+
+  /** The Proxmox host entry, when it has been added. */
+  getNode(): Container | null {
+    const row = this.db.query<ContainerRow, []>("SELECT * FROM containers WHERE kind = 'node'").get();
+    return row ? toContainer(row) : null;
+  }
+
+  /** Adds the Proxmox host as a target (apt only). */
+  addNode(name: string): Container {
+    const result = this.db
+      .query("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('node', ?, ?, ?)")
+      .run(NODE_VMID, name, new Date().toISOString());
+    return this.get(Number(result.lastInsertRowid))!;
   }
 
   add(vmid: number, name: string): Container {

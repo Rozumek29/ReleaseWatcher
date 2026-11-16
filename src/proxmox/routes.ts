@@ -144,13 +144,14 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     const appDtos = apps.map(appDto);
     return {
       id: c.id,
+      kind: c.kind,
       vmid: c.vmid,
       name: c.name,
       isEnabled: c.isEnabled,
       aptEnabled: c.aptEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
-      effectiveBackupBeforeUpdate: c.backupBeforeUpdate ?? deps.backupDefaults().enabled,
+      effectiveBackupBeforeUpdate: c.kind !== 'node' && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
       startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
@@ -290,6 +291,30 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           });
         }),
     },
+    // The Proxmox host itself as a target: apt check and dist-upgrade on the node (no applications, no backup).
+    '/api/containers/node': {
+      POST: () =>
+        guard(async () => {
+          if (containers.getNode()) {
+            return problem(409, 'The Proxmox host has already been added.');
+          }
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          let name: string;
+          try {
+            name = await service.nodeHostname();
+          } catch (error) {
+            return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
+          }
+          const node = containers.addNode(name);
+          service.startCheck(node, 'manual');
+          return Response.json(containerDto(node), {
+            status: 201,
+            headers: { location: `/api/containers/${node.id}` },
+          });
+        }),
+    },
     // Adds every container of the node that has not been added yet and queues a check of each.
     '/api/containers/add-all': {
       POST: () =>
@@ -349,12 +374,14 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (cronError) {
           return validationProblem('checkCron', cronError);
         }
+        const isNode = container.kind === 'node';
         Object.assign(container, {
           name,
           isEnabled: body.isEnabled,
-          aptEnabled: body.aptEnabled,
-          backupBeforeUpdate: body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
-          startWhenStopped: body.startWhenStopped ?? container.startWhenStopped,
+          // The host entry exists only for apt; backups and temporary starts apply to containers only.
+          aptEnabled: isNode || body.aptEnabled,
+          backupBeforeUpdate: isNode ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
+          startWhenStopped: !isNode && (body.startWhenStopped ?? container.startWhenStopped),
           checkCron,
         });
         if (!container.aptEnabled) {
@@ -393,6 +420,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container.aptEnabled) {
             return problem(409, 'apt is disabled for this container.');
           }
+          if (container.kind === 'node') {
+            if (options.backup === true) {
+              return problem(409, 'The Proxmox host cannot be backed up with vzdump – update it without a backup.');
+            }
+            return accepted(service.startAptUpgrade(container, null));
+          }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
         }),
@@ -411,6 +444,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         const body = await readBody<AppBody>(req, appSchema);
         if (!container) {
           return problem(404, 'Container not found.');
+        }
+        if (container.kind === 'node') {
+          return problem(409, 'Applications can be added to containers only, not to the Proxmox host.');
         }
         const input = toAppInput(body, null);
         if (input instanceof Response) {
