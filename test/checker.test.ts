@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { beforeEach, describe, it } from 'node:test';
+import { beforeEach, describe, it } from 'bun:test';
 import { ReleaseChecker } from '../src/checker.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { NotificationDispatcher } from '../src/notifiers/dispatcher.ts';

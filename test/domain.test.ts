@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { describe, it } from 'bun:test';
 import { MAX_NOTIFICATIONS_PER_CHECK, parseRepositoryName, selectNewReleases } from '../src/domain.ts';
 import { dayIso, release } from './helpers.ts';
 

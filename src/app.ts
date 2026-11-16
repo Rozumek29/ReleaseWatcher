@@ -1,10 +1,10 @@
-import { existsSync } from 'node:fs';
-import fastifyStatic from '@fastify/static';
-import Fastify, { type FastifyInstance, type FastifyReply, type FastifyServerOptions } from 'fastify';
+import { stat } from 'node:fs/promises';
+import { join, resolve, sep } from 'node:path';
 import { ReleaseChecker } from './checker.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
+import { createLogger, type Logger } from './log.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
 import { Poller } from './poller.ts';
@@ -16,6 +16,7 @@ import {
   type SettingsPatch,
   type SettingsService,
 } from './settings.ts';
+import { parseId, readBody, RequestValidationError, type ObjectSchema, type Schema } from './validation.ts';
 import {
   compareVersions,
   fetchInstalledVersion,
@@ -32,16 +33,16 @@ interface HeaderInput {
   value?: string | null;
 }
 
-const headersSchema = {
-  type: ['array', 'null'],
+const headersSchema: Schema = {
+  type: 'array',
+  nullable: true,
   maxItems: MAX_CUSTOM_HEADERS,
   items: {
     type: 'object',
-    additionalProperties: false,
-    properties: { name: { type: 'string', maxLength: 100 }, value: { type: ['string', 'null'], maxLength: 4000 } },
+    properties: { name: { type: 'string', maxLength: 100 }, value: { type: 'string', nullable: true, maxLength: 4000 } },
     required: ['name'],
   },
-} as const;
+};
 
 /** Merges submitted headers with saved ones so secrets don't have to be sent back to the UI. */
 function resolveHeaders(input: readonly HeaderInput[], saved: readonly HttpHeader[]): HttpHeader[] | { error: string } {
@@ -73,14 +74,19 @@ export interface AppDeps {
   ) => Promise<{ version: string; preview: string }>;
   /** Directory with the built Angular UI; skipped when missing. */
   publicDir?: string;
-  logger?: FastifyServerOptions['logger'];
+  /** Defaults to an `info` level logger. */
+  log?: Logger;
 }
 
 export interface App {
-  server: FastifyInstance;
   checker: ReleaseChecker;
   /** Created but not started – call `poller.start()`. */
   poller: Poller;
+  log: Logger;
+  /** Starts the HTTP server (`port: 0` picks a free port). */
+  listen(options: { port: number; hostname: string }): Bun.Server<undefined>;
+  /** Stops the poller and the HTTP server (if started). */
+  close(): Promise<void>;
 }
 
 /** Public shape of a watched repository (internal fields like the ETag are not exposed). */
@@ -112,31 +118,88 @@ export const toDto = (r: WatchedRepository) => ({
   })(),
 });
 
-const idParams = {
-  type: 'object',
-  properties: { id: { type: 'integer', minimum: 1 } },
-  required: ['id'],
-} as const;
-
 /** RFC 7807-style error response, consumed by the UI. */
-function problem(reply: FastifyReply, status: number, title: string, extra: Record<string, unknown> = {}) {
-  return reply.code(status).type('application/problem+json').send({ status, title, ...extra });
+function problem(status: number, title: string, extra: Record<string, unknown> = {}): Response {
+  return Response.json({ status, title, ...extra }, { status, headers: { 'content-type': 'application/problem+json' } });
+}
+
+const validationProblem = (field: string, message: string) =>
+  problem(400, 'One or more validation errors occurred.', { errors: { [field]: [message] } });
+
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
+
+const addRepositorySchema: ObjectSchema = {
+  type: 'object',
+  properties: { repository: { type: 'string' }, includePrereleases: { type: 'boolean' } },
+  required: ['repository'],
+};
+
+const updateRepositorySchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    includePrereleases: { type: 'boolean' },
+    isEnabled: { type: 'boolean' },
+    installedVersionUrl: { type: 'string', nullable: true, maxLength: 2000 },
+    installedVersionField: { type: 'string', nullable: true, maxLength: 200 },
+    installedVersionHeaders: headersSchema,
+  },
+  required: ['includePrereleases', 'isEnabled'],
+};
+
+const testInstalledVersionSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    url: { type: 'string', maxLength: 2000 },
+    field: { type: 'string', nullable: true, maxLength: 200 },
+    headers: headersSchema,
+    repositoryId: { type: 'integer', nullable: true },
+  },
+  required: ['url'],
+};
+
+const settingsSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    discordWebhookUrl: { type: 'string', nullable: true },
+    discordMention: { type: 'string', nullable: true },
+    discordUsername: { type: 'string', nullable: true },
+    githubToken: { type: 'string', nullable: true },
+    pollIntervalMinutes: { type: 'number', nullable: true },
+  },
+};
+
+/** Resolves a URL path to a regular file inside `root`, or null (missing file, directory or path traversal). */
+async function findStaticFile(root: string, pathname: string): Promise<string | null> {
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    return null;
+  }
+  const path = resolve(root, `.${decoded}`);
+  if (!path.startsWith(root + sep)) {
+    return null;
+  }
+  try {
+    return (await stat(path)).isFile() ? path : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function buildApp(deps: AppDeps): Promise<App> {
-  const server = Fastify({ logger: deps.logger ?? true });
-  const dispatcher = new NotificationDispatcher(deps.notifiers, server.log);
+  const log = deps.log ?? createLogger('info');
+  const dispatcher = new NotificationDispatcher(deps.notifiers, log);
   const checker = new ReleaseChecker({
     store: deps.store,
     source: deps.source,
     dispatcher,
-    log: server.log,
+    log,
     ...(deps.fetchInstalledVersion ? { fetchInstalledVersion: deps.fetchInstalledVersion } : {}),
   });
   const { store, source, settings } = deps;
-  const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, server.log);
+  const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, log);
   settings.onChange(() => poller.reschedule());
-  server.addHook('onClose', () => poller.stop());
 
   const settingsDto = () => {
     const current = settings.current;
@@ -162,250 +225,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     };
   };
 
-  // Schema validation errors → same shape as the other validation problems.
-  server.setErrorHandler((error: { validation?: unknown; statusCode?: number; message: string }, request, reply) => {
-    if (error.validation) {
-      return problem(reply, 400, 'One or more validation errors occurred.', { errors: { request: [error.message] } });
-    }
-    request.log.error(error);
-    return problem(reply, error.statusCode ?? 500, 'An unexpected error occurred.');
-  });
-
-  server.get('/health', async () => ({ status: 'ok' }));
-
-  server.get('/api/repositories', async () => store.list().map(toDto));
-
-  server.get<{ Params: { id: number } }>('/api/repositories/:id', { schema: { params: idParams } }, async (req, reply) => {
-    const repo = store.get(req.params.id);
-    return repo ? toDto(repo) : problem(reply, 404, 'Repository not found.');
-  });
-
-  server.post<{ Body: { repository: string; includePrereleases?: boolean } }>(
-    '/api/repositories',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          properties: { repository: { type: 'string' }, includePrereleases: { type: 'boolean' } },
-          required: ['repository'],
-        },
-      },
-    },
-    async (req, reply) => {
-      const parsed = parseRepositoryName(req.body.repository);
-      if (!parsed) {
-        return problem(reply, 400, 'One or more validation errors occurred.', {
-          errors: { repository: ["Use the 'owner/repo' format or a https://github.com/owner/repo URL."] },
-        });
-      }
-
-      const { owner, name } = parsed;
-      if (store.exists(owner, name)) {
-        return problem(reply, 409, `${owner}/${name} is already being watched.`);
-      }
-
-      try {
-        if (!(await source.repositoryExists(owner, name))) {
-          return problem(reply, 400, 'One or more validation errors occurred.', {
-            errors: { repository: [`Repository ${owner}/${name} was not found on GitHub.`] },
-          });
-        }
-      } catch (error) {
-        return problem(reply, 502, 'Bad Gateway', { detail: error instanceof Error ? error.message : String(error) });
-      }
-
-      const repo = store.add(owner, name, req.body.includePrereleases ?? false);
-      // Establish the baseline right away so the UI shows the current latest release.
-      await checker.check(repo);
-
-      return reply.code(201).header('location', `/api/repositories/${repo.id}`).send(toDto(repo));
-    },
-  );
-
-  server.put<{
-    Params: { id: number };
-    Body: {
-      includePrereleases: boolean;
-      isEnabled: boolean;
-      installedVersionUrl?: string | null;
-      installedVersionField?: string | null;
-      installedVersionHeaders?: HeaderInput[] | null;
-    };
-  }>(
-    '/api/repositories/:id',
-    {
-      schema: {
-        params: idParams,
-        body: {
-          type: 'object',
-          properties: {
-            includePrereleases: { type: 'boolean' },
-            isEnabled: { type: 'boolean' },
-            installedVersionUrl: { type: ['string', 'null'], maxLength: 2000 },
-            installedVersionField: { type: ['string', 'null'], maxLength: 200 },
-            installedVersionHeaders: headersSchema,
-          },
-          required: ['includePrereleases', 'isEnabled'],
-        },
-      },
-    },
-    async (req, reply) => {
-      const repo = store.get(req.params.id);
-      if (!repo) {
-        return problem(reply, 404, 'Repository not found.');
-      }
-      if (repo.includePrereleases !== req.body.includePrereleases) {
-        // Filter changed: force a full fetch on the next check.
-        repo.etag = null;
-      }
-      repo.includePrereleases = req.body.includePrereleases;
-      repo.isEnabled = req.body.isEnabled;
-
-      // Installed-version settings are optional in the body: undefined = keep, null/"" = clear.
-      const { installedVersionUrl, installedVersionField, installedVersionHeaders } = req.body;
-      if (installedVersionUrl !== undefined || installedVersionField !== undefined || installedVersionHeaders !== undefined) {
-        const url = installedVersionUrl === undefined ? repo.installedVersionUrl : installedVersionUrl?.trim() || null;
-        const field = installedVersionField === undefined ? repo.installedVersionField : installedVersionField?.trim() || null;
-        const urlError = url ? validateVersionUrl(url) : null;
-        if (urlError) {
-          return problem(reply, 400, 'One or more validation errors occurred.', { errors: { installedVersionUrl: [urlError] } });
-        }
-        let headers = repo.installedVersionHeaders;
-        if (installedVersionHeaders !== undefined) {
-          const resolved = resolveHeaders(installedVersionHeaders ?? [], repo.installedVersionHeaders);
-          const headerError = 'error' in resolved ? resolved.error : validateHeaders(resolved);
-          if (headerError) {
-            return problem(reply, 400, 'One or more validation errors occurred.', { errors: { installedVersionHeaders: [headerError] } });
-          }
-          headers = resolved as HttpHeader[];
-        }
-        const changed =
-          url !== repo.installedVersionUrl ||
-          field !== repo.installedVersionField ||
-          JSON.stringify(headers) !== JSON.stringify(repo.installedVersionHeaders);
-        repo.installedVersionUrl = url;
-        repo.installedVersionField = field;
-        repo.installedVersionHeaders = headers;
-        if (changed) {
-          await checker.refreshInstalledVersion(repo);
-        }
-      }
-
-      store.save(repo);
-      return toDto(repo);
-    },
-  );
-
-  // Tries an installed-version URL without saving it (used by the "Test" button in the UI).
-  // `repositoryId` lets headers without a value reuse the secret saved for that repository.
-  server.post<{ Body: { url: string; field?: string | null; headers?: HeaderInput[] | null; repositoryId?: number | null } }>(
-    '/api/installed-version/test',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          properties: {
-            url: { type: 'string', maxLength: 2000 },
-            field: { type: ['string', 'null'], maxLength: 200 },
-            headers: headersSchema,
-            repositoryId: { type: ['integer', 'null'] },
-          },
-          required: ['url'],
-        },
-      },
-    },
-    async (req, reply) => {
-      const urlError = validateVersionUrl(req.body.url.trim());
-      if (urlError) {
-        return problem(reply, 400, 'One or more validation errors occurred.', { errors: { installedVersionUrl: [urlError] } });
-      }
-      const saved = req.body.repositoryId ? (store.get(req.body.repositoryId)?.installedVersionHeaders ?? []) : [];
-      const resolved = resolveHeaders(req.body.headers ?? [], saved);
-      const headerError = 'error' in resolved ? resolved.error : validateHeaders(resolved);
-      if (headerError) {
-        return problem(reply, 400, 'One or more validation errors occurred.', { errors: { installedVersionHeaders: [headerError] } });
-      }
-      try {
-        return await (deps.fetchInstalledVersion ?? fetchInstalledVersion)(
-          req.body.url.trim(),
-          req.body.field?.trim() || null,
-          resolved as HttpHeader[],
-        );
-      } catch (error) {
-        if (error instanceof InstalledVersionError) {
-          return problem(reply, 422, error.message);
-        }
-        throw error;
-      }
-    },
-  );
-
-  server.delete<{ Params: { id: number } }>('/api/repositories/:id', { schema: { params: idParams } }, async (req, reply) =>
-    store.delete(req.params.id) ? reply.code(204).send() : problem(reply, 404, 'Repository not found.'),
-  );
-
-  server.post<{ Params: { id: number } }>('/api/repositories/:id/check', { schema: { params: idParams } }, async (req, reply) => {
-    const repo = store.get(req.params.id);
-    if (!repo) {
-      return problem(reply, 404, 'Repository not found.');
-    }
-    const result = await checker.check(repo);
-    return { repository: toDto(repo), notifiedCount: result.notifiedCount };
-  });
-
-  server.get('/api/notifiers', async () => deps.notifiers.map((n) => ({ name: n.name, isEnabled: n.isEnabled })));
-
-  // Sends a fake release to every enabled notifier to verify the configuration.
-  server.post('/api/notifiers/test', async () =>
-    dispatcher.dispatch({
-      owner: 'releasewatcher',
-      repository: 'test',
-      release: {
-        tag: 'v0.0.0-test',
-        name: 'Test notification',
-        htmlUrl: 'https://github.com',
-        body: 'If you can read this, ReleaseWatcher can reach this channel. 🎉',
-        isPrerelease: false,
-        publishedAt: new Date().toISOString(),
-        authorLogin: null,
-        authorAvatarUrl: null,
-      },
-    }),
-  );
-
-  server.get('/api/settings', async () => settingsDto());
-
-  const nullableString = { type: ['string', 'null'] } as const;
-  server.put<{ Body: SettingsPatch }>(
-    '/api/settings',
-    {
-      schema: {
-        body: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            discordWebhookUrl: nullableString,
-            discordMention: nullableString,
-            discordUsername: nullableString,
-            githubToken: nullableString,
-            pollIntervalMinutes: { type: ['number', 'null'] },
-          },
-        },
-      },
-    },
-    async (req, reply) => {
-      try {
-        settings.update(req.body);
-      } catch (error) {
-        if (error instanceof SettingsValidationError) {
-          return problem(reply, 400, 'One or more validation errors occurred.', { errors: { [error.field]: [error.message] } });
-        }
-        throw error;
-      }
-      return settingsDto();
-    },
-  );
-
   const statusDto = () => {
     const repositories = store.list();
     return {
@@ -419,33 +238,242 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     };
   };
 
-  server.get('/api/status', async () => statusDto());
+  const findRepository = (rawId: string) => store.get(parseId(rawId));
 
-  // Checks all enabled repositories right away.
-  server.post('/api/check-all', async () => {
-    await poller.runNow();
-    return statusDto();
-  });
+  const addRepository = async (req: Request) => {
+    const body = await readBody<{ repository: string; includePrereleases?: boolean }>(req, addRepositorySchema);
+    const parsed = parseRepositoryName(body.repository);
+    if (!parsed) {
+      return validationProblem('repository', "Use the 'owner/repo' format or a https://github.com/owner/repo URL.");
+    }
 
-  server.get('/api/github/rate-limit', async (_req, reply) => {
+    const { owner, name } = parsed;
+    if (store.exists(owner, name)) {
+      return problem(409, `${owner}/${name} is already being watched.`);
+    }
+
     try {
-      return (await source.getRateLimit?.()) ?? null;
+      if (!(await source.repositoryExists(owner, name))) {
+        return validationProblem('repository', `Repository ${owner}/${name} was not found on GitHub.`);
+      }
     } catch (error) {
-      return problem(reply, 502, 'Bad Gateway', { detail: error instanceof Error ? error.message : String(error) });
+      return problem(502, 'Bad Gateway', { detail: errorMessage(error) });
     }
-  });
 
-  // Angular UI + SPA fallback.
-  const hasUi = deps.publicDir !== undefined && existsSync(deps.publicDir);
-  if (hasUi) {
-    await server.register(fastifyStatic, { root: deps.publicDir! });
-  }
-  server.setNotFoundHandler((req, reply) => {
-    if (hasUi && req.method === 'GET' && !req.url.startsWith('/api/')) {
-      return reply.sendFile('index.html');
+    const repo = store.add(owner, name, body.includePrereleases ?? false);
+    // Establish the baseline right away so the UI shows the current latest release.
+    await checker.check(repo);
+
+    return Response.json(toDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
+  };
+
+  const updateRepository = async (req: Request, rawId: string) => {
+    const repo = findRepository(rawId);
+    const body = await readBody<{
+      includePrereleases: boolean;
+      isEnabled: boolean;
+      installedVersionUrl?: string | null;
+      installedVersionField?: string | null;
+      installedVersionHeaders?: HeaderInput[] | null;
+    }>(req, updateRepositorySchema);
+    if (!repo) {
+      return problem(404, 'Repository not found.');
     }
-    return problem(reply, 404, 'Not found.');
-  });
+    if (repo.includePrereleases !== body.includePrereleases) {
+      // Filter changed: force a full fetch on the next check.
+      repo.etag = null;
+    }
+    repo.includePrereleases = body.includePrereleases;
+    repo.isEnabled = body.isEnabled;
 
-  return { server, checker, poller };
+    // Installed-version settings are optional in the body: undefined = keep, null/"" = clear.
+    const { installedVersionUrl, installedVersionField, installedVersionHeaders } = body;
+    if (installedVersionUrl !== undefined || installedVersionField !== undefined || installedVersionHeaders !== undefined) {
+      const url = installedVersionUrl === undefined ? repo.installedVersionUrl : installedVersionUrl?.trim() || null;
+      const field = installedVersionField === undefined ? repo.installedVersionField : installedVersionField?.trim() || null;
+      const urlError = url ? validateVersionUrl(url) : null;
+      if (urlError) {
+        return validationProblem('installedVersionUrl', urlError);
+      }
+      let headers = repo.installedVersionHeaders;
+      if (installedVersionHeaders !== undefined) {
+        const resolved = resolveHeaders(installedVersionHeaders ?? [], repo.installedVersionHeaders);
+        const headerError = 'error' in resolved ? resolved.error : validateHeaders(resolved);
+        if (headerError) {
+          return validationProblem('installedVersionHeaders', headerError);
+        }
+        headers = resolved as HttpHeader[];
+      }
+      const changed =
+        url !== repo.installedVersionUrl ||
+        field !== repo.installedVersionField ||
+        JSON.stringify(headers) !== JSON.stringify(repo.installedVersionHeaders);
+      repo.installedVersionUrl = url;
+      repo.installedVersionField = field;
+      repo.installedVersionHeaders = headers;
+      if (changed) {
+        await checker.refreshInstalledVersion(repo);
+      }
+    }
+
+    store.save(repo);
+    return Response.json(toDto(repo));
+  };
+
+  // Tries an installed-version URL without saving it (used by the "Test" button in the UI).
+  // `repositoryId` lets headers without a value reuse the secret saved for that repository.
+  const testInstalledVersion = async (req: Request) => {
+    const body = await readBody<{ url: string; field?: string | null; headers?: HeaderInput[] | null; repositoryId?: number | null }>(
+      req,
+      testInstalledVersionSchema,
+    );
+    const urlError = validateVersionUrl(body.url.trim());
+    if (urlError) {
+      return validationProblem('installedVersionUrl', urlError);
+    }
+    const saved = body.repositoryId ? (store.get(body.repositoryId)?.installedVersionHeaders ?? []) : [];
+    const resolved = resolveHeaders(body.headers ?? [], saved);
+    const headerError = 'error' in resolved ? resolved.error : validateHeaders(resolved);
+    if (headerError) {
+      return validationProblem('installedVersionHeaders', headerError);
+    }
+    try {
+      return Response.json(
+        await (deps.fetchInstalledVersion ?? fetchInstalledVersion)(body.url.trim(), body.field?.trim() || null, resolved as HttpHeader[]),
+      );
+    } catch (error) {
+      if (error instanceof InstalledVersionError) {
+        return problem(422, error.message);
+      }
+      throw error;
+    }
+  };
+
+  const updateSettings = async (req: Request) => {
+    const body = await readBody<SettingsPatch>(req, settingsSchema);
+    try {
+      settings.update(body);
+    } catch (error) {
+      if (error instanceof SettingsValidationError) {
+        return validationProblem(error.field, error.message);
+      }
+      throw error;
+    }
+    return Response.json(settingsDto());
+  };
+
+  // Angular UI + SPA fallback; everything else (incl. unknown /api routes) is a 404 problem.
+  const publicDir = deps.publicDir === undefined ? null : resolve(deps.publicDir);
+  const uiDir = publicDir && (await Bun.file(join(publicDir, 'index.html')).exists()) ? publicDir : null;
+  const fallback = async (req: Request) => {
+    const { pathname } = new URL(req.url);
+    if (uiDir && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
+      const file = await findStaticFile(uiDir, pathname);
+      return new Response(Bun.file(file ?? join(uiDir, 'index.html')));
+    }
+    return problem(404, 'Not found.');
+  };
+
+  let server: Bun.Server<undefined> | null = null;
+
+  const listen = (options: { port: number; hostname: string }) => {
+    server = Bun.serve({
+      port: options.port,
+      hostname: options.hostname,
+      routes: {
+        '/health': { GET: () => Response.json({ status: 'ok' }) },
+
+        '/api/repositories': {
+          GET: () => Response.json(store.list().map(toDto)),
+          POST: addRepository,
+        },
+        '/api/repositories/:id': {
+          GET: (req) => {
+            const repo = findRepository(req.params.id);
+            return repo ? Response.json(toDto(repo)) : problem(404, 'Repository not found.');
+          },
+          PUT: (req) => updateRepository(req, req.params.id),
+          DELETE: (req) =>
+            store.delete(parseId(req.params.id)) ? new Response(null, { status: 204 }) : problem(404, 'Repository not found.'),
+        },
+        '/api/repositories/:id/check': {
+          POST: async (req) => {
+            const repo = findRepository(req.params.id);
+            if (!repo) {
+              return problem(404, 'Repository not found.');
+            }
+            const result = await checker.check(repo);
+            return Response.json({ repository: toDto(repo), notifiedCount: result.notifiedCount });
+          },
+        },
+
+        '/api/installed-version/test': { POST: testInstalledVersion },
+
+        '/api/notifiers': {
+          GET: () => Response.json(deps.notifiers.map((n) => ({ name: n.name, isEnabled: n.isEnabled }))),
+        },
+        // Sends a fake release to every enabled notifier to verify the configuration.
+        '/api/notifiers/test': {
+          POST: async () =>
+            Response.json(
+              await dispatcher.dispatch({
+                owner: 'releasewatcher',
+                repository: 'test',
+                release: {
+                  tag: 'v0.0.0-test',
+                  name: 'Test notification',
+                  htmlUrl: 'https://github.com',
+                  body: 'If you can read this, ReleaseWatcher can reach this channel. 🎉',
+                  isPrerelease: false,
+                  publishedAt: new Date().toISOString(),
+                  authorLogin: null,
+                  authorAvatarUrl: null,
+                },
+              }),
+            ),
+        },
+
+        '/api/settings': {
+          GET: () => Response.json(settingsDto()),
+          PUT: updateSettings,
+        },
+
+        '/api/status': { GET: () => Response.json(statusDto()) },
+        // Checks all enabled repositories right away.
+        '/api/check-all': {
+          POST: async () => {
+            await poller.runNow();
+            return Response.json(statusDto());
+          },
+        },
+
+        '/api/github/rate-limit': {
+          GET: async () => {
+            try {
+              return Response.json((await source.getRateLimit?.()) ?? null);
+            } catch (error) {
+              return problem(502, 'Bad Gateway', { detail: errorMessage(error) });
+            }
+          },
+        },
+      },
+      fetch: fallback,
+      error: (error) => {
+        if (error instanceof RequestValidationError) {
+          return validationProblem('request', error.message);
+        }
+        log.error({ err: error }, 'Request failed');
+        return problem(500, 'An unexpected error occurred.');
+      },
+    });
+    return server;
+  };
+
+  const close = async () => {
+    poller.stop();
+    await server?.stop();
+    server = null;
+  };
+
+  return { checker, poller, log, listen, close };
 }

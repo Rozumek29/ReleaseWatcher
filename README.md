@@ -2,10 +2,11 @@
 
 Watches selected GitHub repositories for new releases and sends a notification (Discord today, more channels later).
 
-- **Server:** Node.js 22.18+ / 24 running TypeScript natively (no build step), Fastify, built-in `node:sqlite`
+- **Server:** [Bun](https://bun.sh) 1.4+ running TypeScript natively (no build step), `Bun.serve` HTTP server,
+  built-in `bun:sqlite`
 - **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
 - **Notifications:** Discord webhook; new channels plug in through the `Notifier` interface
-- Only two runtime dependencies: `fastify` and `@fastify/static`
+- No runtime dependencies – everything the server needs is built into Bun
 
 ## How it works
 
@@ -27,44 +28,50 @@ Open http://localhost:8080. The SQLite database lives in the `releasewatcher-dat
 
 ## Local development
 
-Requirements: Node.js 22.18+ (24 LTS recommended). The server and the Angular UI are one npm
-workspace, so a single `npm install` in the repository root installs both.
+Requirements: Bun 1.4.4+ and Node.js 24 (the Angular CLI still runs on Node; Bun is only its package
+manager). The server and the Angular UI are one Bun workspace, so a single `bun install` in the repository
+root installs both.
+
+Bun loads `.env` from the working directory automatically.
 
 ```bash
 cp .env.example .env        # fill in DISCORD_WEBHOOK_URL (or set it later in the UI)
-npm install
-npm start                   # builds the UI if needed, then serves app + API on http://localhost:8080
+bun install
+bun start                   # builds the UI if needed, then serves app + API on http://localhost:8080
 ```
 
-`npm start` rebuilds the UI only when `web/` changed since the last build, so later starts are instant.
+`bun start` rebuilds the UI only when `web/` changed since the last build, so later starts are instant.
 
 For development with live reload:
 
 ```bash
-npm run dev                 # API on :8080 (restarts on change) + Angular dev server on http://localhost:4200
+bun run dev                 # API on :8080 (restarts on change) + Angular dev server on http://localhost:4200
 ```
 
 Open http://localhost:4200; the Angular dev server proxies `/api` to the API on :8080 (`web/proxy.conf.json`,
 adjust it if you change `PORT`).
 
-| Script              | What it does                                              |
-| ------------------- | --------------------------------------------------------- |
-| `npm start`         | build the UI if it is missing or outdated, start the app  |
-| `npm run dev`       | API in watch mode + Angular dev server, side by side      |
-| `npm run build`     | force a production build of the UI into `public/`         |
-| `npm run serve`     | start the app without touching the UI build               |
-| `npm test`          | server tests (node:test) + UI tests (Vitest)              |
-| `npm run typecheck` | type-check the server                                     |
-| `npm run package`   | ready-to-run release folder in `release/` (see Releases)  |
+| Script              | What it does                                                         |
+| ------------------- | -------------------------------------------------------------------- |
+| `bun start`         | build the UI if it is missing or outdated, start the app             |
+| `bun run dev`       | API in watch mode + Angular dev server, side by side (`--parallel`)  |
+| `bun run build`     | force a production build of the UI into `public/`                    |
+| `bun run serve`     | start the app without touching the UI build                          |
+| `bun run test`      | server tests (`bun test`) + UI tests (Vitest)                        |
+| `bun run typecheck` | type-check the server (TypeScript 7)                                 |
+| `bun run package`   | ready-to-run release folder in `release/` (see Releases)             |
+
+Use `bun run test`, not plain `bun test` – the latter runs only the server tests (`bunfig.toml` limits
+it to `test/`).
 
 ## Releases
 
-`npm run package` builds a ready-to-run folder in `release/releasewatcher-<version>/` with the server,
-the production UI and the production dependencies. The target machine only needs Node.js:
+`bun run package` builds a ready-to-run folder in `release/releasewatcher-<version>/` with the server
+and the production UI (there are no runtime dependencies). The target machine only needs Bun:
 
 ```bash
 cp .env.example .env   # optional, settings can also be changed in the UI
-npm start              # http://localhost:8080
+bun start              # http://localhost:8080
 ```
 
 Pushing a tag runs `.github/workflows/release.yml`:
@@ -113,7 +120,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
 | `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
 | `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
-| `LOG_LEVEL` | `info` | Pino log level. |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
 > (fewer with ETag hits), so for more than ~10 repositories at a 15 min interval add a token.
@@ -164,19 +171,21 @@ does not block the others. The UI picks up the new channel automatically.
 ```
 src/
   main.ts            entry point: config, DB, HTTP server, poller, graceful shutdown
-  app.ts             Fastify routes + static UI
+  app.ts             HTTP routes (Bun.serve) + static UI with SPA fallback
+  log.ts             minimal JSON-lines logger
+  validation.ts      request body/param validation
   domain.ts          types, repository-name parsing, new-release selection
-  db.ts              node:sqlite store with simple versioned migrations
+  db.ts              bun:sqlite store with simple versioned migrations
   github.ts          GitHub REST client (ETag aware)
   checker.ts         checks one/all repositories, dispatches notifications
   poller.ts          interval scheduler (interval can change at runtime)
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars
   version.ts         version parsing/comparison, reading the installed version of a self-hosted app
   notifiers/         Notifier interface, dispatcher, Discord
-test/                node:test tests
+test/                bun:test tests
 scripts/
-  ensure-web.ts      builds the UI for `npm start` when needed
-  package.ts         builds the release folder for `npm run package`
+  ensure-web.ts      builds the UI for `bun start` when needed
+  package.ts         builds the release folder for `bun run package`
 web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
   src/app/pages/repositories watched repositories

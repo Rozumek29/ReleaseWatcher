@@ -4,30 +4,26 @@
   "private": true,
   "description": "Watches GitHub repositories for new releases and notifies Discord (and other channels).",
   "type": "module",
+  "packageManager": "bun@1.4.4",
   "engines": {
-    "node": ">=22.18"
+    "bun": ">=1.4.4"
   },
   "scripts": {
-    "start": "node scripts/ensure-web.ts && node --disable-warning=ExperimentalWarning src/main.ts",
-    "serve": "node --disable-warning=ExperimentalWarning src/main.ts",
-    "dev": "concurrently --kill-others-on-fail --names api,web --prefix-colors blue,magenta \"npm:dev:api\" \"npm:dev:web\"",
-    "dev:api": "node --disable-warning=ExperimentalWarning --watch src/main.ts",
-    "dev:web": "npm start --workspace web",
-    "build": "node scripts/ensure-web.ts --force",
-    "test": "npm run test:api && npm run test:web",
-    "test:api": "node --disable-warning=ExperimentalWarning --test \"test/**/*.test.ts\"",
-    "test:web": "npm test --workspace web -- --watch=false",
+    "start": "bun scripts/ensure-web.ts && bun src/main.ts",
+    "serve": "bun src/main.ts",
+    "dev": "bun run --parallel dev:api dev:web",
+    "dev:api": "bun --watch src/main.ts",
+    "dev:web": "bun run --cwd web start",
+    "build": "bun scripts/ensure-web.ts --force",
+    "test": "bun run test:api && bun run test:web",
+    "test:api": "bun test",
+    "test:web": "bun run --cwd web test --watch=false",
     "typecheck": "tsc --noEmit",
-    "package": "node scripts/package.ts"
-  },
-  "dependencies": {
-    "@fastify/static": "^10.1.11",
-    "fastify": "^5.12.8"
+    "package": "bun scripts/package.ts"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5",
-    "concurrently": "^10.0.6",
-    "typescript": "^5.9.3"
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2"
   },
   "workspaces": [
     "web"

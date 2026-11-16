@@ -1,0 +1,3 @@
+[test]
+# Server tests only; the Angular specs in web/ run through `ng test` (Vitest).
+root = "./test"

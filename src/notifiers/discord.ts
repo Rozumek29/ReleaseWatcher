@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import { ownerAvatarUrl } from '../domain.ts';
 import {
   notificationFullName,
@@ -55,7 +54,7 @@ export class DiscordNotifier implements Notifier {
 
       if (response.status === 429 && attempt < MAX_ATTEMPTS) {
         const retryAfter = Number(response.headers.get('retry-after'));
-        await sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000 * attempt);
+        await Bun.sleep(Number.isFinite(retryAfter) && retryAfter > 0 ? retryAfter * 1000 : 2000 * attempt);
         continue;
       }
 

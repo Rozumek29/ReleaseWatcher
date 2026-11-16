@@ -1,4 +1,4 @@
-import type { FastifyBaseLogger } from 'fastify';
+import type { Logger } from '../log.ts';
 import { notificationFullName, type Notifier, type ReleaseNotification } from './notifier.ts';
 
 /**
@@ -7,9 +7,9 @@ import { notificationFullName, type Notifier, type ReleaseNotification } from '.
  */
 export class NotificationDispatcher {
   readonly notifiers: readonly Notifier[];
-  private readonly log: Pick<FastifyBaseLogger, 'info' | 'error'>;
+  private readonly log: Pick<Logger, 'info' | 'error'>;
 
-  constructor(notifiers: readonly Notifier[], log: Pick<FastifyBaseLogger, 'info' | 'error'>) {
+  constructor(notifiers: readonly Notifier[], log: Pick<Logger, 'info' | 'error'>) {
     this.notifiers = notifiers;
     this.log = log;
   }

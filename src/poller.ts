@@ -1,4 +1,4 @@
-import type { FastifyBaseLogger } from 'fastify';
+import type { Logger } from './log.ts';
 import type { ReleaseChecker } from './checker.ts';
 
 export interface PollerStatus {
@@ -16,12 +16,12 @@ export class Poller {
   private running: Promise<void> | null = null;
   private readonly checker: ReleaseChecker;
   private readonly getIntervalMs: () => number;
-  private readonly log: Pick<FastifyBaseLogger, 'error'>;
+  private readonly log: Pick<Logger, 'error'>;
   private lastRunStartedAt: Date | null = null;
   private lastRunFinishedAt: Date | null = null;
   private nextRunAt: Date | null = null;
 
-  constructor(checker: ReleaseChecker, intervalMs: number | (() => number), log: Pick<FastifyBaseLogger, 'error'>) {
+  constructor(checker: ReleaseChecker, intervalMs: number | (() => number), log: Pick<Logger, 'error'>) {
     this.checker = checker;
     this.getIntervalMs = typeof intervalMs === 'function' ? intervalMs : () => intervalMs;
     this.log = log;

@@ -1,4 +1,4 @@
-import type { FastifyBaseLogger } from 'fastify';
+import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, selectNewReleases, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
@@ -21,7 +21,7 @@ export class ReleaseChecker {
   private readonly store: RepositoryStore;
   private readonly source: ReleaseSource;
   private readonly dispatcher: NotificationDispatcher;
-  private readonly log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+  private readonly log: Pick<Logger, 'info' | 'warn'>;
   private readonly now: () => Date;
   private readonly fetchInstalled: InstalledVersionFetcher;
 
@@ -29,7 +29,7 @@ export class ReleaseChecker {
     store: RepositoryStore;
     source: ReleaseSource;
     dispatcher: NotificationDispatcher;
-    log: Pick<FastifyBaseLogger, 'info' | 'warn'>;
+    log: Pick<Logger, 'info' | 'warn'>;
     now?: () => Date;
     fetchInstalledVersion?: InstalledVersionFetcher;
   }) {

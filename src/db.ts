@@ -1,4 +1,4 @@
-import { DatabaseSync } from 'node:sqlite';
+import { Database } from 'bun:sqlite';
 import type { WatchedRepository } from './domain.ts';
 
 interface Row {
@@ -83,41 +83,38 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE watched_repositories ADD COLUMN installed_version_headers TEXT;`,
 ];
 
-/** SQLite-backed store of watched repositories (uses the built-in node:sqlite module). */
+/** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
-  private readonly db: DatabaseSync;
+  private readonly db: Database;
 
   constructor(path: string) {
-    this.db = new DatabaseSync(path);
-    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+    this.db = new Database(path);
+    this.db.run('PRAGMA journal_mode = WAL');
+    this.db.run('PRAGMA foreign_keys = ON');
     this.migrate();
   }
 
   list(): WatchedRepository[] {
-    const rows = this.db.prepare('SELECT * FROM watched_repositories ORDER BY owner, name').all() as unknown as Row[];
-    return rows.map(toEntity);
+    return this.db.query<Row, []>('SELECT * FROM watched_repositories ORDER BY owner, name').all().map(toEntity);
   }
 
   listEnabled(): WatchedRepository[] {
-    const rows = this.db
-      .prepare('SELECT * FROM watched_repositories WHERE is_enabled = 1 ORDER BY id')
-      .all() as unknown as Row[];
-    return rows.map(toEntity);
+    return this.db.query<Row, []>('SELECT * FROM watched_repositories WHERE is_enabled = 1 ORDER BY id').all().map(toEntity);
   }
 
   get(id: number): WatchedRepository | null {
-    const row = this.db.prepare('SELECT * FROM watched_repositories WHERE id = ?').get(id) as unknown as Row | undefined;
+    const row = this.db.query<Row, [number]>('SELECT * FROM watched_repositories WHERE id = ?').get(id);
     return row ? toEntity(row) : null;
   }
 
   /** Case-insensitive lookup (columns use NOCASE collation). */
   exists(owner: string, name: string): boolean {
-    return this.db.prepare('SELECT 1 FROM watched_repositories WHERE owner = ? AND name = ?').get(owner, name) !== undefined;
+    return this.db.query('SELECT 1 FROM watched_repositories WHERE owner = ? AND name = ?').get(owner, name) !== null;
   }
 
   add(owner: string, name: string, includePrereleases: boolean): WatchedRepository {
     const result = this.db
-      .prepare('INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?)')
+      .query('INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?)')
       .run(owner, name, includePrereleases ? 1 : 0, new Date().toISOString());
     return this.get(Number(result.lastInsertRowid))!;
   }
@@ -125,7 +122,7 @@ export class RepositoryStore {
   /** Persists all mutable fields of the entity. */
   save(repo: WatchedRepository): void {
     this.db
-      .prepare(
+      .query(
         `UPDATE watched_repositories SET
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            etag = ?, last_checked_at = ?, last_error = ?,
@@ -152,22 +149,22 @@ export class RepositoryStore {
   }
 
   delete(id: number): boolean {
-    return Number(this.db.prepare('DELETE FROM watched_repositories WHERE id = ?').run(id).changes) > 0;
+    return this.db.query('DELETE FROM watched_repositories WHERE id = ?').run(id).changes > 0;
   }
 
   /** Returns all persisted settings as raw key/value pairs. */
   readSettings(): Record<string, string> {
-    const rows = this.db.prepare('SELECT key, value FROM settings').all() as unknown as { key: string; value: string }[];
+    const rows = this.db.query<{ key: string; value: string }, []>('SELECT key, value FROM settings').all();
     return Object.fromEntries(rows.map((r) => [r.key, r.value]));
   }
 
   /** Upserts a setting; null removes it (the environment default applies again). */
   writeSetting(key: string, value: string | null): void {
     if (value === null) {
-      this.db.prepare('DELETE FROM settings WHERE key = ?').run(key);
+      this.db.query('DELETE FROM settings WHERE key = ?').run(key);
     } else {
       this.db
-        .prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+        .query('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
         .run(key, value);
     }
   }
@@ -177,17 +174,13 @@ export class RepositoryStore {
   }
 
   private migrate(): void {
-    const { user_version: version } = this.db.prepare('PRAGMA user_version').get() as { user_version: number };
+    const { user_version: version } = this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()!;
+    const apply = this.db.transaction((index: number) => {
+      this.db.exec(MIGRATIONS[index]!);
+      this.db.exec(`PRAGMA user_version = ${index + 1}`);
+    });
     for (let i = version; i < MIGRATIONS.length; i++) {
-      this.db.exec('BEGIN');
-      try {
-        this.db.exec(MIGRATIONS[i]!);
-        this.db.exec(`PRAGMA user_version = ${i + 1}`);
-        this.db.exec('COMMIT');
-      } catch (error) {
-        this.db.exec('ROLLBACK');
-        throw error;
-      }
+      apply(i);
     }
   }
 }

@@ -24,41 +24,44 @@ app does, the API, configuration and project layout – this file covers only wh
 - Before marking work done, run the full check (same as CI):
 
   ```bash
-  npm run typecheck && npm test && npm run build
+  bun run typecheck && bun run test && bun run build
   ```
 
 ## Commands
 
 | Command              | Purpose                                                    |
 | -------------------- | ---------------------------------------------------------- |
-| `npm install`        | installs server + `web/` workspace                         |
-| `npm run dev`        | API on :8080 (watch) + Angular dev server on :4200         |
-| `npm run typecheck`  | type-checks `src/`, `test/`, `scripts/`                    |
-| `npm run test:api`   | server tests (`node:test`)                                 |
-| `npm run test:web`   | UI tests (Vitest via `ng test`)                            |
-| `npm run build`      | production UI build into `public/`                         |
+| `bun install`        | installs server + `web/` workspace                         |
+| `bun run dev`        | API on :8080 (watch) + Angular dev server on :4200         |
+| `bun run typecheck`  | type-checks `src/`, `test/`, `scripts/` (TypeScript 7)     |
+| `bun run test:api`   | server tests (`bun test`, limited to `test/` by `bunfig.toml`) |
+| `bun run test:web`   | UI tests (Vitest via `ng test`)                            |
+| `bun run build`      | production UI build into `public/`                         |
 
-A single server test file: `node --test test/checker.test.ts`.
+A single server test file: `bun test test/checker.test.ts`. Use `bun run test` (not `bun test`) for
+the full suite. The Angular CLI runs on Node.js; Bun is only its package manager.
 
-## Server (`src/`) – TypeScript without a build step
+## Server (`src/`) – Bun, TypeScript without a build step
 
-Node runs the `.ts` files directly (type stripping), which constrains the syntax (`tsconfig.json`):
+Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked with TypeScript 7):
 
-- Relative imports **must include the `.ts` extension**: `import { x } from './domain.ts'`.
+- Relative imports include the `.ts` extension: `import { x } from './domain.ts'`.
 - Type-only imports must use `import type` / `type` specifiers (`verbatimModuleSyntax`).
-- No non-erasable syntax (`erasableSyntaxOnly`): no `enum`, `namespace`, constructor parameter properties
-  (`constructor(private x)`), or decorators. Use union types / `as const` objects and explicit fields.
+- Prefer union types / `as const` objects over `enum`/`namespace`.
 - `noUncheckedIndexedAccess` is on – indexed access returns `T | undefined`.
-- Keep runtime dependencies minimal (currently only `fastify` and `@fastify/static`). Prefer Node built-ins
-  (`node:sqlite`, `fetch`, `node:test`). Ask before adding a dependency.
+- The server has **no runtime dependencies**. Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
+  `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
+- `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
 
 ### Architecture notes
 
 - Dependencies are injected: `buildApp(deps)` in `src/app.ts` receives the store, settings, release source,
-  notifiers and optional fakes (`fetchInstalledVersion`, clock). Keep new I/O behind such seams so it can be
-  faked in tests.
+  notifiers, logger and optional fakes (`fetchInstalledVersion`, clock). Keep new I/O behind such seams so it
+  can be faked in tests. `app.listen()` starts `Bun.serve`; `app.close()` stops the server and the poller.
 - Pure logic lives in `domain.ts` / `version.ts`; `checker.ts` orchestrates; `app.ts` only handles HTTP
-  (validation via Fastify JSON schemas, errors via the `problem()` helper).
+  (routes via `Bun.serve({ routes })`, body validation via the small schemas in `validation.ts`, errors via
+  the `problem()` helper). A thrown `RequestValidationError` becomes a 400 problem response.
+- Logging goes through the `Logger` from `log.ts` (`log.info({ fields }, 'message')`, JSON lines).
 - `checker.ts` advances the baseline (`lastSeenTag`/`lastSeenPublishedAt`) after **each** dispatched release
   so a crash cannot cause duplicate notifications. Preserve this when changing it.
 - Settings: values saved from the UI live in the `settings` table and override env vars; `null` in
@@ -97,8 +100,9 @@ When changing an endpoint, also update the API table in `README.md`.
 
 ## Tests
 
-- Server tests use `node:test` + `node:assert/strict`, an in-memory DB (`new RepositoryStore(':memory:')`)
+- Server tests use `bun:test` + `node:assert/strict`, an in-memory DB (`new RepositoryStore(':memory:')`)
   and the fakes in `test/helpers.ts` (`FakeSource`, `RecordingNotifier`, `release()`, `silentLog`).
+  API tests start the app on `127.0.0.1` with `port: 0` and use `fetch`.
 - Tests must never call the real GitHub API, Discord or other network services.
 - Add or update tests with every behavior change (logic → `domain`/`version`/`checker` tests,
   endpoints → `test/api.test.ts`).

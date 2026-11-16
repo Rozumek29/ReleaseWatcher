@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { afterEach, beforeEach, describe, it } from 'node:test';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { buildApp, type App } from '../src/app.ts';
+import { silentLogger } from '../src/log.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { loadConfig } from '../src/config.ts';
 import { SettingsService } from '../src/settings.ts';
@@ -11,6 +15,20 @@ describe('HTTP API', () => {
   let source: FakeSource;
   let notifier: RecordingNotifier;
   let lastHeaders: readonly { name: string; value: string }[] = [];
+  let baseUrl: URL;
+
+  /** Sends a request to the running server (the shape mirrors Fastify's former `inject`). */
+  const inject = async (options: string | { method?: string; url: string; payload?: unknown }) => {
+    const { method = 'GET', url, payload } = typeof options === 'string' ? { url: options } : options;
+    const response = await fetch(new URL(url, baseUrl), {
+      method,
+      ...(payload === undefined
+        ? {}
+        : { body: typeof payload === 'string' ? payload : JSON.stringify(payload), headers: { 'content-type': 'application/json' } }),
+    });
+    const body = await response.text();
+    return { statusCode: response.status, headers: response.headers, body, json: () => JSON.parse(body) };
+  };
 
   beforeEach(async () => {
     source = new FakeSource();
@@ -23,7 +41,7 @@ describe('HTTP API', () => {
       settings,
       source,
       notifiers: [notifier],
-      logger: false,
+      log: silentLogger,
       fetchInstalledVersion: async (url, _field, headers) => {
         lastHeaders = headers;
         if (url.includes('down')) {
@@ -33,12 +51,13 @@ describe('HTTP API', () => {
         return { version: '0.9.0', preview: '"0.9.0"' };
       },
     });
+    baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
-  afterEach(() => app.server.close());
+  afterEach(() => app.close());
 
   const add = (repository: string) =>
-    app.server.inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
+    inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
 
   it('adds a repository and establishes the baseline', async () => {
     const response = await add('https://github.com/acme/widget');
@@ -67,7 +86,7 @@ describe('HTTP API', () => {
   it('updates, checks and deletes a repository', async () => {
     const { id } = (await add('acme/widget')).json();
 
-    const updated = await app.server.inject({
+    const updated = await inject({
       method: 'PUT',
       url: `/api/repositories/${id}`,
       payload: { includePrereleases: true, isEnabled: false },
@@ -75,27 +94,27 @@ describe('HTTP API', () => {
     assert.equal(updated.json().isEnabled, false);
 
     source.releases = [release('v2', 2), release('v1', 1)];
-    const check = await app.server.inject({ method: 'POST', url: `/api/repositories/${id}/check` });
+    const check = await inject({ method: 'POST', url: `/api/repositories/${id}/check` });
     assert.equal(check.json().notifiedCount, 1);
 
-    assert.equal((await app.server.inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 204);
-    assert.equal((await app.server.inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 404);
+    assert.equal((await inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 204);
+    assert.equal((await inject({ method: 'DELETE', url: `/api/repositories/${id}` })).statusCode, 404);
   });
 
   it('lists notifiers and sends a test notification', async () => {
-    assert.deepEqual((await app.server.inject('/api/notifiers')).json(), [{ name: 'recording', isEnabled: true }]);
-    const test = await app.server.inject({ method: 'POST', url: '/api/notifiers/test' });
+    assert.deepEqual((await inject('/api/notifiers')).json(), [{ name: 'recording', isEnabled: true }]);
+    const test = await inject({ method: 'POST', url: '/api/notifiers/test' });
     assert.deepEqual(test.json(), { sent: ['recording'], failed: [] });
   });
 
   it('reads and updates settings, masking secrets', async () => {
-    const initial = (await app.server.inject('/api/settings')).json();
+    const initial = (await inject('/api/settings')).json();
     assert.equal(initial.discord.webhookConfigured, false);
     assert.equal(initial.polling.intervalMinutes, 15);
     assert.equal(initial.polling.intervalSource, 'env');
 
     const webhook = 'https://discord.com/api/webhooks/123456789/secret-token-value';
-    const updated = await app.server.inject({
+    const updated = await inject({
       method: 'PUT',
       url: '/api/settings',
       payload: { discordWebhookUrl: webhook, githubToken: 'ghp_abcdefghijklmnop', pollIntervalMinutes: 5 },
@@ -108,23 +127,23 @@ describe('HTTP API', () => {
     assert.ok(!JSON.stringify(body).includes('ghp_abcdefghijklmnop'));
     assert.equal(body.polling.intervalMinutes, 5);
 
-    const cleared = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: null } });
+    const cleared = await inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: null } });
     assert.equal(cleared.json().polling.intervalMinutes, 15);
   });
 
   it('validates settings', async () => {
-    const badUrl = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { discordWebhookUrl: 'nope' } });
+    const badUrl = await inject({ method: 'PUT', url: '/api/settings', payload: { discordWebhookUrl: 'nope' } });
     assert.equal(badUrl.statusCode, 400);
     assert.ok(badUrl.json().errors.discordWebhookUrl);
 
-    const badInterval = await app.server.inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: 0 } });
+    const badInterval = await inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: 0 } });
     assert.ok(badInterval.json().errors.pollIntervalMinutes);
   });
 
   it('reports status and runs a check of all repositories', async () => {
     await add('acme/widget');
     source.releases = [release('v2', 2), release('v1', 1)];
-    const status = (await app.server.inject({ method: 'POST', url: '/api/check-all' })).json();
+    const status = (await inject({ method: 'POST', url: '/api/check-all' })).json();
     assert.equal(status.repositories.total, 1);
     assert.ok(status.poller.lastRunFinishedAt);
     assert.equal(notifier.sent.length, 1);
@@ -133,14 +152,14 @@ describe('HTTP API', () => {
   it('configures an installed-version URL and reports available updates', async () => {
     const { id } = (await add('acme/widget')).json();
 
-    const invalid = await app.server.inject({
+    const invalid = await inject({
       method: 'PUT',
       url: `/api/repositories/${id}`,
       payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'not a url' },
     });
     assert.equal(invalid.statusCode, 400);
 
-    const updated = await app.server.inject({
+    const updated = await inject({
       method: 'PUT',
       url: `/api/repositories/${id}`,
       payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://widget.lan/api/version' },
@@ -149,11 +168,11 @@ describe('HTTP API', () => {
     assert.equal(body.installedVersion, '0.9.0');
     assert.equal(body.updateAvailable, true); // latest release is v1
 
-    const status = (await app.server.inject('/api/status')).json();
+    const status = (await inject('/api/status')).json();
     assert.equal(status.repositories.updatesAvailable, 1);
 
     // Omitting the fields keeps them.
-    const kept = await app.server.inject({
+    const kept = await inject({
       method: 'PUT',
       url: `/api/repositories/${id}`,
       payload: { includePrereleases: true, isEnabled: true },
@@ -162,10 +181,10 @@ describe('HTTP API', () => {
   });
 
   it('tests an installed-version URL without saving it', async () => {
-    const ok = await app.server.inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v' } });
+    const ok = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v' } });
     assert.deepEqual(ok.json(), { version: '0.9.0', preview: '"0.9.0"' });
 
-    const down = await app.server.inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://down.lan/v' } });
+    const down = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://down.lan/v' } });
     assert.equal(down.statusCode, 422);
     assert.match(down.json().title, /Could not reach/);
   });
@@ -173,7 +192,7 @@ describe('HTTP API', () => {
   it('stores headers without ever returning their values', async () => {
     const { id } = (await add('acme/widget')).json();
     const put = (payload: object) =>
-      app.server.inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+      inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
 
     const saved = await put({
       installedVersionUrl: 'https://widget.lan/api/version',
@@ -186,7 +205,7 @@ describe('HTTP API', () => {
 
     // Re-sending the header without a value keeps the stored secret; a new header needs a value.
     await put({ installedVersionHeaders: [{ name: 'Authorization' }, { name: 'X-Extra', value: '1' }] });
-    const test = await app.server.inject({
+    const test = await inject({
       method: 'POST',
       url: '/api/installed-version/test',
       payload: { url: 'https://widget.lan/api/version', headers: [{ name: 'Authorization' }], repositoryId: id },
@@ -200,5 +219,82 @@ describe('HTTP API', () => {
 
     const cleared = await put({ installedVersionHeaders: [] });
     assert.deepEqual(cleared.json().installedVersionHeaders, []);
+  });
+
+  it('rejects malformed requests with a validation problem', async () => {
+    const wrongType = await inject({ method: 'POST', url: '/api/repositories', payload: { repository: 42 } });
+    assert.equal(wrongType.statusCode, 400);
+    assert.equal(wrongType.headers.get('content-type'), 'application/problem+json');
+    assert.deepEqual(wrongType.json().errors, { request: ['body/repository must be string'] });
+
+    const missing = await inject({ method: 'PUT', url: '/api/repositories/1', payload: { isEnabled: true } });
+    assert.match(missing.json().errors.request[0], /required property 'includePrereleases'/);
+
+    const badJson = await inject({ method: 'POST', url: '/api/repositories', payload: '{oops' });
+    assert.equal(badJson.statusCode, 400);
+
+    const badId = await inject('/api/repositories/abc');
+    assert.equal(badId.statusCode, 400);
+    assert.equal((await inject('/api/repositories/0')).statusCode, 400);
+  });
+
+  it('ignores unknown settings properties', async () => {
+    const response = await inject({ method: 'PUT', url: '/api/settings', payload: { unknown: 1, pollIntervalMinutes: 7 } });
+    assert.equal(response.statusCode, 200);
+    assert.equal(response.json().polling.intervalMinutes, 7);
+  });
+
+  it('answers unknown routes with a 404 problem when no UI is built', async () => {
+    assert.equal((await inject('/api/nope')).statusCode, 404);
+    assert.equal((await inject('/some/page')).json().title, 'Not found.');
+  });
+});
+
+describe('UI hosting', () => {
+  let app: App;
+  let baseUrl: URL;
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'releasewatcher-ui-'));
+    mkdirSync(join(dir, 'public'));
+    writeFileSync(join(dir, 'public', 'index.html'), '<app-root></app-root>');
+    writeFileSync(join(dir, 'public', 'main.js'), 'console.log(1);');
+    writeFileSync(join(dir, 'secret.txt'), 'top secret');
+    const store = new RepositoryStore(':memory:');
+    app = await buildApp({
+      store,
+      settings: new SettingsService(store, loadConfig({})),
+      source: new FakeSource(),
+      notifiers: [],
+      publicDir: join(dir, 'public'),
+      log: silentLogger,
+    });
+    baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
+  });
+
+  afterEach(async () => {
+    await app.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  const get = (path: string) => fetch(new URL(path, baseUrl));
+
+  it('serves static files with a content type', async () => {
+    const response = await get('/main.js');
+    assert.equal(await response.text(), 'console.log(1);');
+    assert.match(response.headers.get('content-type') ?? '', /javascript/);
+  });
+
+  it('falls back to index.html for client-side routes but not for the API', async () => {
+    assert.equal(await (await get('/')).text(), '<app-root></app-root>');
+    assert.equal(await (await get('/settings')).text(), '<app-root></app-root>');
+    assert.equal((await get('/api/nope')).status, 404);
+  });
+
+  it('never serves files outside the UI directory', async () => {
+    for (const path of ['/../secret.txt', '/%2e%2e/secret.txt', '/..%2fsecret.txt', '/%2e%2e%5csecret.txt']) {
+      assert.ok(!(await (await get(path)).text()).includes('top secret'), path);
+    }
   });
 });
