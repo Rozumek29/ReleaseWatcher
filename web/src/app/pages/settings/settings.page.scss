@@ -262,3 +262,20 @@
     }
   }
 }
+
+.token-help {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+
+  summary {
+    cursor: pointer;
+    width: fit-content;
+  }
+
+  ul {
+    margin: 0.4rem 0 0;
+    padding-left: 1.1rem;
+    display: grid;
+    gap: 0.3rem;
+  }
+}

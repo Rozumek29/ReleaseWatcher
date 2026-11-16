@@ -159,7 +159,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `DISCORD_USERNAME` | `ReleaseWatcher` | Display name of the webhook. |
 | `DISCORD_AVATAR_URL` | – | Avatar of the webhook. |
 | `DISCORD_MAX_BODY_LENGTH` | `1500` | Release notes are truncated to this length. |
-| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos. |
+| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos – fine-grained token with access to those repositories and **Contents: Read-only** (Metadata: Read-only is added automatically); a classic token needs `repo`. |
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
 | `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |

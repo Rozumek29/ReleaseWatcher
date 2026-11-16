@@ -146,6 +146,26 @@
               <a href="https://github.com/settings/personal-access-tokens/new" target="_blank" rel="noopener">Create a fine-grained token</a>
               – no permissions needed for public repositories.
             </span>
+            <details class="token-help">
+              <summary>Permissions for private repositories</summary>
+              <ul>
+                <li>
+                  <strong>Fine-grained token (recommended):</strong> <em>Repository access</em> → <em>Only select
+                  repositories</em> (the private ones you watch), <em>Repository permissions</em> →
+                  <strong>Contents: Read-only</strong> (releases and their files). <em>Metadata: Read-only</em> is added
+                  automatically. Nothing else is needed – the token is never used to write.
+                </li>
+                <li>
+                  <strong>Repositories of an organization:</strong> set <em>Resource owner</em> to the organization; the
+                  organization may have to approve the token before it works.
+                </li>
+                <li>
+                  <strong>Classic token:</strong> needs the <code>repo</code> scope, which also grants write access –
+                  prefer a fine-grained token.
+                </li>
+                <li>Tokens expire – set a reminder or a long expiration; an expired token shows up as an error on the repository.</li>
+              </ul>
+            </details>
           </div>
           <div class="section-actions">
             @if (s.github.tokenSource === 'ui') {
