@@ -298,7 +298,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | How many containers are checked at the same time (1–10). |
 | `PROXMOX_BACKUP_STORAGE` | – | Storage for backups (`vzdump`) made before updates. |
 | `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default (containers and single updates can change it). |
-| `PUBLIC_URL` | – | Public address behind a reverse proxy, e.g. `https://watcher.example.com`; pins the origin and the passkey relying party. |
+| `PUBLIC_URL` | – | Public address behind a reverse proxy, e.g. `https://watcher.example.com`; pins the origin and the passkey relying party; container notifications on Discord link to its Containers page. |
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` (login lockout, session list) – only behind a proxy that sets it. |
 | `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from Basic auth: create the login account with these credentials when none exists. |
 

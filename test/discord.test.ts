@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { buildDiscordPayload, DiscordNotifier, type DiscordOptions } from '../src/notifiers/discord.ts';
+import { buildContainerPayload, buildDiscordPayload, DiscordNotifier, type DiscordOptions } from '../src/notifiers/discord.ts';
 import { release } from './helpers.ts';
 
 const options: DiscordOptions = {
@@ -61,5 +61,22 @@ describe('DiscordNotifier', () => {
       new DiscordNotifier({ ...options, fetch }).notify({ owner: 'acme', repository: 'widget', release: release('v1', 1) }),
       /400/,
     );
+  });
+
+  it('links container notifications to the Containers page when PUBLIC_URL is set', () => {
+    const notification = {
+      vmid: 101,
+      containerName: 'vaultwarden',
+      aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
+      apps: [{ name: 'Vaultwarden', installedVersion: '1.30.0', latestVersion: '1.32.0' }],
+    };
+    const linked = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' }).embeds[0]!;
+    assert.equal(linked.url, 'https://updater.example.com/containers');
+    assert.match(linked.description, /\[Open containers in ReleaseWatcher\]\(https:\/\/updater\.example\.com\/containers\)$/);
+
+    // Without a public URL there is nothing to link to.
+    const plain = buildContainerPayload(notification, options).embeds[0]!;
+    assert.equal('url' in plain, false);
+    assert.equal(plain.description.includes('Open containers'), false);
   });
 });

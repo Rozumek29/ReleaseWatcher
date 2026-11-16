@@ -15,6 +15,8 @@ export interface DiscordOptions {
   /** Optional text above the embed, e.g. "@here" or "<@&ROLE_ID>". */
   mention: string | null;
   maxBodyLength: number;
+  /** Public address of ReleaseWatcher (`PUBLIC_URL`); container notifications link to its Containers page. */
+  publicUrl?: string | null;
   fetch?: typeof fetch;
 }
 
@@ -116,8 +118,10 @@ const MAX_LISTED = 25;
 
 export function buildContainerPayload(
   notification: ContainerUpdatesNotification,
-  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'maxBodyLength'>,
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'maxBodyLength' | 'publicUrl'>,
 ) {
+  // PUBLIC_URL is normalised to an origin (no trailing slash) by the config.
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
   const lines: string[] = [];
   for (const app of notification.apps) {
     lines.push(`**${app.name}**: ${app.installedVersion ?? '?'} → ${app.latestVersion ?? '?'}`);
@@ -144,7 +148,11 @@ export function buildContainerPayload(
           `${notification.isNode ? 'Proxmox host' : `CT ${notification.vmid}`} (${notification.containerName}): updates available`,
           256,
         ),
-        description: truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)),
+        // The title links to the Containers page; the description repeats the link visibly (kept after truncation).
+        ...(containersUrl ? { url: containersUrl } : {}),
+        description:
+          truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)) +
+          (containersUrl ? `\n\n[Open containers in ReleaseWatcher](${containersUrl})` : ''),
         color: CONTAINER_COLOR,
         timestamp: new Date().toISOString(),
       },

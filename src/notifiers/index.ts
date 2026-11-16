@@ -10,6 +10,7 @@ export function createNotifiers(config: Config, settings: SettingsService): Noti
       const current = settings.current;
       return {
         ...config.discord,
+        publicUrl: config.publicUrl,
         webhookUrl: current.discordWebhookUrl,
         mention: current.discordMention,
         username: current.discordUsername,
