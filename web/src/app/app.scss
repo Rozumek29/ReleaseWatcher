@@ -293,7 +293,7 @@ nav {
   display: flex;
   align-items: center;
   gap: 4px;
-  margin-top: -8px;
+  margin-top: -14px;
 
   .user-link {
     display: flex;
@@ -325,13 +325,13 @@ nav {
   }
 }
 
-/* Version and link to the project; sits right under the account row. */
+/* Version and link to the project; sits between the poller card and the account row. */
 .sidebar-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-top: -14px;
+  margin-top: -10px;
   padding-left: 10px;
   color: var(--text-muted);
   font-size: 0.78rem;

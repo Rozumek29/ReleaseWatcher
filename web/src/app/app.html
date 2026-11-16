@@ -84,16 +84,6 @@
       </button>
     </section>
 
-    <section class="user" aria-label="Account">
-      <a routerLink="/account" routerLinkActive="active" class="user-link" [attr.aria-current]="null">
-        <app-icon name="user" [size]="16" />
-        <span class="user-name">{{ auth.username() }}</span>
-      </a>
-      <button type="button" class="icon-btn" (click)="signOut()" aria-label="Sign out" title="Sign out">
-        <app-icon name="logout" [size]="16" />
-      </button>
-    </section>
-
     <footer class="sidebar-foot">
       <span class="version mono">{{ version() }}</span>
       <a
@@ -107,6 +97,16 @@
         <app-icon name="github" [size]="16" />
       </a>
     </footer>
+
+    <section class="user" aria-label="Account">
+      <a routerLink="/account" routerLinkActive="active" class="user-link" [attr.aria-current]="null">
+        <app-icon name="user" [size]="16" />
+        <span class="user-name">{{ auth.username() }}</span>
+      </a>
+      <button type="button" class="icon-btn" (click)="signOut()" aria-label="Sign out" title="Sign out">
+        <app-icon name="logout" [size]="16" />
+      </button>
+    </section>
   </aside>
 
   <main class="content">
