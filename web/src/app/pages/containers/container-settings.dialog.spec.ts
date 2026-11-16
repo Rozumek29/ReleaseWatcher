@@ -45,6 +45,10 @@ describe('ContainerSettingsDialog', () => {
     expect(backup.value).toBe('default');
     backup.value = 'no';
     backup.dispatchEvent(new Event('change'));
+    const startSwitch = el.querySelector<HTMLButtonElement>('[role=switch][aria-label="Start temporarily when stopped"]')!;
+    expect(startSwitch.getAttribute('aria-checked')).toBe('false');
+    startSwitch.click();
+    await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
 
     const request = http.expectOne('/api/containers/1');
@@ -53,6 +57,7 @@ describe('ContainerSettingsDialog', () => {
       name: 'vaultwarden',
       isEnabled: true,
       aptEnabled: true,
+      startWhenStopped: true,
       backupBeforeUpdate: false,
       checkCron: '30 4 * * *',
     });

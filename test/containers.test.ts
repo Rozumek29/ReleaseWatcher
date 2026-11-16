@@ -291,6 +291,84 @@ describe('containers API', () => {
     assert.equal((await request('GET', `/api/containers/${container.id}`)).json().status, 'stopped');
   });
 
+  /** Makes CT 101 stopped; `pct start`/`pct shutdown` change its state like on a real node. */
+  const stoppableContainer = async () => {
+    const container = await addContainer();
+    let state = 'stopped';
+    shell
+      .on(/^pct status 101$/, () => ({ output: `status: ${state}\n` }))
+      .on(/^pct start 101/, () => {
+        state = 'running';
+        return { output: '' };
+      })
+      .on(/^pct shutdown 101 /, () => {
+        state = 'stopped';
+        return { output: '' };
+      });
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const saved = await request('PUT', `/api/containers/${container.id}`, { ...dto, startWhenStopped: true });
+    assert.equal(saved.json().startWhenStopped, true);
+    shell.commands.length = 0;
+    return { container, state: () => state };
+  };
+
+  it('starts a stopped container temporarily for a check when allowed and shuts it down again', async () => {
+    const { container, state } = await stoppableContainer();
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+
+    await request('POST', `/api/containers/${container.id}/check`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded');
+    const started = shell.commands.findIndex((c) => c.startsWith('pct start 101'));
+    const checked = shell.commands.findIndex((c) => c.startsWith('pct exec 101'));
+    const stopped = shell.commands.findIndex((c) => c.startsWith('pct shutdown 101 --timeout 120 --forceStop 1'));
+    assert.ok(started >= 0 && started < checked && checked < stopped, shell.commands.join('\n'));
+    // It waits for the network inside the container (apt needs it).
+    assert.match(shell.commands[started]!, /\/proc\/net\/route/);
+    assert.equal(state(), 'stopped');
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.status, 'stopped');
+    assert.deepEqual(dto.aptUpgradable, [], 'fresh results from the temporary start');
+    assert.equal(dto.lastError, null);
+  });
+
+  it('starts a stopped container temporarily for an update, after the backup', async () => {
+    const { container, state } = await stoppableContainer();
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
+
+    assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    const order = ['pct start 101', 'vzdump', 'apt-get -y', 'pct shutdown 101'].map((part) =>
+      shell.commands.findIndex((c) => c.includes(part)),
+    );
+    assert.deepEqual([...order].sort((a, b) => a - b), order, shell.commands.join('\n'));
+    assert.ok(order.every((i) => i >= 0));
+    assert.equal(state(), 'stopped');
+  });
+
+  it('leaves a running container running when the option is on', async () => {
+    const { container, state } = await stoppableContainer();
+    shell.on(/^pct status 101$/, { output: 'status: running\n' });
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    assert.equal(shell.commands.some((c) => /^pct (start|shutdown)/.test(c)), false);
+    assert.equal(state(), 'stopped', 'the fake state was never touched');
+  });
+
+  it('fails the update when the container cannot be started', async () => {
+    const { container } = await stoppableContainer();
+    shell.on(/^pct start 101/, { exitCode: 255, output: 'startup for container 101 failed\n' });
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`);
+    const run = await app.containers.wait(container.id);
+    assert.equal(run?.status, 'failed');
+    assert.match(run?.output ?? '', /Starting CT 101 failed/);
+    assert.equal(shell.commands.some((c) => c.includes('apt-get -y') || c.startsWith('pct shutdown')), false);
+  });
+
   it('adds all containers of the node at once and checks them', async () => {
     await addContainer();
     const response = await request('POST', '/api/containers/add-all');

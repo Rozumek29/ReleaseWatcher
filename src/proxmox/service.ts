@@ -18,6 +18,10 @@ import {
   parsePctList,
   parsePctStatus,
   parsePvesmStatus,
+  SHUTDOWN_TIMEOUT_SECONDS,
+  shutdownContainerCommand,
+  START_NETWORK_WAIT_SECONDS,
+  startContainerCommand,
   type BackupStorage,
   vzdumpCommand,
   pctExec,
@@ -164,20 +168,27 @@ export class ContainerService {
   /** Starts a check in the background; returns the created run. */
   startCheck(container: Container, trigger: RunTrigger): Run {
     return this.start(container, null, 'check', trigger, async (log) => {
-      const errors = await this.check(container, log, true);
-      return { ok: errors === 0, exitCode: null };
+      // Without the option a stopped container is detected by the batched check itself (no extra connection).
+      const started = container.startWhenStopped ? await this.prepare(container, log, false) : false;
+      try {
+        const errors = await this.check(container, log, true);
+        return { ok: errors === 0, exitCode: null };
+      } finally {
+        if (started) await this.shutDownAgain(container, log);
+      }
     });
   }
 
   /** @param backupStorage back up to this storage first (null = no backup) */
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
-    return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
-      await this.ensureRunning(container, log);
-      await this.backupFirst(container, backupStorage, log, 'apt upgrade');
-      log.note(`apt-get update && apt-get upgrade in CT ${container.vmid}`);
-      const result = await this.exec(container.vmid, APT_UPGRADE_SCRIPT, log, { timeoutMs: APT_UPGRADE_TIMEOUT_MS });
-      return this.finishUpdate(container, log, result);
-    });
+    return this.start(container, null, 'apt-upgrade', 'manual', (log) =>
+      this.whileRunning(container, log, async () => {
+        await this.backupFirst(container, backupStorage, log, 'apt upgrade');
+        log.note(`apt-get update && apt-get upgrade in CT ${container.vmid}`);
+        const result = await this.exec(container.vmid, APT_UPGRADE_SCRIPT, log, { timeoutMs: APT_UPGRADE_TIMEOUT_MS });
+        return this.finishUpdate(container, log, result);
+      }),
+    );
   }
 
   /** @param backupStorage back up to this storage first (null = no backup) */
@@ -186,16 +197,17 @@ export class ContainerService {
       throw new Error(`No update command is configured for ${app.name}.`);
     }
     const command = app.updateCommand;
-    return this.start(container, app.id, 'app-update', 'manual', async (log) => {
-      await this.ensureRunning(container, log);
-      await this.backupFirst(container, backupStorage, log, `update of ${app.name}`);
-      log.note(`Updating ${app.name}: ${command}`);
-      const result = await this.exec(container.vmid, command, log, {
-        timeoutMs: app.timeoutSeconds * 1000,
-        tty: app.useTty,
-      });
-      return this.finishUpdate(container, log, result);
-    });
+    return this.start(container, app.id, 'app-update', 'manual', (log) =>
+      this.whileRunning(container, log, async () => {
+        await this.backupFirst(container, backupStorage, log, `update of ${app.name}`);
+        log.note(`Updating ${app.name}: ${command}`);
+        const result = await this.exec(container.vmid, command, log, {
+          timeoutMs: app.timeoutSeconds * 1000,
+          tty: app.useTty,
+        });
+        return this.finishUpdate(container, log, result);
+      }),
+    );
   }
 
   /**
@@ -270,21 +282,75 @@ export class ContainerService {
     return parsePvesmStatus(result.output);
   }
 
-  /** Reads the live status before an update – commands cannot run in a stopped container. */
-  private async ensureRunning(container: Container, log: RunLog): Promise<void> {
+  /** Runs an update while the container runs: started first when allowed, shut down again afterwards. */
+  private async whileRunning(container: Container, log: RunLog, task: () => Promise<TaskResult>): Promise<TaskResult> {
+    const started = await this.prepare(container, log, true);
+    try {
+      return await task();
+    } finally {
+      if (started) await this.shutDownAgain(container, log);
+    }
+  }
+
+  /**
+   * Reads the live status (commands cannot run in a stopped container) and starts a stopped container when its
+   * settings allow it. Returns true when it was started here and must be shut down again.
+   * @param required throw when the container does not run afterwards (updates); checks report it themselves
+   */
+  private async prepare(container: Container, log: RunLog, required: boolean): Promise<boolean> {
     const result = await this.deps.shell.run(`pct status ${container.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(`pct status failed – ${describeSshFailure(result)}`);
     }
     const status = parsePctStatus(result.output);
+    this.saveStatus(container, status);
+    if (status === 'running') {
+      log.note(`CT ${container.vmid} is running`);
+      return false;
+    }
+    if (status === 'stopped' && container.startWhenStopped) {
+      log.note(`CT ${container.vmid} is stopped – starting it for this task (it is shut down again afterwards)`);
+      const start = await this.deps.shell.run(startContainerCommand(container.vmid), {
+        timeoutMs: NODE_TIMEOUT_MS + START_NETWORK_WAIT_SECONDS * 1000,
+        onOutput: (chunk) => log.write(chunk),
+      });
+      if (start.exitCode !== 0) {
+        throw new Error(`Starting CT ${container.vmid} failed – ${describeSshFailure(start)}`);
+      }
+      this.saveStatus(container, 'running');
+      log.note(`CT ${container.vmid} started`);
+      return true;
+    }
+    if (required) {
+      throw new Error(
+        `CT ${container.vmid} is ${status ?? 'in an unknown state'} – start it, then run the update again` +
+          (status === 'stopped' ? ' (or let ReleaseWatcher start it temporarily in the container settings).' : '.'),
+      );
+    }
+    return false;
+  }
+
+  /** Shuts down a container that was started for a task; a failure is logged, the task result stays. */
+  private async shutDownAgain(container: Container, log: RunLog): Promise<void> {
+    log.note(`Shutting CT ${container.vmid} down again`);
+    const result = await this.deps.shell.run(shutdownContainerCommand(container.vmid), {
+      timeoutMs: NODE_TIMEOUT_MS + SHUTDOWN_TIMEOUT_SECONDS * 1000,
+      onOutput: (chunk) => log.write(chunk),
+    });
+    if (result.exitCode !== 0) {
+      log.note(`Shutdown failed – ${describeSshFailure(result)}. The container is still running.`);
+      this.deps.log.warn({ vmid: container.vmid }, 'Shutting down a temporarily started container failed');
+      return;
+    }
+    this.saveStatus(container, 'stopped');
+    log.note(`CT ${container.vmid} stopped`);
+  }
+
+  private saveStatus(container: Container, status: string | null): void {
     if (status !== container.status) {
       container.status = status;
       this.deps.containers.save(container);
     }
-    if (status !== 'running') {
-      throw new Error(`CT ${container.vmid} is ${status ?? 'in an unknown state'} – start it, then run the update again.`);
-    }
-    log.note(`CT ${container.vmid} is running`);
   }
 
   /** Backs the container up with vzdump; a failed backup aborts the update. */

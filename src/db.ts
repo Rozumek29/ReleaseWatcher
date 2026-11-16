@@ -176,6 +176,8 @@ const MIGRATIONS: readonly string[] = [
      expires_at   TEXT NOT NULL
    );
    CREATE INDEX idx_sessions_expires ON sessions (expires_at);`,
+  // Start a stopped container temporarily for checks and updates (shut down again afterwards).
+  `ALTER TABLE containers ADD COLUMN start_when_stopped INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */

@@ -205,7 +205,7 @@ describe('ContainersPage', () => {
   it('explains stopped containers and blocks their updates', async () => {
     const { el } = await create([container({ status: 'stopped' })]);
 
-    expect(el.querySelector('.stopped-line')?.textContent).toContain('never started automatically');
+    expect(el.querySelector('.stopped-line')?.textContent).toContain('not started automatically');
     expect(el.textContent).not.toContain('Up to date');
     const updateButtons = [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) =>
       ['Upgrade', 'Update'].includes(b.textContent?.trim() ?? ''),
@@ -217,5 +217,16 @@ describe('ContainersPage', () => {
       (b) => b.textContent?.trim() === 'Check',
     )!;
     expect(check.disabled).toBe(false);
+  });
+
+  it('keeps updates of a stopped container available when it may be started temporarily', async () => {
+    const { el } = await create([container({ status: 'stopped', startWhenStopped: true })]);
+
+    expect(el.querySelector('.stopped-line')?.textContent).toContain('start it temporarily');
+    const updateButtons = [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) =>
+      ['Upgrade', 'Update'].includes(b.textContent?.trim() ?? ''),
+    );
+    expect(updateButtons.length).toBe(2);
+    expect(updateButtons.some((b) => b.disabled)).toBe(false);
   });
 });

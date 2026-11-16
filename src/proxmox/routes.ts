@@ -44,6 +44,7 @@ const updateContainerSchema: ObjectSchema = {
     isEnabled: { type: 'boolean' },
     aptEnabled: { type: 'boolean' },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
+    startWhenStopped: { type: 'boolean' },
     checkCron: { type: 'string', nullable: true, maxLength: 200 },
   },
   required: ['name', 'isEnabled', 'aptEnabled'],
@@ -150,6 +151,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
       effectiveBackupBeforeUpdate: c.backupBeforeUpdate ?? deps.backupDefaults().enabled,
+      startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
@@ -332,6 +334,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           isEnabled: boolean;
           aptEnabled: boolean;
           backupBeforeUpdate?: boolean | null;
+          startWhenStopped?: boolean;
           checkCron?: string | null;
         }>(req, updateContainerSchema);
         if (!container) {
@@ -351,6 +354,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           isEnabled: body.isEnabled,
           aptEnabled: body.aptEnabled,
           backupBeforeUpdate: body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
+          startWhenStopped: body.startWhenStopped ?? container.startWhenStopped,
           checkCron,
         });
         if (!container.aptEnabled) {

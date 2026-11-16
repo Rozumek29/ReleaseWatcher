@@ -25,6 +25,19 @@
           </div>
 
           <div class="field">
+            <app-switch
+              label="Start temporarily when stopped"
+              [checked]="startWhenStopped"
+              (toggled)="startWhenStopped = !startWhenStopped"
+            />
+            <span class="hint">
+              Checks (scheduled ones too) and updates start a stopped container with <code>pct start</code>, wait
+              up to a minute for its network and shut it down again afterwards. When off, a stopped container is
+              only reported and cannot be updated.
+            </span>
+          </div>
+
+          <div class="field">
             <label for="ct-backup">Backup before updates</label>
             <select id="ct-backup" class="input" name="backupChoice" [(ngModel)]="backupChoice">
               <option value="default">Use default ({{ globalBackup() ? 'yes' : 'no' }})</option>

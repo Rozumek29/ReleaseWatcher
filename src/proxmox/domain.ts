@@ -12,6 +12,8 @@ export interface Container {
   aptEnabled: boolean;
   /** Back up (vzdump) before updates by default; null = use the global setting. */
   backupBeforeUpdate: boolean | null;
+  /** Start the container for checks and updates when it is stopped, and shut it down again afterwards. */
+  startWhenStopped: boolean;
   /** Cron expression overriding the global check schedule; null = use the global one. */
   checkCron: string | null;
   /** Last status reported by `pct status` (running, stopped, …). */
@@ -127,6 +129,31 @@ export function parsePvesmStatus(output: string): BackupStorage[] {
  * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
  * Retention follows the prune settings of the storage.
  */
+/** Seconds to wait for a default route after `pct start` (services need the network, e.g. apt). */
+export const START_NETWORK_WAIT_SECONDS = 60;
+/** Seconds `pct shutdown` waits for a clean shutdown before the container is stopped forcibly. */
+export const SHUTDOWN_TIMEOUT_SECONDS = 120;
+
+/**
+ * Starts a stopped container and waits until it has a default route (read from /proc, so no tools are needed
+ * inside). Without a network after the wait it continues anyway – the following commands report their errors.
+ */
+export function startContainerCommand(vmid: number): string {
+  const networkReady = shQuote(`awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route`);
+  return [
+    `pct start ${vmid} || exit $?`,
+    `for i in $(seq 1 ${START_NETWORK_WAIT_SECONDS}); do`,
+    `  pct exec ${vmid} -- sh -c ${networkReady} >/dev/null 2>&1 && exit 0`,
+    `  sleep 1`,
+    `done`,
+    `echo 'No network after ${START_NETWORK_WAIT_SECONDS} s – continuing anyway.'`,
+  ].join('\n');
+}
+
+/** Shuts a container down cleanly, stopping it forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}. */
+export const shutdownContainerCommand = (vmid: number): string =>
+  `pct shutdown ${vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} --forceStop 1`;
+
 export function vzdumpCommand(vmid: number, storage: string, note: string): string {
   const id = shQuote(storage);
   return [

@@ -33,6 +33,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   isEnabled: true,
   aptEnabled: true,
   backupBeforeUpdate: null,
+  startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
   checkCron: null,
   nextCheckAt: '2030-01-01T06:00:00Z',

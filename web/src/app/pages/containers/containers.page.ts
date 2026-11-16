@@ -270,9 +270,9 @@ export class ContainersPage {
     return container.status === 'running' ? 'badge-success' : '';
   }
 
-  /** Commands cannot run in a stopped container; it is never started automatically. */
-  protected isStopped(container: Container): boolean {
-    return container.status === 'stopped';
+  /** Stopped and not allowed to be started temporarily – commands cannot run in it. */
+  protected blockedWhileStopped(container: Container): boolean {
+    return container.status === 'stopped' && !container.startWhenStopped;
   }
 
   protected cronOf(container: Container): string {
