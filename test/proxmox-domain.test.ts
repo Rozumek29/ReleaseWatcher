@@ -89,6 +89,7 @@ describe('proxmox domain', () => {
     assert.ok(options.includes('PasswordAuthentication=no'));
     assert.ok(options.includes('PreferredAuthentications=publickey'));
     assert.ok(options.includes('StrictHostKeyChecking=accept-new'));
+    assert.ok(options.includes('LogLevel=ERROR')); // keeps "Permanently added…" out of version output
     assert.deepEqual(args.slice(-3), ['--', 'pve.lan', "sudo -n -- sh -c 'pct list'"]);
   });
 });

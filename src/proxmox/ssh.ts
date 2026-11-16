@@ -91,6 +91,10 @@ export class SshShell implements NodeShell {
       'StrictHostKeyChecking=accept-new',
       '-o',
       `UserKnownHostsFile=${options.knownHostsFile}`,
+      // Hide warnings such as "Permanently added … to known hosts" – they would end up in the command output
+      // (and could be read as a version). Errors (auth failure, changed host key) are still printed.
+      '-o',
+      'LogLevel=ERROR',
       '-o',
       'ConnectTimeout=15',
       '-o',
