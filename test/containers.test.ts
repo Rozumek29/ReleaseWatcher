@@ -158,8 +158,10 @@ describe('containers API', () => {
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
-    assert.match(shell.commands[0]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
-    assert.ok(shell.commands[1]!.includes('apt-get -y'));
+    // The live status is read first – updates never run in a stopped container.
+    assert.equal(shell.commands[0], 'pct status 101');
+    assert.match(shell.commands[1]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
+    assert.ok(shell.commands[2]!.includes('apt-get -y'));
     assert.deepEqual((await request('GET', `/api/containers/${container.id}`)).json().aptUpgradable, []);
     assert.match(run?.output ?? '', /Backing up CT 101 to storage "pbs"/);
   });
@@ -255,12 +257,58 @@ describe('containers API', () => {
     assert.equal(ok.json().checkCron, '30 4 * * *');
   });
 
-  it('reports stopped containers as errors without running commands inside', async () => {
-    const response = await request('POST', '/api/containers', { vmid: 102 });
-    const run = await app.containers.wait(response.json().id);
+  it('skips stopped containers without an error, keeps their last results and never starts them', async () => {
+    const container = await addContainer();
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().aptUpgradable.length, 1);
+    const sent = notifier.containerSent.length;
+
+    shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
+    shell.commands.length = 0;
+    await request('POST', `/api/containers/${container.id}/check`);
+    const run = await app.containers.wait(container.id);
+
+    assert.equal(run?.status, 'succeeded');
+    assert.match(run?.output ?? '', /stopped – apt and application checks skipped/);
+    assert.equal(shell.commands.some((c) => c.startsWith('pct exec') || c.startsWith('pct start')), false);
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.status, 'stopped');
+    assert.equal(dto.lastError, null);
+    assert.equal(dto.aptUpgradable.length, 1, 'results of the last check are kept');
+    assert.equal(notifier.containerSent.length, sent);
+  });
+
+  it('refuses to update a container that is stopped now', async () => {
+    const container = await addContainer();
+    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
+    shell.commands.length = 0;
+
+    assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
-    assert.equal(shell.commands.some((c) => c.startsWith('pct exec 102')), false);
-    assert.match((await request('GET', `/api/containers/${response.json().id}`)).json().lastError, /stopped/);
+    assert.match(run?.output ?? '', /CT 101 is stopped – start it, then run the update again/);
+    assert.deepEqual(shell.commands, ['pct status 101'], 'no backup, no update');
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().status, 'stopped');
+  });
+
+  it('adds all containers of the node at once and checks them', async () => {
+    await addContainer();
+    const response = await request('POST', '/api/containers/add-all');
+    assert.equal(response.status, 201);
+    assert.deepEqual(
+      response.json().map((c: { vmid: number; name: string }) => [c.vmid, c.name]),
+      [[102, 'old']],
+    );
+    await app.scheduler.idle();
+    const list = (await request('GET', '/api/containers')).json();
+    assert.deepEqual(list.map((c: { vmid: number }) => c.vmid), [101, 102]);
+    assert.equal(list[1].status, 'stopped');
+    assert.ok(list[1].lastCheckedAt);
+
+    // Nothing left to add.
+    const again = await request('POST', '/api/containers/add-all');
+    assert.equal(again.status, 200);
+    assert.deepEqual(again.json(), []);
   });
 
   it('checks containers in parallel up to the configured limit, one batch command each', async () => {

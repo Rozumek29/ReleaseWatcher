@@ -152,6 +152,32 @@ export class ContainersPage {
     }
   }
 
+  protected async addAll(): Promise<void> {
+    if (this.adding()) {
+      return;
+    }
+    this.adding.set(true);
+    try {
+      const created = await firstValueFrom(this.api.addAllContainers());
+      const vmids = new Set(created.map((c) => c.vmid));
+      this.discovered.update((list) => list.map((c) => (vmids.has(c.vmid) ? { ...c, added: true } : c)));
+      this.addOpen.set(false);
+      this.toast.success(
+        created.length > 0
+          ? `Added ${created.length} container(s) – checking them now.`
+          : 'All containers of the node have been added already.',
+      );
+      // Checks are queued on the server; reload to pick up their progress.
+      await this.load();
+      void this.statusService.refresh();
+    } catch (error) {
+      this.handleNotConfigured(error);
+      this.toast.error(error);
+    } finally {
+      this.adding.set(false);
+    }
+  }
+
   protected async checkAll(): Promise<void> {
     this.checkingAll.set(true);
     try {
@@ -240,11 +266,13 @@ export class ContainersPage {
   }
 
   protected statusClass(container: Container): string {
-    return container.status === 'running'
-      ? 'badge-success'
-      : container.status === 'stopped'
-        ? 'badge-danger'
-        : '';
+    // Stopped is a normal state (skipped, not an error) – a neutral badge.
+    return container.status === 'running' ? 'badge-success' : '';
+  }
+
+  /** Commands cannot run in a stopped container; it is never started automatically. */
+  protected isStopped(container: Container): boolean {
+    return container.status === 'stopped';
   }
 
   protected cronOf(container: Container): string {

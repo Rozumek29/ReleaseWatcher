@@ -8,6 +8,7 @@ import {
   type Container,
   type ContainerApp,
   DEFAULT_APP_TIMEOUT_SECONDS,
+  type DiscoveredContainer,
   LATEST_SOURCES,
   type LatestSource,
   MAX_APP_TIMEOUT_SECONDS,
@@ -285,6 +286,28 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             status: 201,
             headers: { location: `/api/containers/${container.id}` },
           });
+        }),
+    },
+    // Adds every container of the node that has not been added yet and queues a check of each.
+    '/api/containers/add-all': {
+      POST: () =>
+        guard(async () => {
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          let found: DiscoveredContainer[];
+          try {
+            found = await service.discover();
+          } catch (error) {
+            return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
+          }
+          const added = found.filter((c) => !containers.existsVmid(c.vmid)).map((c) => containers.add(c.vmid, c.name));
+          // Checks run through the scheduler queue, so the concurrency limit applies.
+          void scheduler.checkMany(added.map((c) => c.id));
+          return Response.json(
+            added.map((c) => containerDto(c)),
+            { status: added.length > 0 ? 201 : 200 },
+          );
         }),
     },
     '/api/containers/check-all': {

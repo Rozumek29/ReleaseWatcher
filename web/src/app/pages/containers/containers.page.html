@@ -51,6 +51,11 @@
         <button type="submit" class="btn" [disabled]="adding() || selectedVmid === null">
           {{ adding() ? 'Adding…' : 'Add' }}
         </button>
+        @if (available().length > 1) {
+          <button type="button" class="btn btn-secondary" (click)="addAll()" [disabled]="adding()">
+            Add all ({{ available().length }})
+          </button>
+        }
       </form>
     }
   </section>
@@ -87,7 +92,7 @@
                 <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
               } @else if (c.updatesAvailable > 0) {
                 <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
-              } @else if (c.lastCheckedAt && !c.lastError) {
+              } @else if (c.lastCheckedAt && !c.lastError && !isStopped(c)) {
                 <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
               }
             </div>
@@ -139,6 +144,15 @@
             <span class="pre-line">{{ c.lastError }}</span>
           </div>
         }
+        @if (isStopped(c)) {
+          <p class="stopped-line muted small">
+            <app-icon name="power" [size]="14" />
+            <span>
+              The container is stopped, so apt and applications are not checked and updates cannot run – it is never
+              started automatically. Results below are from the last check while it was running.
+            </span>
+          </p>
+        }
 
         <div class="items">
           @if (c.aptEnabled) {
@@ -169,7 +183,7 @@
                   <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                   } @else {
-                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured()">
+                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || isStopped(c)" [title]="isStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
                       <app-icon name="arrowUp" [size]="14" /> Upgrade
                     </button>
                   }
@@ -230,8 +244,8 @@
                     class="btn btn-sm"
                     [class.btn-secondary]="!a.updateAvailable"
                     (click)="ask('app-' + c.id + '-' + a.id, c)"
-                    [disabled]="isBusy(c) || !configured()"
-                    [title]="'Run: ' + a.updateCommand"
+                    [disabled]="isBusy(c) || !configured() || isStopped(c)"
+                    [title]="isStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
                   >
                     <app-icon name="arrowUp" [size]="14" /> Update
                   </button>

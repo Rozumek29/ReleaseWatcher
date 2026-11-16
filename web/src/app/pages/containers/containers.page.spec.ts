@@ -172,4 +172,50 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('jellyfin');
     expect(el.querySelector('.add-card')).toBeNull();
   });
+
+  it('adds all containers of the node at once', async () => {
+    const { fixture, el } = await create([]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    http.expectOne('/api/proxmox/containers').flush([
+      { vmid: 101, status: 'running', name: 'vaultwarden', added: false },
+      { vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
+    ]);
+    await settle(fixture);
+
+    const addAll = [...el.querySelectorAll<HTMLButtonElement>('.add-form button')].find((b) =>
+      b.textContent?.includes('Add all'),
+    )!;
+    expect(addAll.textContent?.trim()).toBe('Add all (2)');
+    addAll.click();
+    const request = http.expectOne('/api/containers/add-all');
+    expect(request.request.method).toBe('POST');
+    const added = [container({ isBusy: true }), container({ id: 2, vmid: 102, name: 'jellyfin' })];
+    request.flush(added, { status: 201, statusText: 'Created' });
+    await settle(fixture);
+    http.expectOne('/api/containers').flush(added);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    expect(el.querySelectorAll('.list > li').length).toBe(2);
+    expect(el.querySelector('.add-card')).toBeNull();
+  });
+
+  it('explains stopped containers and blocks their updates', async () => {
+    const { el } = await create([container({ status: 'stopped' })]);
+
+    expect(el.querySelector('.stopped-line')?.textContent).toContain('never started automatically');
+    expect(el.textContent).not.toContain('Up to date');
+    const updateButtons = [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) =>
+      ['Upgrade', 'Update'].includes(b.textContent?.trim() ?? ''),
+    );
+    expect(updateButtons.length).toBe(2);
+    expect(updateButtons.every((b) => b.disabled)).toBe(true);
+    // Checking stays possible – it reads the status without starting the container.
+    const check = [...el.querySelectorAll<HTMLButtonElement>('.actions button')].find(
+      (b) => b.textContent?.trim() === 'Check',
+    )!;
+    expect(check.disabled).toBe(false);
+  });
 });

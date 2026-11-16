@@ -172,6 +172,7 @@ export class ContainerService {
   /** @param backupStorage back up to this storage first (null = no backup) */
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
     return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
+      await this.ensureRunning(container, log);
       await this.backupFirst(container, backupStorage, log, 'apt upgrade');
       log.note(`apt-get update && apt-get upgrade in CT ${container.vmid}`);
       const result = await this.exec(container.vmid, APT_UPGRADE_SCRIPT, log, { timeoutMs: APT_UPGRADE_TIMEOUT_MS });
@@ -186,6 +187,7 @@ export class ContainerService {
     }
     const command = app.updateCommand;
     return this.start(container, app.id, 'app-update', 'manual', async (log) => {
+      await this.ensureRunning(container, log);
       await this.backupFirst(container, backupStorage, log, `update of ${app.name}`);
       log.note(`Updating ${app.name}: ${command}`);
       const result = await this.exec(container.vmid, command, log, {
@@ -268,6 +270,23 @@ export class ContainerService {
     return parsePvesmStatus(result.output);
   }
 
+  /** Reads the live status before an update – commands cannot run in a stopped container. */
+  private async ensureRunning(container: Container, log: RunLog): Promise<void> {
+    const result = await this.deps.shell.run(`pct status ${container.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
+    if (result.exitCode !== 0) {
+      throw new Error(`pct status failed – ${describeSshFailure(result)}`);
+    }
+    const status = parsePctStatus(result.output);
+    if (status !== container.status) {
+      container.status = status;
+      this.deps.containers.save(container);
+    }
+    if (status !== 'running') {
+      throw new Error(`CT ${container.vmid} is ${status ?? 'in an unknown state'} – start it, then run the update again.`);
+    }
+    log.note(`CT ${container.vmid} is running`);
+  }
+
   /** Backs the container up with vzdump; a failed backup aborts the update. */
   private async backupFirst(container: Container, storage: string | null, log: RunLog, reason: string): Promise<void> {
     if (!storage) {
@@ -324,7 +343,11 @@ export class ContainerService {
     container.status = parsePctStatus(batch.status.output);
     log.note(`Status: ${container.status ?? 'unknown'}`);
 
-    if (container.status !== 'running') {
+    const stopped = container.status === 'stopped';
+    if (stopped) {
+      // Not an error: a stopped container is skipped, never started. Results of the last check are kept.
+      log.note('Container is stopped – apt and application checks skipped (it is not started automatically)');
+    } else if (container.status !== 'running') {
       errors.push(`Container is ${container.status ?? 'in an unknown state'} – start it to check for updates.`);
     } else {
       if (container.aptEnabled) {
@@ -354,7 +377,7 @@ export class ContainerService {
     container.lastCheckedAt = this.now().toISOString();
     container.lastError = errors.length > 0 ? errors.join('\n').slice(0, 2000) : null;
 
-    if (notify) {
+    if (notify && !stopped) {
       await this.notifyNewUpdates(container, apps, log);
     }
     containers.save(container);
