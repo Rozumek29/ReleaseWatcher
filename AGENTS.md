@@ -40,6 +40,7 @@ app does, the API, configuration and project layout – this file covers only wh
 | `bun run test:web`   | UI tests (Vitest via `ng test`)                            |
 | `bun run build`      | production UI build into `public/`                         |
 | `bun run compile`    | single-file server executable into `dist/` (`scripts/compile.ts`) |
+| `bun run deploy`     | build + install/update in a Proxmox LXC (`scripts/deploy-lxc.ts`, `deploy/install.sh`) |
 
 A single server test file: `bun test test/checker.test.ts`. Use `bun run test` (not `bun test`) for
 the full suite. The Angular CLI runs on Node.js; Bun is only its package manager.

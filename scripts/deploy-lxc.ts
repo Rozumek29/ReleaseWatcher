@@ -1,0 +1,148 @@
+// Builds ReleaseWatcher and installs (or updates) it as a systemd service in a Proxmox LXC – one command from your
+// computer. Files travel over SSH to the node and into the container with `pct push`; `deploy/install.sh` then
+// sets everything up inside the container (user, directories, service, first configuration with a Basic auth
+// password). Running it again updates the app and keeps the configuration and data.
+//
+// Usage: bun scripts/deploy-lxc.ts --ct <vmid> [options]
+//   --ct <vmid>        target container (required)
+//   --node <host>      Proxmox node; default: the host saved in the local database (Settings → Proxmox node)
+//   --user <name>      SSH user on the node (default: root, or the one saved in the local database)
+//   --port <port>      SSH port (default: 22, or the saved one)
+//   --identity <file>  SSH private key; default: the key saved in the local database, else your normal ssh setup
+//   --db               copy the local database (repositories, containers, settings) – only when the container has
+//                      none yet; add --force-db to replace an existing one
+//   --skip-build       reuse dist/releasewatcher-linux-x64
+//   --database <path>  local database to read defaults from / copy (default: DATABASE_PATH or releasewatcher.db)
+
+import { Database } from 'bun:sqlite';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { parseArgs } from 'node:util';
+import { compile } from './compile.ts';
+
+const root = resolve(import.meta.dir, '..');
+const { values } = parseArgs({
+  options: {
+    ct: { type: 'string' },
+    node: { type: 'string' },
+    user: { type: 'string' },
+    port: { type: 'string' },
+    identity: { type: 'string' },
+    db: { type: 'boolean', default: false },
+    'force-db': { type: 'boolean', default: false },
+    'skip-build': { type: 'boolean', default: false },
+    database: { type: 'string' },
+  },
+});
+
+const fail = (message: string): never => {
+  console.error(`\x1b[31m✗ ${message}\x1b[0m`);
+  process.exit(1);
+};
+const step = (message: string) => console.log(`\x1b[1;34m»\x1b[0m ${message}`);
+
+const vmid = values.ct ?? fail('Pass the container ID: --ct <vmid> (e.g. --ct 251).');
+if (!/^\d+$/.test(vmid)) {
+  fail(`--ct must be a number, got "${vmid}".`);
+}
+
+// Defaults come from the settings saved in the local (development) database.
+const databasePath = resolve(root, values.database ?? process.env['DATABASE_PATH'] ?? 'releasewatcher.db');
+const saved: Record<string, string> = {};
+if (existsSync(databasePath)) {
+  const db = new Database(databasePath, { readonly: true });
+  try {
+    for (const row of db.query<{ key: string; value: string }, []>('SELECT key, value FROM settings').all()) {
+      saved[row.key] = row.value;
+    }
+  } catch {
+    // no settings table yet
+  } finally {
+    db.close();
+  }
+}
+const node = values.node ?? saved['proxmoxHost'] ?? process.env['PROXMOX_HOST'] ?? fail(
+  'Unknown Proxmox node – pass --node <host> (or save it in Settings → Proxmox node of your local instance).',
+);
+const user = values.user ?? saved['proxmoxUser'] ?? 'root';
+const port = values.port ?? saved['proxmoxPort'] ?? '22';
+if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(node) || !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(user) || !/^\d+$/.test(port)) {
+  fail('Invalid node, user or port.');
+}
+
+const staging = mkdtempSync(join(tmpdir(), 'releasewatcher-deploy-'));
+try {
+  // 1. Build
+  const binary = join(root, 'dist', 'releasewatcher-linux-x64');
+  if (!values['skip-build']) {
+    step('Building the UI');
+    const build = Bun.spawnSync(['bun', 'run', 'build'], { cwd: root, stdout: 'inherit', stderr: 'inherit' });
+    if (build.exitCode !== 0) fail('UI build failed.');
+    step('Compiling the Linux executable');
+    await compile({ outfile: binary, target: 'bun-linux-x64' });
+  } else if (!existsSync(binary)) {
+    fail(`${binary} does not exist – run without --skip-build.`);
+  }
+
+  // 2. Stage the files (text files with LF line endings – they run on Linux)
+  copyFileSync(binary, join(staging, 'releasewatcher-linux-x64'));
+  for (const [from, to] of [
+    ['deploy/install.sh', 'install.sh'],
+    ['deploy/releasewatcher.service', 'releasewatcher.service'],
+    ['.env.example', '.env.example'],
+  ] as const) {
+    writeFileSync(join(staging, to), readFileSync(join(root, from), 'utf8').replace(/\r\n/g, '\n'));
+  }
+  const files = ['releasewatcher-linux-x64', 'install.sh', 'releasewatcher.service', '.env.example'];
+  if (values.db || values['force-db']) {
+    if (!existsSync(databasePath)) fail(`${databasePath} does not exist.`);
+    step(`Snapshotting the local database ${databasePath}`);
+    // VACUUM INTO gives a consistent copy even while the dev server is running.
+    const db = new Database(databasePath, { readonly: true });
+    db.run(`VACUUM INTO '${join(staging, 'releasewatcher.db').replaceAll("'", "''")}'`);
+    db.close();
+    files.push('releasewatcher.db');
+  }
+
+  // 3. SSH options: the key saved in the local database, an explicit one, or the user's normal ssh setup
+  const sshOptions = ['-p', port, '-o', 'StrictHostKeyChecking=accept-new'];
+  if (values.identity) {
+    sshOptions.push('-i', resolve(values.identity), '-o', 'IdentitiesOnly=yes');
+  } else if (saved['proxmoxSshKey']) {
+    const keyFile = join(staging, 'id');
+    writeFileSync(keyFile, `${saved['proxmoxSshKey'].replace(/\r\n/g, '\n').trim()}\n`, { mode: 0o600 });
+    chmodSync(keyFile, 0o600);
+    sshOptions.push('-i', keyFile, '-o', 'IdentitiesOnly=yes');
+  }
+  const target = `${user}@${node}`;
+  const remoteDir = `/tmp/releasewatcher-deploy-${process.pid}`;
+  const run = (cmd: string[], cwd = staging) => Bun.spawnSync(cmd, { cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });
+
+  // 4. Upload to the node (relative paths: scp would read "C:\…" as a host name)
+  step(`Uploading to ${target}`);
+  if (run(['ssh', ...sshOptions, target, `mkdir -p ${remoteDir}`]).exitCode !== 0) {
+    fail(`Cannot connect to ${target} over SSH.`);
+  }
+  if (run(['scp', '-q', ...sshOptions.map((o) => (o === '-p' ? '-P' : o)), ...files, `${target}:${remoteDir}/`]).exitCode !== 0) {
+    fail('Upload to the node failed.');
+  }
+
+  // 5. Into the container and install
+  step(`Installing into CT ${vmid}`);
+  const sudo = user === 'root' ? '' : 'sudo ';
+  const remote = [
+    'set -e',
+    `trap 'rm -rf ${remoteDir}' EXIT`,
+    `${sudo}pct status ${vmid} | grep -q 'status: running' || { echo "CT ${vmid} is not running – starting it"; ${sudo}pct start ${vmid}; sleep 5; }`,
+    `${sudo}pct exec ${vmid} -- mkdir -p /root/releasewatcher-deploy`,
+    ...files.map((f) => `${sudo}pct push ${vmid} ${remoteDir}/${f} /root/releasewatcher-deploy/${f}`),
+    `${sudo}pct exec ${vmid} -- env FORCE_DB=${values['force-db'] ? 1 : 0} sh /root/releasewatcher-deploy/install.sh /root/releasewatcher-deploy`,
+    `${sudo}pct exec ${vmid} -- rm -rf /root/releasewatcher-deploy`,
+  ].join('\n');
+  if (run(['ssh', ...sshOptions, target, remote]).exitCode !== 0) {
+    fail(`Installation in CT ${vmid} failed – see the output above.`);
+  }
+} finally {
+  rmSync(staging, { recursive: true, force: true });
+}

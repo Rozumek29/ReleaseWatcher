@@ -20,7 +20,8 @@
     "test:web": "bun run --cwd web test --watch=false",
     "typecheck": "tsc --noEmit",
     "compile": "bun scripts/compile.ts",
-    "package": "bun scripts/package.ts"
+    "package": "bun scripts/package.ts",
+    "deploy": "bun scripts/deploy-lxc.ts"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

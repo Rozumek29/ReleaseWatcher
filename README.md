@@ -62,6 +62,26 @@ Open http://localhost:8080. The SQLite database lives in the `releasewatcher-dat
 
 ## Native install (systemd, e.g. in its own LXC)
 
+**One command from your computer** (needs SSH access to the Proxmox node and a running Debian/Ubuntu LXC with
+*Nesting* enabled – Proxmox's default):
+
+```bash
+bun run deploy -- --ct 251            # first install and every later update
+```
+
+It builds the executable, uploads it through the node (`pct push`) and runs `deploy/install.sh` inside the container:
+system user, directories, systemd service and – on the first install – `/etc/releasewatcher/releasewatcher.env` with
+**Basic auth `admin` + a generated password, printed at the end**. Running it again updates the app (the previous
+executable stays as `releasewatcher.previous`) and keeps the configuration and data.
+
+- The node host, SSH user, port and key default to what your local instance has in **Settings → Proxmox node**;
+  override with `--node <host>`, `--user`, `--port`, `--identity <key file>`.
+- `--db` also copies your local database (repositories, containers, tokens, settings) when the container has none
+  yet; `--force-db` replaces an existing one.
+- `deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
+
+### Manual install
+
 The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node or
 Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. As root in the container:
 
@@ -140,6 +160,7 @@ adjust it if you change `PORT`).
 | `bun run typecheck` | type-check the server (TypeScript 7)                                 |
 | `bun run compile`   | single-file executable (server + UI) into `dist/` for this platform  |
 | `bun run package`   | release artifacts in `release/` (see Releases)                       |
+| `bun run deploy`    | build and install/update the app in a Proxmox LXC (see Native install) |
 
 Use `bun run test`, not plain `bun test` – the latter runs only the server tests (`bunfig.toml` limits
 it to `test/`).
@@ -309,10 +330,12 @@ src/
 test/                bun:test tests
 deploy/
   releasewatcher.service  systemd unit for a native install (see "Native install")
+  install.sh              installs/updates the service inside the target machine (used by deploy-lxc.ts)
 scripts/
   ensure-web.ts      builds the UI for `bun start` when needed
   compile.ts         `bun build --compile` flags, used by `bun run compile`, packaging and the Dockerfile
   package.ts         builds the release folder for `bun run package`
+  deploy-lxc.ts      `bun run deploy`: build + install/update in a Proxmox LXC through the node
 web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
   src/app/pages/repositories watched repositories
