@@ -10,6 +10,7 @@ import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { AptPackages } from './apt-packages';
 import { ContainerSettingsDialog } from './container-settings.dialog';
 import { RunLogDialog, RunLogTarget } from './run-log.dialog';
 
@@ -27,6 +28,7 @@ const BUSY_REFRESH_MS = 3000;
     RelativeTimePipe,
     ContainerSettingsDialog,
     RunLogDialog,
+    AptPackages,
   ],
   templateUrl: './containers.page.html',
   styleUrl: './containers.page.scss',

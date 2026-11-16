@@ -52,10 +52,10 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.callout')).toBeNull();
 
     // The package list is collapsed until requested.
-    expect(el.querySelector('.packages')).toBeNull();
+    expect(el.querySelector('app-apt-packages')).toBeNull();
     [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
     await settle(fixture);
-    expect(el.querySelector('.packages')?.textContent).toContain('libssl3');
+    expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
   });
 
   it('shows a hint linking to Settings when the node is not configured', async () => {

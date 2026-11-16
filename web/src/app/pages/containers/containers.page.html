@@ -176,14 +176,7 @@
                 </div>
               }
               @if (expanded().has(c.id)) {
-                <ul class="packages">
-                  @for (p of c.aptUpgradable; track p.name) {
-                    <li>
-                      <span class="mono">{{ p.name }}</span>
-                      <span class="muted mono">{{ p.currentVersion ?? '?' }} → {{ p.newVersion }}</span>
-                    </li>
-                  }
-                </ul>
+                <app-apt-packages [packages]="c.aptUpgradable" [listId]="c.id" />
               }
             </div>
           }

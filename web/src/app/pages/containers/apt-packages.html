@@ -1,0 +1,50 @@
+@if (showFilter()) {
+  <div class="filter">
+    <label class="visually-hidden" [for]="'apt-filter-' + listId()">Filter packages</label>
+    <input
+      class="input"
+      type="search"
+      [id]="'apt-filter-' + listId()"
+      placeholder="Filter packages…"
+      autocomplete="off"
+      [value]="query()"
+      (input)="query.set($any($event.target).value)"
+    />
+    <span class="filter-count" aria-live="polite">
+      @if (query().trim()) {
+        {{ rows().length }} of {{ packages().length }}
+      } @else {
+        {{ packages().length }} packages
+      }
+    </span>
+  </div>
+}
+
+<div class="scroll">
+  @if (rows().length > 0) {
+    <table>
+      <thead>
+        <tr>
+          <th scope="col">Package</th>
+          <th scope="col">Installed</th>
+          <th scope="col">Available</th>
+        </tr>
+      </thead>
+      <tbody>
+        @for (p of rows(); track p.name) {
+          <tr>
+            <td class="pkg-name">{{ p.name }}</td>
+            <td class="current">{{ p.currentVersion ?? '–' }}</td>
+            <td class="next">
+              <span class="arrow" aria-hidden="true">→</span>
+              <span class="visually-hidden">to </span>{{ p.diff.same
+              }}<strong>{{ p.diff.changed }}</strong>
+            </td>
+          </tr>
+        }
+      </tbody>
+    </table>
+  } @else {
+    <p class="none">No packages match “{{ query().trim() }}”.</p>
+  }
+</div>

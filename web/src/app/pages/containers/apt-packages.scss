@@ -1,0 +1,141 @@
+:host {
+  display: flex;
+  flex-direction: column;
+  flex-basis: 100%;
+  gap: 8px;
+  min-width: 0;
+}
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  .input {
+    max-width: 260px;
+    padding-block: 6px;
+    font-size: 0.85rem;
+  }
+}
+
+.filter-count {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.scroll {
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overscroll-behavior: contain;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 6px 12px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+td {
+  padding: 5px 12px;
+  font-family: ui-monospace, 'Cascadia Code', SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+  vertical-align: baseline;
+}
+
+/* Name and installed version shrink to their content, so the versions sit right next to the name. */
+th:not(:last-child),
+td.pkg-name,
+td.current {
+  width: 1%;
+  white-space: nowrap;
+}
+
+tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+}
+
+tbody tr:hover {
+  background: var(--hover);
+}
+
+.pkg-name {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.current {
+  color: var(--text-muted);
+}
+
+.next {
+  color: var(--text-muted);
+  white-space: nowrap;
+
+  strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+}
+
+.arrow {
+  margin-right: 8px;
+  color: var(--warning);
+}
+
+.none {
+  margin: 0;
+  padding: 14px 12px;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+/* Phones: name on its own line, the version change below it. */
+@media (max-width: 600px) {
+  thead {
+    display: none;
+  }
+
+  tbody tr {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 8px;
+    padding: 6px 12px;
+  }
+
+  td {
+    padding: 0;
+  }
+
+  td.pkg-name {
+    grid-column: 1 / -1;
+    width: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  td.current,
+  .next {
+    width: auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+}
