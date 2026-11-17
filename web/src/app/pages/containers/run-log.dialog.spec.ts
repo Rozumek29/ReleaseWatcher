@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { Run } from '../../core/models';
+import { Run, RunPage, RunSummary } from '../../core/models';
 import { settle } from '../../testing';
 import { container } from './fixtures';
 import { RunLogDialog } from './run-log.dialog';
@@ -50,6 +50,53 @@ describe('RunLogDialog', () => {
     // Closing stops polling.
     fixture.componentRef.setInput('target', null);
     await settle(fixture);
+  });
+
+  it('asks only for new output while a run is in progress and appends it', async () => {
+    const fixture = TestBed.createComponent(RunLogDialog);
+    fixture.componentRef.setInput('target', { container: container(), runId: 4 });
+    await settle(fixture);
+    vi.useFakeTimers();
+    try {
+      const running = {
+        id: 4,
+        containerId: 1,
+        appId: null,
+        kind: 'apt-upgrade',
+        trigger: 'manual',
+        status: 'running',
+        startedAt: '2026-01-01T00:00:00Z',
+        finishedAt: null,
+        exitCode: null,
+      } satisfies RunSummary;
+      http
+        .expectOne('/api/runs/4')
+        .flush({ ...running, output: 'Reading package lists...\n', outputAppend: false, outputCursor: 'a.0.25' } satisfies RunPage);
+      await vi.advanceTimersByTimeAsync(1000);
+      http
+        .expectOne('/api/runs/4?after=a.0.25')
+        .flush({ ...running, output: 'Setting up curl\n', outputAppend: true, outputCursor: 'a.0.41' } satisfies RunPage);
+      await vi.advanceTimersByTimeAsync(0);
+
+      const el = fixture.nativeElement as HTMLElement;
+      expect(el.querySelector('.output')?.textContent).toBe('Reading package lists...\nSetting up curl\n');
+
+      // A stale cursor (e.g. the output was read again after a reconnect) replaces the output.
+      await vi.advanceTimersByTimeAsync(1000);
+      http.expectOne('/api/runs/4?after=a.0.41').flush({
+        ...running,
+        status: 'succeeded',
+        finishedAt: '2026-01-01T00:01:00Z',
+        exitCode: 0,
+        output: 'Done.\n',
+        outputAppend: false,
+        outputCursor: null,
+      } satisfies RunPage);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(el.querySelector('.output')?.textContent).toBe('Done.\n');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lists the history and opens a run', async () => {

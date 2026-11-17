@@ -103,13 +103,30 @@ const BACKUP_TIMEOUT_MS = 4 * 60 * 60_000;
 const CORES_POLL_ATTEMPTS = 30;
 /** Output kept per run (the tail is preserved). */
 const MAX_OUTPUT_LENGTH = 256 * 1024;
-const OUTPUT_FLUSH_MS = 1000;
+/**
+ * How often the output of a running task is written to the database. The live log is served from memory
+ * ({@link ContainerService.liveRun}), so the stored copy matters only after a restart.
+ */
+const OUTPUT_FLUSH_MS = 5000;
+
+/** Output of a running task for a reader that already has the part before `cursor`. */
+export interface LiveOutput {
+  /** Text after the reader's cursor (`append`), or the whole output when the cursor was missing or stale. */
+  output: string;
+  append: boolean;
+  /** Pass back as `after` to receive only what is written later. */
+  cursor: string;
+}
 
 /** Collects the console output of a run and periodically writes it to the database. */
 class RunLog {
   private text = '';
   /** Characters dropped from the start to stay under {@link MAX_OUTPUT_LENGTH}. */
   private dropped = 0;
+  /** Identifies this instance in cursors (a re-attached run after a restart starts a new log). */
+  private readonly instance = crypto.randomUUID().slice(0, 8);
+  /** Bumped when output is replaced instead of appended, so older cursors are no longer valid. */
+  private revision = 0;
   private dirty = false;
   private timer: Timer | null = null;
   private readonly store: ContainerStore;
@@ -145,6 +162,7 @@ class RunLog {
 
   /** Removes everything written after `mark` (output that is about to be read again). */
   truncate(mark: number): void {
+    this.revision++;
     const local = mark - this.dropped;
     if (local >= 0) {
       this.text = this.text.slice(0, local);
@@ -157,6 +175,20 @@ class RunLog {
 
   get output(): string {
     return this.dropped > 0 ? `[…output truncated…]\n${this.text}` : this.text;
+  }
+
+  /** Output written after `cursor` (from an earlier read), or the whole output when the cursor is missing or stale. */
+  read(cursor: string | null): LiveOutput {
+    const end = this.dropped + this.text.length;
+    const prefix = `${this.instance}.${this.revision}.`;
+    const next = `${prefix}${end}`;
+    if (cursor?.startsWith(prefix)) {
+      const position = Number(cursor.slice(prefix.length));
+      if (Number.isInteger(position) && position >= this.dropped && position <= end) {
+        return { output: this.text.slice(position - this.dropped), append: true, cursor: next };
+      }
+    }
+    return { output: this.output, append: false, cursor: next };
   }
 
   private markDirty(): void {
@@ -230,6 +262,8 @@ export class ContainerService {
   private readonly latest = new Map<number, Promise<Run>>();
   /** Run ID of the task in {@link active}. */
   private readonly activeRuns = new Map<number, number>();
+  /** Logs of the runs in progress by run ID – their live output is read from memory, not the database. */
+  private readonly logs = new Map<number, RunLog>();
 
   constructor(deps: ContainerServiceDeps) {
     this.deps = deps;
@@ -250,6 +284,15 @@ export class ContainerService {
   /** ID of the run in progress in a container (null = none), so its live log can be shown. */
   activeRunId(containerId: number): number | null {
     return this.activeRuns.get(containerId) ?? null;
+  }
+
+  /**
+   * A run in progress in this process with its output after `cursor` (see {@link LiveOutput});
+   * null when the run is not running here (read it from the store).
+   */
+  liveRun(runId: number, cursor: string | null): { run: Run; output: LiveOutput } | null {
+    const log = this.logs.get(runId);
+    return log ? { run: { ...log.run }, output: log.read(cursor) } : null;
   }
 
   /** Waits for all running tasks (used on shutdown and in tests). */
@@ -479,10 +522,12 @@ export class ContainerService {
       } finally {
         this.active.delete(container.id);
         this.activeRuns.delete(container.id);
+        this.logs.delete(run.id);
       }
     })();
     this.active.set(container.id, promise);
     this.activeRuns.set(container.id, run.id);
+    this.logs.set(run.id, log);
     this.latest.set(container.id, promise);
   }
 

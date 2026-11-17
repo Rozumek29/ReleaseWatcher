@@ -765,8 +765,18 @@ describe('containers API', () => {
     assert.notEqual(activeRunId, null);
     const active = (await request('GET', `/api/runs/${activeRunId}`)).json();
     assert.deepEqual([active.kind, active.status], ['apt-upgrade', 'running']);
+    // The live log comes from memory: the first read has everything, later reads only what is new.
+    assert.equal(active.outputAppend, false);
+    assert.equal(typeof active.outputCursor, 'string');
+    const again = (await request('GET', `/api/runs/${activeRunId}?after=${encodeURIComponent(active.outputCursor)}`)).json();
+    assert.deepEqual([again.outputAppend, again.output], [true, '']);
+    const stale = (await request('GET', `/api/runs/${activeRunId}?after=unknown.0.0`)).json();
+    assert.deepEqual([stale.outputAppend, stale.output], [false, active.output]);
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     await app.updater.idle();
+    const done = (await request('GET', `/api/runs/${activeRunId}?after=${encodeURIComponent(active.outputCursor)}`)).json();
+    assert.deepEqual([done.status, done.outputAppend, done.outputCursor], ['succeeded', false, null]);
+    assert.match(done.output, /Setting up curl/);
     assert.equal((await request('GET', `/api/containers/${container.id}`)).json().activeRunId, null);
 
     const updates = shell.commands.filter((c) => /vzdump|apt-get -y|\nupdate'$/.test(c));

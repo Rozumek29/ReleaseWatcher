@@ -53,30 +53,43 @@ export class App {
       this.sidebarOpen.set(false);
     });
 
-    // Poll the status only while signed in – otherwise every request would be a 401.
+    // Poll the status only while signed in – otherwise every request would be a 401 – and only while the tab
+    // is visible; a tab coming back refreshes at once.
     let timer: ReturnType<typeof setInterval> | null = null;
+    let signedIn = false;
     const stop = () => {
       if (timer) {
         clearInterval(timer);
         timer = null;
       }
     };
+    const startPolling = () => {
+      stop();
+      if (!signedIn || document.visibilityState === 'hidden') {
+        return;
+      }
+      this.now.set(Date.now());
+      void this.statusService.refresh();
+      timer = setInterval(() => {
+        this.now.set(Date.now());
+        void this.statusService.refresh();
+      }, 30_000);
+    };
     effect(() => {
-      const signedIn = this.auth.authenticated();
+      signedIn = this.auth.authenticated();
       untracked(() => {
-        stop();
-        if (signedIn) {
-          void this.statusService.refresh();
-          timer = setInterval(() => {
-            this.now.set(Date.now());
-            void this.statusService.refresh();
-          }, 30_000);
-        } else {
+        startPolling();
+        if (!signedIn) {
           this.statusService.status.set(null);
         }
       });
     });
-    inject(DestroyRef).onDestroy(stop);
+    const onVisibilityChange = () => (document.visibilityState === 'hidden' ? stop() : startPolling());
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    inject(DestroyRef).onDestroy(() => {
+      stop();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    });
   }
 
   protected async signOut(): Promise<void> {

@@ -638,9 +638,18 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
     '/api/runs/:id': {
+      // `?after=<outputCursor>` returns only the output written since that read while the run is in progress.
       GET: (req: Bun.BunRequest<'/api/runs/:id'>) => {
-        const run = containers.getRun(parseId(req.params.id));
-        return run ? Response.json(runDto(run)) : problem(404, 'Run not found.');
+        const id = parseId(req.params.id);
+        const live = service.liveRun(id, new URL(req.url).searchParams.get('after'));
+        if (live) {
+          const { output, append, cursor } = live.output;
+          return Response.json({ ...runDto(live.run), output, outputAppend: append, outputCursor: cursor });
+        }
+        const run = containers.getRun(id);
+        return run
+          ? Response.json({ ...runDto(run), outputAppend: false, outputCursor: null })
+          : problem(404, 'Run not found.');
       },
     },
   };

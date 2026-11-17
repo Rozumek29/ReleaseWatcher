@@ -373,7 +373,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
 | `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run; optional `{ "backup": true \| false }` |
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
-| `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`) |
+| `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`). While it runs, pass the previous `outputCursor` as `?after=` to receive only new output (`outputAppend: true`); otherwise `output` is the whole log |
 | `GET` | `/health` | Liveness |
 
 Everything except `/health` and the public auth endpoints below needs a session cookie (401 otherwise).

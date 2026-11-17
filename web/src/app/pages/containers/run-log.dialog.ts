@@ -28,6 +28,15 @@ export interface RunLogTarget {
 /** Poll interval while a run is still running. */
 export const RUN_POLL_MS = 1000;
 
+/** Output kept in the dialog while it grows (the server keeps the same amount). */
+const MAX_OUTPUT_LENGTH = 256 * 1024;
+
+function keepTail(output: string): string {
+  return output.length > MAX_OUTPUT_LENGTH
+    ? `[…output truncated…]\n${output.slice(-MAX_OUTPUT_LENGTH)}`
+    : output;
+}
+
 /** Console output of a check/update, refreshed live while it runs, plus the run history. */
 @Component({
   selector: 'app-run-log-dialog',
@@ -154,16 +163,30 @@ export class RunLogDialog {
     this.closed.emit();
   }
 
-  private async poll(runId: number, generation: number, previous: Run['status'] | null): Promise<void> {
+  /** `cursor` = where the shown output ends, so the server sends only what was written since. */
+  private async poll(
+    runId: number,
+    generation: number,
+    previous: Run['status'] | null,
+    cursor: string | null = null,
+  ): Promise<void> {
     try {
-      const run = await firstValueFrom(this.api.getRun(runId));
+      const { outputAppend, outputCursor, ...fields } = await firstValueFrom(
+        this.api.getRun(runId, cursor),
+      );
       if (generation !== this.generation) {
         return;
       }
+      const shown = this.run();
+      const run: Run =
+        outputAppend && shown?.id === runId
+          ? { ...fields, output: keepTail(shown.output + fields.output) }
+          : fields;
       this.run.set(run);
       this.error.set(null);
       if (run.status === 'running') {
-        this.timer = setTimeout(() => void this.poll(runId, generation, run.status), RUN_POLL_MS);
+        const next = outputCursor ?? null;
+        this.timer = setTimeout(() => void this.poll(runId, generation, run.status, next), RUN_POLL_MS);
       } else if (previous === 'running' || (previous === null && this.isTargetRun(runId))) {
         this.finished.emit(run);
       }

@@ -217,6 +217,8 @@ export class RepositoryStore {
     this.db = new Database(path);
     this.secrets = secrets ?? SecretBox.ephemeral();
     this.db.run('PRAGMA journal_mode = WAL');
+    // Safe with WAL (no corruption; at most the last commits are lost on a power cut) and avoids an fsync per write.
+    this.db.run('PRAGMA synchronous = NORMAL');
     this.db.run('PRAGMA foreign_keys = ON');
     try {
       this.migrate();
@@ -237,6 +239,21 @@ export class RepositoryStore {
       .query<Row, []>('SELECT * FROM watched_repositories ORDER BY name COLLATE NOCASE, owner COLLATE NOCASE')
       .all()
       .map((r) => toEntity(r, this.secrets));
+  }
+
+  /** The few fields the status summary needs – without reading (and decrypting) the secrets of every repository. */
+  listStatusFields(): Pick<WatchedRepository, 'isEnabled' | 'lastError' | 'lastSeenTag' | 'installedVersion'>[] {
+    return this.db
+      .query<Pick<Row, 'is_enabled' | 'last_error' | 'last_seen_tag' | 'installed_version'>, []>(
+        'SELECT is_enabled, last_error, last_seen_tag, installed_version FROM watched_repositories',
+      )
+      .all()
+      .map((r) => ({
+        isEnabled: r.is_enabled === 1,
+        lastError: r.last_error,
+        lastSeenTag: r.last_seen_tag,
+        installedVersion: r.installed_version,
+      }));
   }
 
   listEnabled(): WatchedRepository[] {

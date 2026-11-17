@@ -17,6 +17,7 @@ import {
   Notifier,
   RateLimit,
   Run,
+  RunPage,
   RunSummary,
   SettingsPatch,
   TestNotificationResult,
@@ -209,8 +210,9 @@ export class ApiService {
     return this.http.get<RunSummary[]>(`${this.baseUrl}/containers/${containerId}/runs`);
   }
 
-  getRun(id: number): Observable<Run> {
-    return this.http.get<Run>(`${this.baseUrl}/runs/${id}`);
+  /** `after` = `outputCursor` of the previous answer: only output written since then is returned. */
+  getRun(id: number, after: string | null = null): Observable<RunPage> {
+    return this.http.get<RunPage>(`${this.baseUrl}/runs/${id}`, after ? { params: { after } } : {});
   }
 }
 

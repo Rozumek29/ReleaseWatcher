@@ -319,7 +319,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const statusDto = () => {
-    const repositories = store.list();
+    const repositories = store.listStatusFields();
     return {
       version: APP_VERSION,
       poller: poller.status,
@@ -327,7 +327,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         total: repositories.length,
         enabled: repositories.filter((r) => r.isEnabled).length,
         withErrors: repositories.filter((r) => r.lastError).length,
-        updatesAvailable: repositories.filter((r) => toDto(r).updateAvailable).length,
+        updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
       containers: containerStatus(containerStore),
     };

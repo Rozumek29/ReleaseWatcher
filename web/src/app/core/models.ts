@@ -306,6 +306,14 @@ export interface Run extends RunSummary {
   output: string;
 }
 
+/** GET /api/runs/:id – while the run is in progress, `output` may hold only the part after `?after=<cursor>`. */
+export interface RunPage extends Run {
+  /** `output` continues the output read before (append it) instead of replacing it. */
+  outputAppend: boolean;
+  /** Pass as `after` on the next poll; null when the run is not in progress. */
+  outputCursor: string | null;
+}
+
 /** Login state of the browser (GET /api/auth/state). */
 export interface AuthState {
   /** No account yet – the setup screen creates it. */
