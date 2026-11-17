@@ -98,6 +98,18 @@ describe('proxmox domain', () => {
     assert.match(command, /\. \/etc\/profile;.*\. "\$HOME\/\.profile";.*} <\/dev\/null >\/dev\/null 2>&1\n/);
   });
 
+  it('sets HOME for commands in containers even when pct exec cleared the environment', async () => {
+    // Run the script part of pct exec locally with an empty environment, like lxc-attach --clear-env does.
+    const script = pctExec(101, 'echo "home=$HOME user=$USER"').replace(/^pct exec 101 -- sh -c /, '');
+    const proc = Bun.spawn(['sh', '-c', `exec env -i PATH="$PATH" sh -c ${script}`], { stdout: 'pipe', stderr: 'pipe' });
+    const output = (await new Response(proc.stdout).text()).trim();
+    assert.equal(await proc.exited, 0);
+    const match = /^home=(\S+) user=(\S+)$/.exec(output);
+    assert.ok(match, output);
+    assert.notEqual(match[1], '');
+    assert.notEqual(match[2], '');
+  });
+
   it('decides whether an application update is available', () => {
     assert.equal(appUpdateAvailable({ installedVersion: '1.2.0', latestVersion: 'v1.3.0' }), true);
     assert.equal(appUpdateAvailable({ installedVersion: '1.3.0', latestVersion: 'v1.3.0' }), false);

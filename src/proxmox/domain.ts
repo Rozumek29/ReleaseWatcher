@@ -161,11 +161,24 @@ export const pctExec = (vmid: number, script: string): string =>
   `pct exec ${vmid} -- sh -c ${shQuote(`${QUIET_PROFILE}\n${script}`)}`;
 
 /**
- * Loads the login environment (PATH etc.) like `sh -l`, but without its output: Proxmox community-script
+ * Sets the user's login variables: `pct exec` clears the environment (and the detached systemd unit has no `HOME`
+ * either), so without them git cannot read `~/.gitconfig` – e.g. the credential helper of `gh auth login` – and
+ * private repositories fail with "could not read Username".
+ */
+const LOGIN_ENV = [
+  'USER=$(id -un 2>/dev/null || echo root)',
+  'HOME=$(getent passwd "$USER" 2>/dev/null | cut -d: -f6)',
+  'if [ -z "$HOME" ]; then HOME=$(awk -F: -v u="$USER" \'$1 == u { print $6; exit }\' /etc/passwd 2>/dev/null); fi',
+  'if [ -z "$HOME" ]; then HOME=/root; fi',
+  'LOGNAME=$USER',
+  'export USER LOGNAME HOME',
+].join('\n');
+
+/**
+ * Loads the login environment (HOME, PATH etc.) like `sh -l`, but without its output: Proxmox community-script
  * containers print a banner from `/etc/profile.d` (with `echo -e`, shown as "-e …" by dash) on every login shell.
  */
-const QUIET_PROFILE =
-  '{ if [ -r /etc/profile ]; then . /etc/profile; fi; if [ -r "$HOME/.profile" ]; then . "$HOME/.profile"; fi; } </dev/null >/dev/null 2>&1';
+const QUIET_PROFILE = `${LOGIN_ENV}\n{ if [ -r /etc/profile ]; then . /etc/profile; fi; if [ -r "$HOME/.profile" ]; then . "$HOME/.profile"; fi; } </dev/null >/dev/null 2>&1`;
 
 /** Directory on the node holding the output and exit code of detached commands (removed after reading). */
 export const DETACHED_DIR = '/var/tmp/releasewatcher';
