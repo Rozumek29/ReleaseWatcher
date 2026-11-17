@@ -159,6 +159,8 @@ the pinned host key of the node is stored next to it.
 
 - **Update:** replace `/opt/releasewatcher/releasewatcher` with the new executable and `systemctl restart releasewatcher`
   (database migrations run on start). Keep the old file to roll back.
+- **Version:** `/opt/releasewatcher/releasewatcher --version` prints the installed version and exits (nothing else
+  starts) – use it as the *version command* when ReleaseWatcher's own container is in the Containers page.
 - **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all three `releasewatcher.db*`
   files, plus `encryption.key` that decrypts the secrets in it) and `/etc/releasewatcher`.
 - **Hardening:** the unit runs as an unprivileged user with a read-only system (`ProtectSystem=strict`, writes only

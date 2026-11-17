@@ -13,6 +13,13 @@ import { SshShell } from './proxmox/ssh.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 
+// `--version` prints the version and exits before touching the configuration, the database or the port – usable as
+// the version command of the container app that runs ReleaseWatcher itself.
+if (process.argv.includes('--version')) {
+  console.log(APP_VERSION);
+  process.exit(0);
+}
+
 const config = loadConfig();
 const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
 const dataDir = config.databasePath === ':memory:' ? null : dirname(resolve(config.databasePath));
