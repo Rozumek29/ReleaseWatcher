@@ -265,12 +265,15 @@ Pushing a tag runs `.github/workflows/release.yml`:
 
 | Tag          | GitHub Release                                                    | Docker image (`ghcr.io/<owner>/releasewatcher`) |
 | ------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
-| `v1.2.3`     | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64`     | `1.2.3`, `1.2`, `latest`                        |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64` | `1.2.3`, `1.2`, `latest`                 |
 | `beta-1.2.3` | pre-release with the same two files                               | `beta-1.2.3`                                    |
 
 ```bash
-git tag v1.0.0 && git push origin v1.0.0
+git tag v1.2.3 && git push origin v1.2.3
 ```
+
+Push only the tag – the workflow creates the GitHub Release with the files. A release created by hand on github.com
+has no files (and makes the workflow's `gh release create` fail if it already exists for that tag).
 
 To run the published image instead of building locally, replace `build: .` in `docker-compose.yml` with
 `image: ghcr.io/<owner>/releasewatcher:latest` (log in with `docker login ghcr.io` if the package is private).

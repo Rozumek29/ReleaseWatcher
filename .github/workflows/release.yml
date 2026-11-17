@@ -1,11 +1,12 @@
 name: Release
 
 # Push a tag to publish a release:
-#   v1.2.3        -> GitHub Release (zip for Bun + Linux x64 executable) + Docker image :1.2.3, :1.2 and :latest
-#   beta-1.2.3    -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
+#   v1.2.3 / 1.2.3 -> GitHub Release (zip for Bun + Linux x64 executable) + Docker image :1.2.3, :1.2 and :latest
+#   beta-1.2.3     -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
+# Push the tag only – don't create the release on github.com first: this workflow creates it with the files.
 on:
   push:
-    tags: ['v*', 'beta-*']
+    tags: ['v*', '[0-9]*', 'beta-*']
 
 permissions:
   contents: write
@@ -69,7 +70,7 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest,enable=${{ startsWith(github.ref_name, 'v') }}
+            type=raw,value=latest,enable=${{ !startsWith(github.ref_name, 'beta-') }}
             type=raw,value=${{ github.ref_name }},enable=${{ startsWith(github.ref_name, 'beta-') }}
 
       - uses: docker/build-push-action@v6
