@@ -260,6 +260,9 @@ it to `test/`).
   ./releasewatcher-1.2.3-linux-x64   # reads .env from the working directory
   ```
 
+  About 110 MB – almost all of it is the Bun runtime (our code and UI are ~5 MB). The release also has it packed
+  as `releasewatcher-<version>-linux-x64.tar.xz` (~40 MB download): `tar -xJf releasewatcher-1.2.3-linux-x64.tar.xz`.
+
 Compile flags live in `scripts/compile.ts`; the target is `TARGET` in `scripts/package.ts`.
 The Docker image runs the same kind of executable on a distroless base (no Bun, Node or shell inside).
 
@@ -267,8 +270,8 @@ Pushing a tag runs `.github/workflows/release.yml`:
 
 | Tag          | GitHub Release                                                    | Docker image (`ghcr.io/<owner>/releasewatcher`) |
 | ------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
-| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64` | `1.2.3`, `1.2`, `latest`                 |
-| `beta-1.2.3` | pre-release with the same two files                               | `beta-1.2.3`                                    |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64` (+ `.tar.xz`) | `1.2.3`, `1.2`, `latest`       |
+| `beta-1.2.3` | pre-release with the same files                                   | `beta-1.2.3`                                    |
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
@@ -298,6 +301,9 @@ To run the published image instead of building locally, replace `build: .` in `d
   the environment variables below (clearing a value falls back to the environment).
 - The sidebar shows when the next check runs and has a **Check all now** button; its footer shows the running
   version and links to the GitHub repository.
+- The server keeps the built UI in memory: files with a build hash in their name are served with
+  `Cache-Control: immutable` (one year), `index.html` and icons are revalidated with an `ETag` (`304 Not Modified`),
+  and text files are sent zstd-compressed to browsers that accept it. API responses are `Cache-Control: no-store`.
 
 ## Configuration (environment variables / `.env`)
 

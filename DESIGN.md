@@ -83,6 +83,11 @@ Full endpoint list: `README.md` → *API*. Rules for new endpoints:
   Secrets follow the same rule, so the UI never has to send a saved secret back.
 - **Secrets** in responses: `hasX` / `xConfigured` booleans and `maskSecret()` hints only (see `AGENTS.md`).
 - Keep `web/src/app/core/models.ts` + `api.service.ts` in sync with the server mappers in the same PR.
+- **Caching:** every `/api/*` response is `Cache-Control: no-store` (added by the route guard via `noStore()`);
+  don't add ETags or caching to API responses. The UI is served by `StaticUi` (`src/static-ui.ts`): loaded into
+  memory at startup, zstd-compressed (no gzip/brotli – browsers without zstd get the plain file), an `ETag` per
+  representation with `304` support, `immutable` for hashed file names, `no-cache` for the rest, and a `404` (not
+  `index.html`) for missing paths that have a file extension.
 
 ---
 

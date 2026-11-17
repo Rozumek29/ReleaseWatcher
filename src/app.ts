@@ -1,5 +1,4 @@
-import { stat } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { resolve } from 'node:path';
 import { APP_VERSION } from './app-version.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
@@ -8,7 +7,7 @@ import { ReleaseChecker } from './checker.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
-import { errorMessage, problem, validationProblem } from './http.ts';
+import { errorMessage, noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
@@ -29,6 +28,7 @@ import {
   type SettingsPatch,
   type SettingsService,
 } from './settings.ts';
+import { scanDirectory, StaticUi } from './static-ui.ts';
 import { parseId, readBody, RequestValidationError, type ObjectSchema, type Schema } from './validation.ts';
 import {
   compareVersions,
@@ -223,51 +223,12 @@ const settingsSchema: ObjectSchema = {
   },
 };
 
-/** Resolves a URL path to a regular file inside `root`, or null (missing file, directory or path traversal). */
-async function findStaticFile(root: string, pathname: string): Promise<string | null> {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(pathname);
-  } catch {
-    return null;
+/** The UI files to serve: the ones embedded into a compiled executable, else the files of `publicDir`. */
+async function loadUi(deps: Pick<AppDeps, 'publicDir' | 'embeddedUi'>): Promise<StaticUi | null> {
+  if (deps.embeddedUi?.has('/index.html')) {
+    return StaticUi.load(deps.embeddedUi);
   }
-  const path = resolve(root, `.${decoded}`);
-  if (!path.startsWith(root + sep)) {
-    return null;
-  }
-  try {
-    return (await stat(path)).isFile() ? path : null;
-  } catch {
-    return null;
-  }
-}
-
-/** Where the UI comes from: `find` maps a URL path to a file path (or null), `index` is the SPA fallback. */
-interface UiResolver {
-  find(pathname: string): Promise<string | null>;
-  index: string;
-}
-
-async function createUiResolver(deps: Pick<AppDeps, 'publicDir' | 'embeddedUi'>): Promise<UiResolver | null> {
-  const embedded = deps.embeddedUi;
-  if (embedded?.has('/index.html')) {
-    return {
-      find: async (pathname) => {
-        try {
-          return embedded.get(decodeURIComponent(pathname)) ?? null;
-        } catch {
-          return null;
-        }
-      },
-      index: embedded.get('/index.html')!,
-    };
-  }
-  if (deps.publicDir === undefined) {
-    return null;
-  }
-  const dir = resolve(deps.publicDir);
-  const index = join(dir, 'index.html');
-  return (await Bun.file(index).exists()) ? { find: (pathname) => findStaticFile(dir, pathname), index } : null;
+  return deps.publicDir === undefined ? null : StaticUi.load(await scanDirectory(resolve(deps.publicDir)));
 }
 
 export async function buildApp(deps: AppDeps): Promise<App> {
@@ -553,14 +514,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     type AnyHandler = (req: Request, server: Bun.Server<undefined>) => Response | Promise<Response>;
     const guard =
       (path: string, handler: AnyHandler): AnyHandler =>
-      (req, server) => {
+      async (req, server) => {
         if (!sameOrigin(req)) {
-          return problem(403, 'Cross-site request refused.');
+          return noStore(problem(403, 'Cross-site request refused.'));
         }
         if (requireAuth && !PUBLIC_ROUTES.has(path) && !signedIn(req)) {
-          return problem(401, 'Sign in first.');
+          return noStore(problem(401, 'Sign in first.'));
         }
-        return handler(req, server);
+        // API responses are per-user, live data: never let a browser or proxy cache them.
+        return noStore(await handler(req, server));
       };
     const wrapped: Record<string, unknown> = {};
     for (const [path, value] of Object.entries(routes)) {
@@ -577,14 +539,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return wrapped as Bun.Serve.Routes<undefined, R | '/health'>;
   };
 
-  // Angular UI + SPA fallback; everything else (incl. unknown /api routes) is a 404 problem.
-  const ui = await createUiResolver(deps);
-  const fallback = async (req: Request) => {
+  // Angular UI + SPA fallback (see static-ui.ts); everything else (incl. unknown /api routes) is a 404 problem.
+  const ui = await loadUi(deps);
+  const fallback = (req: Request) => {
     const { pathname } = new URL(req.url);
     if (ui && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
-      return new Response(Bun.file((await ui.find(pathname)) ?? ui.index));
+      return ui.respond(req, pathname);
     }
-    return requireAuth && !signedIn(req) ? problem(401, 'Sign in first.') : problem(404, 'Not found.');
+    return noStore(requireAuth && !signedIn(req) ? problem(401, 'Sign in first.') : problem(404, 'Not found.'));
   };
 
   let server: Bun.Server<undefined> | null = null;

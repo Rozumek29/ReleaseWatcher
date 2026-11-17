@@ -15,7 +15,7 @@
 //   --database <path>  local database to read defaults from / copy (default: DATABASE_PATH or releasewatcher.db)
 
 import { Database } from 'bun:sqlite';
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -92,8 +92,10 @@ try {
     fail(`${binary} does not exist – run without --skip-build.`);
   }
 
-  // 2. Stage the files (text files with LF line endings – they run on Linux)
-  copyFileSync(binary, join(staging, 'releasewatcher-linux-x64'));
+  // 2. Stage the files (text files with LF line endings – they run on Linux). The executable is mostly the Bun
+  //    runtime (~110 MB); zstd halves the upload and the Proxmox node (which uses zstd for backups) unpacks it.
+  step('Compressing the executable');
+  await Bun.write(join(staging, 'releasewatcher-linux-x64.zst'), await Bun.zstdCompress(await Bun.file(binary).bytes(), { level: 9 }));
   for (const [from, to] of [
     ['deploy/install.sh', 'install.sh'],
     ['deploy/releasewatcher.service', 'releasewatcher.service'],
@@ -101,6 +103,8 @@ try {
   ] as const) {
     writeFileSync(join(staging, to), readFileSync(join(root, from), 'utf8').replace(/\r\n/g, '\n'));
   }
+  const uploads = ['releasewatcher-linux-x64.zst', 'install.sh', 'releasewatcher.service', '.env.example'];
+  /** Files pushed into the container (after unpacking on the node). */
   const files = ['releasewatcher-linux-x64', 'install.sh', 'releasewatcher.service', '.env.example'];
   if (values.db || values['force-db']) {
     if (!existsSync(databasePath)) fail(`${databasePath} does not exist.`);
@@ -110,6 +114,7 @@ try {
     db.run(`VACUUM INTO '${join(staging, 'releasewatcher.db').replaceAll("'", "''")}'`);
     db.close();
     files.push('releasewatcher.db');
+    uploads.push('releasewatcher.db');
   }
 
   // 3. SSH options: the key saved in the local database, an explicit one, or the user's normal ssh setup
@@ -130,7 +135,7 @@ try {
   if (run(['ssh', ...sshOptions, target, `mkdir -p ${remoteDir}`]).exitCode !== 0) {
     fail(`Cannot connect to ${target} over SSH.`);
   }
-  if (run(['scp', '-q', ...sshOptions.map((o) => (o === '-p' ? '-P' : o)), ...files, `${target}:${remoteDir}/`]).exitCode !== 0) {
+  if (run(['scp', '-q', ...sshOptions.map((o) => (o === '-p' ? '-P' : o)), ...uploads, `${target}:${remoteDir}/`]).exitCode !== 0) {
     fail('Upload to the node failed.');
   }
 
@@ -140,6 +145,7 @@ try {
   const remote = [
     'set -e',
     `trap 'rm -rf ${remoteDir}' EXIT`,
+    `zstd -dq --rm ${remoteDir}/releasewatcher-linux-x64.zst`,
     `${sudo}pct status ${vmid} | grep -q 'status: running' || { echo "CT ${vmid} is not running – starting it"; ${sudo}pct start ${vmid}; sleep 5; }`,
     `${sudo}pct exec ${vmid} -- mkdir -p /root/releasewatcher-deploy`,
     ...files.map((f) => `${sudo}pct push ${vmid} ${remoteDir}/${f} /root/releasewatcher-deploy/${f}`),

@@ -14,4 +14,20 @@ export function problem(
 export const validationProblem = (field: string, message: string) =>
   problem(400, 'One or more validation errors occurred.', { errors: { [field]: [message] } });
 
+/** Marks a response as not cacheable (`Cache-Control: no-store`) unless it already sets its own caching. */
+export function noStore(response: Response): Response {
+  if (response.headers.has('cache-control')) {
+    return response;
+  }
+  try {
+    response.headers.set('cache-control', 'no-store');
+    return response;
+  } catch {
+    // Immutable headers (e.g. a proxied fetch response): copy the response.
+    const copy = new Response(response.body, response);
+    copy.headers.set('cache-control', 'no-store');
+    return copy;
+  }
+}
+
 export const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));

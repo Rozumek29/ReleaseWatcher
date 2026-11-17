@@ -65,6 +65,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   `with { type: 'file' }`, fills `embeddedUi` (`src/embedded-ui.ts`) and then imports `main.ts`. Code must work
   there too: `import.meta.dir` points into Bun's virtual FS (`/$bunfs/…`), so don't read files relative to
   the sources at runtime, and avoid `import()` of paths the bundler cannot see.
+- The UI (`public/` or the embedded files) is read into memory once at startup (`src/static-ui.ts`), so a
+  server started with `bun src/main.ts` needs a restart after `bun run build` to serve the new UI.
 
 ### Architecture notes
 

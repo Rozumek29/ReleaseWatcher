@@ -1,7 +1,7 @@
 name: Release
 
 # Push a tag to publish a release:
-#   v1.2.3 / 1.2.3 -> GitHub Release (zip for Bun + Linux x64 executable) + Docker image :1.2.3, :1.2 and :latest
+#   v1.2.3 / 1.2.3 -> GitHub Release (zip for Bun + Linux x64 executable, also as .tar.xz) + Docker image :1.2.3, :1.2 and :latest
 #   beta-1.2.3     -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
 # Push the tag only – don't create the release on github.com first: this workflow creates it with the files.
 on:
@@ -38,8 +38,11 @@ jobs:
           bun run package "$VERSION"
           cd release
           zip -qr "releasewatcher-$VERSION.zip" "releasewatcher-$VERSION"
+          # The executable is ~110 MB (almost all Bun runtime); xz packs it to ~40 MB for downloads.
+          XZ_OPT='-9 -T0' tar -cJf "releasewatcher-$VERSION-linux-x64.tar.xz" "releasewatcher-$VERSION-linux-x64"
           echo "file=release/releasewatcher-$VERSION.zip" >> "$GITHUB_OUTPUT"
           echo "binary=release/releasewatcher-$VERSION-linux-x64" >> "$GITHUB_OUTPUT"
+          echo "archive=release/releasewatcher-$VERSION-linux-x64.tar.xz" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:
@@ -47,7 +50,7 @@ jobs:
         run: |
           PRERELEASE=""
           if [[ "$GITHUB_REF_NAME" == beta-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" "${{ steps.pkg.outputs.binary }}" \
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" "${{ steps.pkg.outputs.binary }}" "${{ steps.pkg.outputs.archive }}" \
             --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
 
   docker:

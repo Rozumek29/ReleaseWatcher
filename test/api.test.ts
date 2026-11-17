@@ -61,6 +61,12 @@ describe('HTTP API', () => {
   const add = (repository: string) =>
     inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
 
+  it('marks API responses as not cacheable', async () => {
+    assert.equal((await inject('/api/repositories')).headers.get('cache-control'), 'no-store');
+    assert.equal((await add('not a repository')).headers.get('cache-control'), 'no-store');
+    assert.equal((await inject('/api/nope')).headers.get('cache-control'), 'no-store');
+  });
+
   it('uses a repository token for a private repository and never returns it', async () => {
     source.privateRepos.set('other/private-app', 'github_pat_other_owner_1234');
 
@@ -304,6 +310,7 @@ describe('HTTP API', () => {
 });
 
 describe('UI hosting', () => {
+  const bigScript = `console.log(${JSON.stringify('x'.repeat(4000))});`;
   let app: App;
   let baseUrl: URL;
   let dir: string;
@@ -313,6 +320,8 @@ describe('UI hosting', () => {
     mkdirSync(join(dir, 'public'));
     writeFileSync(join(dir, 'public', 'index.html'), '<app-root></app-root>');
     writeFileSync(join(dir, 'public', 'main.js'), 'console.log(1);');
+    writeFileSync(join(dir, 'public', 'chunk-AB12cd34.js'), 'export const a = 1;');
+    writeFileSync(join(dir, 'public', 'big.js'), bigScript);
     writeFileSync(join(dir, 'secret.txt'), 'top secret');
     const store = new RepositoryStore(':memory:');
     app = await buildApp({
@@ -344,6 +353,56 @@ describe('UI hosting', () => {
     assert.equal(await (await get('/settings')).text(), '<app-root></app-root>');
     // The UI is public, the API is not: without a session unknown API paths are 401, not the SPA.
     assert.equal((await get('/api/nope')).status, 401);
+  });
+
+  it('caches hashed assets forever and revalidates everything else', async () => {
+    assert.equal((await get('/chunk-AB12cd34.js')).headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    for (const path of ['/', '/index.html', '/settings', '/main.js']) {
+      assert.equal((await get(path)).headers.get('cache-control'), 'no-cache', path);
+    }
+  });
+
+  it('answers a matching If-None-Match with 304', async () => {
+    const first = await get('/settings');
+    const etag = first.headers.get('etag');
+    assert.ok(etag);
+    const again = await fetch(new URL('/', baseUrl), { headers: { 'if-none-match': etag } });
+    assert.equal(again.status, 304);
+    assert.equal(again.headers.get('etag'), etag);
+    assert.equal(await again.text(), '');
+    const changed = await fetch(new URL('/', baseUrl), { headers: { 'if-none-match': '"other"' } });
+    assert.equal(changed.status, 200);
+  });
+
+  it('serves zstd to browsers that accept it, with its own ETag', async () => {
+    const script = bigScript;
+    const url = new URL('/big.js', baseUrl);
+
+    const zstd = await fetch(url, { headers: { 'accept-encoding': 'gzip, br, zstd' }, decompress: false });
+    assert.equal(zstd.headers.get('content-encoding'), 'zstd');
+    assert.equal(zstd.headers.get('vary'), 'Accept-Encoding');
+    assert.match(zstd.headers.get('content-type') ?? '', /javascript/);
+    const body = new Uint8Array(await zstd.arrayBuffer());
+    assert.ok(body.length < script.length / 10);
+    assert.equal(new TextDecoder().decode(Bun.zstdDecompressSync(body)), script);
+
+    const plain = await fetch(url, { headers: { 'accept-encoding': 'gzip, br' }, decompress: false });
+    assert.equal(plain.headers.get('content-encoding'), null);
+    assert.equal(await plain.text(), script);
+    assert.notEqual(plain.headers.get('etag'), zstd.headers.get('etag'));
+  });
+
+  it('answers HEAD requests without a body', async () => {
+    const response = await fetch(new URL('/main.js', baseUrl), { method: 'HEAD' });
+    assert.equal(response.status, 200);
+    assert.ok(response.headers.get('etag'));
+    assert.equal(await response.text(), '');
+  });
+
+  it('returns 404 instead of index.html for missing files, e.g. chunks of an older build', async () => {
+    const response = await get('/chunk-OLD12345.js');
+    assert.equal(response.status, 404);
+    assert.equal(response.headers.get('cache-control'), 'no-store');
   });
 
   it('never serves files outside the UI directory', async () => {
