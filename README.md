@@ -56,6 +56,15 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
      Enable **TTY** for scripts that need a terminal (it runs in a pseudo-terminal via `script`); every update has a
      timeout (default 30 min). Update commands run with `PHS_SILENT=1` and `DEBIAN_FRONTEND=noninteractive`, so a
      plain `update` of community-scripts skips its *Silent / Verbose / Cancel* menu and updates silently.
+
+   **Detect applications** (container settings) looks inside a running container and suggests what it finds:
+   a community-scripts container (`/usr/bin/update` → `ct/<app>.sh`) with its version file (`~/.<app>` or
+   `/opt/<App>_version.txt`) and `update` as update command, or – without community-scripts – `/opt/*_version.txt`
+   files and version files of well-known applications. The GitHub repository comes from a built-in list of popular
+   applications or from the `# Source:` line of the app's community-scripts script (downloaded from
+   `raw.githubusercontent.com`). Nothing is saved until you click **Add**: that watches the repository (or reuses it
+   when it is already watched) and links it as the latest version; applications already in the container are marked
+   **Added**.
 5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
    notify Discord when something new is pending (each pending item is reported once). A check is a single SSH
    connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
@@ -349,6 +358,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
+| `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container: `[{ "name", "slug", "versionCommand", "installedVersion", "updateCommand", "repository", "repositoryId", "alreadyAdded" }]` (nothing is saved; `409` for a stopped container or the host) |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
 | `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run; optional `{ "backup": true \| false }` |
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |

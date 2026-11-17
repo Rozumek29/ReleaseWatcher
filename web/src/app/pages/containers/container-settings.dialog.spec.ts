@@ -158,6 +158,83 @@ describe('ContainerSettingsDialog', () => {
     expect(names()).toEqual(['Alpha', 'Gamma', 'Zeta']);
   });
 
+  it('detects applications and adds one, watching its repository first', async () => {
+    const { fixture, el } = await open(container({ apps: [] }));
+    const button = (text: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes(text))!;
+
+    button('Detect applications').click();
+    await settle(fixture);
+    expect(button('Detecting…').disabled).toBe(true);
+    const detect = http.expectOne('/api/containers/1/detect-apps');
+    expect(detect.request.method).toBe('POST');
+    detect.flush([
+      {
+        name: 'Immich',
+        slug: 'immich',
+        versionCommand: 'cat /root/.immich',
+        installedVersion: '1.130.0',
+        updateCommand: 'update',
+        repository: 'immich-app/immich',
+        repositoryId: null,
+        alreadyAdded: false,
+      },
+      {
+        name: 'Vaultwarden',
+        slug: null,
+        versionCommand: 'cat /root/.vaultwarden',
+        installedVersion: '1.34.3',
+        updateCommand: null,
+        repository: 'dani-garcia/vaultwarden',
+        repositoryId: 3,
+        alreadyAdded: true,
+      },
+    ]);
+    await settle(fixture);
+    const found = el.querySelector('.detected')!;
+    expect(found.textContent).toContain('immich-app/immich');
+    expect(found.textContent).toContain('(watched when added)');
+    expect(found.querySelector('.badge')?.textContent).toContain('Added');
+
+    [...found.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Add')!.click();
+    await settle(fixture);
+    const watch = http.expectOne('/api/repositories');
+    expect(watch.request.method).toBe('POST');
+    expect(watch.request.body).toEqual({ repository: 'immich-app/immich', includePrereleases: false });
+    watch.flush({ id: 7, fullName: 'immich-app/immich', lastSeenTag: 'v1.131.0' });
+    await settle(fixture);
+
+    const add = http.expectOne('/api/containers/1/apps');
+    expect(add.request.body).toEqual({
+      name: 'Immich',
+      versionCommand: 'cat /root/.immich',
+      latestSource: 'github',
+      repositoryId: 7,
+      latestCommand: null,
+      updateCommand: 'update',
+      useTty: false,
+      timeoutSeconds: null,
+    });
+    add.flush({ ...container().apps[0]!, id: 9, name: 'Immich', repositoryId: 7 });
+    await settle(fixture);
+    expect(el.querySelector('.apps .app-row strong')?.textContent).toContain('Immich');
+    expect(found.querySelectorAll('.badge').length).toBe(2);
+  });
+
+  it('shows why applications could not be detected', async () => {
+    const { fixture, el } = await open(container({ apps: [] }));
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Detect applications'))!.click();
+    http
+      .expectOne('/api/containers/1/detect-apps')
+      .flush(
+        { status: 409, title: 'CT 101 is stopped – start it to detect its applications.' },
+        { status: 409, statusText: 'Conflict' },
+      );
+    await settle(fixture);
+    expect(el.querySelector('.save-error')?.textContent).toContain('start it to detect');
+    expect(el.querySelector('.detected')).toBeNull();
+  });
+
   it('shows validation errors of an application', async () => {
     const { fixture, el } = await open(container({ apps: [] }));
     [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Add application'))!.click();

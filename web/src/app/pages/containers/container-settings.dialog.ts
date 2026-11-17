@@ -19,6 +19,7 @@ import {
   Container,
   ContainerApp,
   ContainerAppRequest,
+  DetectedApp,
   LatestSource,
   WatchedRepository,
 } from '../../core/models';
@@ -97,6 +98,13 @@ export class ContainerSettingsDialog {
   protected readonly appForm = signal<AppForm | null>(null);
   protected readonly confirmDeleteAppId = signal<number | null>(null);
 
+  /** Suggestions of the last detection; null = not detected (hidden). */
+  protected readonly detected = signal<DetectedApp[] | null>(null);
+  protected readonly detecting = signal(false);
+  /** Names of detected applications being added right now. */
+  protected readonly addingDetected = signal<ReadonlySet<string>>(new Set());
+  protected readonly detectError = signal<string | null>(null);
+
   protected readonly saving = signal(false);
   protected readonly savingApp = signal(false);
   protected readonly saveError = signal<string | null>(null);
@@ -122,6 +130,8 @@ export class ContainerSettingsDialog {
           this.confirmDeleteAppId.set(null);
           this.saveError.set(null);
           this.appError.set(null);
+          this.detected.set(null);
+          this.detectError.set(null);
           void this.loadRepositories();
           if (!dialog.open) {
             dialog.showModal?.();
@@ -250,6 +260,89 @@ export class ContainerSettingsDialog {
       }
     } catch (error) {
       this.appError.set(describeError(error));
+    }
+  }
+
+  /** Looks for applications in the container (community-scripts, version files) and their GitHub repositories. */
+  protected async detectApps(): Promise<void> {
+    const container = this.container();
+    if (!container || this.detecting()) {
+      return;
+    }
+    this.detecting.set(true);
+    this.detectError.set(null);
+    try {
+      this.detected.set(await firstValueFrom(this.api.detectContainerApps(container.id)));
+    } catch (error) {
+      this.detected.set(null);
+      this.detectError.set(describeError(error));
+    } finally {
+      this.detecting.set(false);
+    }
+  }
+
+  /** Adds a detected application – and watches its GitHub repository first when it is not watched yet. */
+  protected async addDetected(found: DetectedApp): Promise<void> {
+    const container = this.container();
+    if (!container || this.addingDetected().has(found.name)) {
+      return;
+    }
+    this.addingDetected.update((set) => new Set(set).add(found.name));
+    this.detectError.set(null);
+    try {
+      const repositoryId = found.repository
+        ? (found.repositoryId ?? (await this.watch(found.repository)))
+        : null;
+      const created = await firstValueFrom(
+        this.api.addContainerApp(container.id, {
+          name: found.name,
+          versionCommand: found.versionCommand,
+          latestSource: repositoryId === null ? 'none' : 'github',
+          repositoryId,
+          latestCommand: null,
+          updateCommand: found.updateCommand,
+          useTty: false,
+          timeoutSeconds: null,
+        }),
+      );
+      this.apps.update((list) => byName([...list, created]));
+      this.detected.update(
+        (list) =>
+          list?.map((d) => (d === found ? { ...d, repositoryId, alreadyAdded: true } : d)) ?? list,
+      );
+    } catch (error) {
+      this.detectError.set(describeError(error));
+    } finally {
+      this.addingDetected.update((set) => {
+        const next = new Set(set);
+        next.delete(found.name);
+        return next;
+      });
+    }
+  }
+
+  /** ID of the watched repository `owner/repo` – watched now when it is not yet. */
+  private async watch(fullName: string): Promise<number> {
+    const existing = () =>
+      this.repositories().find((r) => r.fullName.toLowerCase() === fullName.toLowerCase());
+    const known = existing();
+    if (known) {
+      return known.id;
+    }
+    try {
+      const repo = await firstValueFrom(
+        this.api.addRepository({ repository: fullName, includePrereleases: false }),
+      );
+      this.repositories.update((list) => [...list, repo]);
+      return repo.id;
+    } catch (error) {
+      // Watched in the meantime (e.g. in another tab): use that one.
+      await this.loadRepositories();
+      const repo = existing();
+      if (repo) {
+        return repo.id;
+      }
+      throw error;
     }
   }
 

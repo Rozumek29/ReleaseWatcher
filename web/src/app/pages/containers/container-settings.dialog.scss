@@ -113,3 +113,29 @@
 .small {
   font-size: 0.8rem;
 }
+
+.app-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.detected {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  p {
+    margin: 0;
+  }
+}
+
+.detected-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}

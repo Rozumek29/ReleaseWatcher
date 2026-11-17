@@ -204,6 +204,22 @@ export interface ContainerApp {
   updateAvailable: boolean | null;
 }
 
+/** An application found in a container (`POST /api/containers/:id/detect-apps`) – a suggestion, not saved. */
+export interface DetectedApp {
+  name: string;
+  /** community-scripts slug; null when found by a version file only. */
+  slug: string | null;
+  versionCommand: string | null;
+  installedVersion: string | null;
+  updateCommand: string | null;
+  /** `owner/repo` on GitHub; null when unknown. */
+  repository: string | null;
+  /** The watched repository with that name; null when it is not watched yet. */
+  repositoryId: number | null;
+  /** The container already has this application (same repository or name). */
+  alreadyAdded: boolean;
+}
+
 export interface Container {
   id: number;
   /** `node` = the Proxmox host itself (apt only, vmid 0). */

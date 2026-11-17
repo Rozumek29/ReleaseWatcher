@@ -820,3 +820,124 @@ describe('containers API', () => {
   });
 
 });
+
+describe('application detection API', () => {
+  let app: App;
+  let store: RepositoryStore;
+  let shell: FakeShell;
+  let baseUrl: URL;
+  const scripts = new Map<string, string>();
+  const fetchedSlugs: string[] = [];
+
+  const request = async (method: string, url: string, payload?: unknown) => {
+    const response = await fetch(new URL(url, baseUrl), {
+      method,
+      headers: payload === undefined ? {} : { 'content-type': 'application/json' },
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+    });
+    const text = await response.text();
+    return { status: response.status, json: () => JSON.parse(text), text };
+  };
+
+  beforeEach(async () => {
+    scripts.clear();
+    fetchedSlugs.length = 0;
+    shell = new FakeShell()
+      .on(/^pct list$/, { output: PCT_LIST })
+      .on(/^pct status 101$/, { output: 'status: running\n' })
+      .on(/^pct status 102$/, { output: 'status: stopped\n' })
+      .on(/apt list --upgradable/, { output: APT_OUTPUT });
+    const source = new FakeSource();
+    source.existing.add('dani-garcia/vaultwarden');
+    store = new RepositoryStore(':memory:');
+    const settings = new SettingsService(store, loadConfig({}));
+    app = await buildApp({
+      store,
+      settings,
+      source,
+      notifiers: [],
+      log: silentLogger,
+      shell,
+      auth: { requireAuth: false },
+      fetchAppScript: async (slug) => {
+        fetchedSlugs.push(slug);
+        return scripts.get(slug) ?? null;
+      },
+    });
+    baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
+  });
+
+  afterEach(() => app.close());
+
+  const addContainer = async (vmid: number) => {
+    const container = (await request('POST', '/api/containers', { vmid })).json() as { id: number };
+    await app.containers.wait(container.id);
+    return container;
+  };
+
+  it('suggests a community-scripts application with its repository and marks watched repositories', async () => {
+    shell.on(/\/usr\/bin\/update/, { output: 'update\tct/vaultwarden.sh\nfile\t/root/.vaultwarden\t1.34.3\n' });
+    const container = await addContainer(101);
+
+    let detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    assert.equal(detected.status, 200);
+    assert.deepEqual(detected.json(), [
+      {
+        name: 'Vaultwarden',
+        slug: 'vaultwarden',
+        versionCommand: 'cat /root/.vaultwarden',
+        installedVersion: '1.34.3',
+        updateCommand: 'update',
+        repository: 'dani-garcia/vaultwarden',
+        repositoryId: null,
+        alreadyAdded: false,
+      },
+    ]);
+    assert.deepEqual(fetchedSlugs, [], 'known applications need no download');
+
+    const repo = (await request('POST', '/api/repositories', { repository: 'dani-garcia/vaultwarden' })).json();
+    detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    assert.equal(detected.json()[0].repositoryId, repo.id);
+    assert.equal(detected.json()[0].alreadyAdded, false);
+
+    await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Password manager',
+      latestSource: 'github',
+      repositoryId: repo.id,
+    });
+    detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    assert.equal(detected.json()[0].alreadyAdded, true, 'the same repository counts as added under another name');
+  });
+
+  it('reads the repository of an unknown application from its community-scripts script', async () => {
+    shell.on(/\/usr\/bin\/update/, { output: 'update\tct/someapp.sh\nfile\t/root/.someapp\t2.1.0\n' });
+    scripts.set('someapp', '# Source: https://github.com/acme/some-app\nAPP="SomeApp"\n');
+    const container = await addContainer(101);
+
+    const detected = (await request('POST', `/api/containers/${container.id}/detect-apps`)).json();
+    assert.deepEqual(fetchedSlugs, ['someapp']);
+    assert.equal(detected[0].name, 'SomeApp');
+    assert.equal(detected[0].repository, 'acme/some-app');
+    assert.equal(detected[0].versionCommand, 'cat /root/.someapp');
+  });
+
+  it('refuses stopped containers and the host, and reports node failures', async () => {
+    const stopped = await addContainer(102);
+    const response = await request('POST', `/api/containers/${stopped.id}/detect-apps`);
+    assert.equal(response.status, 409);
+    assert.match(response.json().title, /stopped – start it/);
+
+    shell.on(/pveversion|hostname/, { output: 'pve\n' });
+    const node = (await request('POST', '/api/containers/node')).json() as { id: number };
+    await app.containers.wait(node.id);
+    assert.equal((await request('POST', `/api/containers/${node.id}/detect-apps`)).status, 409);
+
+    const running = await addContainer(101);
+    shell.on(/\/usr\/bin\/update/, { exitCode: 1, output: 'boom' });
+    const failed = await request('POST', `/api/containers/${running.id}/detect-apps`);
+    assert.equal(failed.status, 502);
+    assert.match(failed.json().detail, /boom/);
+
+    assert.equal((await request('POST', '/api/containers/999/detect-apps')).status, 404);
+  });
+});

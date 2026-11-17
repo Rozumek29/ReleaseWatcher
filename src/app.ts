@@ -99,6 +99,8 @@ export interface AppDeps {
   resourcePollMs?: number;
   /** How long an update may wait at an interactive prompt before it is stopped (tests use a few ms). */
   promptIdleMs?: number;
+  /** Downloads community-scripts scripts for app detection (tests pass a fake; defaults to GitHub). */
+  fetchAppScript?: (slug: string) => Promise<string | null>;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -300,6 +302,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.reconnectDelayMs === undefined ? {} : { reconnectDelayMs: deps.reconnectDelayMs }),
     ...(deps.resourcePollMs === undefined ? {} : { resourcePollMs: deps.resourcePollMs }),
     ...(deps.promptIdleMs === undefined ? {} : { promptIdleMs: deps.promptIdleMs }),
+    ...(deps.fetchAppScript === undefined ? {} : { fetchAppScript: deps.fetchAppScript }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,

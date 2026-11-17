@@ -10,6 +10,7 @@ import {
   Container,
   ContainerApp,
   ContainerAppRequest,
+  DetectedApp,
   DiscoveredContainer,
   HeaderInput,
   InstalledVersionTestResult,
@@ -171,6 +172,11 @@ export class ApiService {
   /** `backup` decides about a backup (vzdump) before this update. */
   upgradeApt(id: number, backup: boolean): Observable<Run> {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });
+  }
+
+  /** Applications found in a running container with their GitHub repository (suggestions, nothing is saved). */
+  detectContainerApps(containerId: number): Observable<DetectedApp[]> {
+    return this.http.post<DetectedApp[]>(`${this.baseUrl}/containers/${containerId}/detect-apps`, {});
   }
 
   addContainerApp(containerId: number, request: ContainerAppRequest): Observable<ContainerApp> {

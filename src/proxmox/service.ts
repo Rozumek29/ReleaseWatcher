@@ -46,6 +46,18 @@ import {
   type RunKind,
   type RunTrigger,
 } from './domain.ts';
+import {
+  appNameFromScript,
+  communityScriptUrl,
+  DETECT_SCRIPT,
+  DETECT_TIMEOUT_SECONDS,
+  type DetectedApp,
+  detectedApps,
+  KNOWN_APPS,
+  normalizeAppName,
+  parseDetectOutput,
+  repositoryFromScript,
+} from './detect.ts';
 import { type CommandResult, describeSshFailure, type NodeShell } from './ssh.ts';
 import type { ContainerStore } from './store.ts';
 
@@ -60,6 +72,23 @@ export class ContainerBusyError extends Error {
 interface TaskResult {
   ok: boolean;
   exitCode: number | null;
+}
+
+/** Applications cannot be detected in this target right now (the host, a stopped container). */
+export class DetectionUnavailableError extends Error {
+  override name = 'DetectionUnavailableError';
+}
+
+/** Downloads the community-scripts script of an application; null when it does not exist. */
+export async function fetchCommunityScript(slug: string): Promise<string | null> {
+  const response = await fetch(communityScriptUrl(slug), { signal: AbortSignal.timeout(10_000) });
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw new Error(`GitHub answered ${response.status} for the community-scripts script ${slug}.sh`);
+  }
+  return response.text();
 }
 
 const NODE_TIMEOUT_MS = 30_000;
@@ -175,6 +204,8 @@ export interface ContainerServiceDeps {
    * (default 45 s) – a script waiting for input would otherwise run into its full timeout.
    */
   promptIdleMs?: number;
+  /** Downloads a community-scripts `ct/<slug>.sh` script (null = not found); defaults to {@link fetchCommunityScript}. */
+  fetchAppScript?: (slug: string) => Promise<string | null>;
 }
 
 /** Extra time to wait for a detached command after its own timeout (systemd stops it at the timeout). */
@@ -251,6 +282,60 @@ export class ContainerService {
       throw new Error(describeSshFailure(result));
     }
     return parsePctList(result.output);
+  }
+
+  /**
+   * Finds applications in a running container (community-scripts traces and version files) together with their
+   * GitHub repository. Only reads – nothing is saved; the UI adds the suggestions the user confirms.
+   */
+  async detectApps(container: Container): Promise<DetectedApp[]> {
+    if (container.kind === 'node') {
+      throw new DetectionUnavailableError('Applications can be detected in containers only, not on the Proxmox host.');
+    }
+    const token = newCheckToken();
+    const steps: CheckStep[] = [{ id: 'detect', script: DETECT_SCRIPT, timeoutSeconds: DETECT_TIMEOUT_SECONDS }];
+    const result = await this.deps.shell.run(buildCheckScript(container.vmid, steps, token), {
+      timeoutMs: NODE_TIMEOUT_MS + DETECT_TIMEOUT_SECONDS * 1000,
+    });
+    const batch = parseCheckOutput(result.output, token);
+    if (!batch.status) {
+      throw new Error(describeSshFailure(result));
+    }
+    const status = batch.status.exitCode === 0 ? parsePctStatus(batch.status.output) : null;
+    if (status !== 'running') {
+      throw new DetectionUnavailableError(
+        `${targetLabel(container)} is ${status ?? 'in an unknown state'} – start it to detect its applications.`,
+      );
+    }
+    const step = batch.steps.get('detect');
+    if (step?.exitCode !== 0) {
+      throw new Error(`Detecting applications failed: ${describeStep(step)}`);
+    }
+    const probe = parseDetectOutput(step.output);
+    const names = probe.scriptSlug ? [probe.scriptSlug] : probe.versionFiles.map((f) => f.appName);
+    const resolved = new Map<string, { repository: string | null; name: string | null }>();
+    for (const name of names) {
+      resolved.set(name, await this.resolveApp(name, name === probe.scriptSlug));
+    }
+    return detectedApps(probe, (name) => resolved.get(name) ?? { repository: null, name: null });
+  }
+
+  /** Repository and display name of an application: the built-in list first, then its community-scripts script. */
+  private async resolveApp(name: string, isScript: boolean): Promise<{ repository: string | null; name: string | null }> {
+    const known = KNOWN_APPS.get(normalizeAppName(name));
+    if (known) {
+      return known;
+    }
+    if (!isScript) {
+      return { repository: null, name: null };
+    }
+    try {
+      const script = await (this.deps.fetchAppScript ?? fetchCommunityScript)(name);
+      return script ? { repository: repositoryFromScript(script), name: appNameFromScript(script) } : { repository: null, name: null };
+    } catch (error) {
+      this.deps.log.warn({ err: error, slug: name }, 'Downloading the community-scripts script failed');
+      return { repository: null, name: null };
+    }
   }
 
   /** Starts a check in the background; returns the created run. */

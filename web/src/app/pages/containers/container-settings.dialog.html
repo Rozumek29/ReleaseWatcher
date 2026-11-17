@@ -186,10 +186,69 @@
               @if (appError(); as e) {
                 <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
               }
-              <div>
+              <div class="app-buttons">
                 <button type="button" class="btn btn-secondary btn-sm" (click)="newApp()">
                   <app-icon name="plus" [size]="14" /> Add application
                 </button>
+                <button type="button" class="btn btn-ghost btn-sm" (click)="detectApps()" [disabled]="detecting()">
+                  <app-icon name="refresh" [size]="14" [class.spin]="detecting()" />
+                  {{ detecting() ? 'Detecting…' : 'Detect applications' }}
+                </button>
+              </div>
+            }
+
+            @if (detectError(); as e) {
+              <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+            }
+            @if (detected(); as found) {
+              <div class="detected" aria-live="polite">
+                <div class="detected-head">
+                  <strong>Found in the container</strong>
+                  <button type="button" class="icon-btn" (click)="detected.set(null)" aria-label="Hide found applications" title="Hide">
+                    <app-icon name="close" [size]="15" />
+                  </button>
+                </div>
+                @if (found.length === 0) {
+                  <p class="muted small">
+                    No applications found. Detection looks for community-scripts containers
+                    (<code>/usr/bin/update</code>) and version files such as <code>~/.vaultwarden</code> or
+                    <code>/opt/app_version.txt</code>.
+                  </p>
+                } @else {
+                  <ul class="apps">
+                    @for (d of found; track d.name) {
+                      <li class="app-row">
+                        <div class="app-text">
+                          <strong>{{ d.name }}</strong>
+                          <span class="muted small">
+                            @if (d.repository) {
+                              <code>{{ d.repository }}</code>
+                              {{ d.repositoryId === null ? '(watched when added)' : '(watched)' }}
+                            } @else {
+                              no GitHub repository found
+                            }
+                            @if (d.installedVersion) {
+                              · installed <code>{{ d.installedVersion }}</code>
+                            }
+                          </span>
+                        </div>
+                        <div class="app-actions">
+                          @if (d.alreadyAdded) {
+                            <span class="badge badge-success">Added</span>
+                          } @else {
+                            <button type="button" class="btn btn-sm" (click)="addDetected(d)" [disabled]="addingDetected().has(d.name)">
+                              {{ addingDetected().has(d.name) ? 'Adding…' : 'Add' }}
+                            </button>
+                          }
+                        </div>
+                      </li>
+                    }
+                  </ul>
+                  <p class="muted small">
+                    Adding watches the repository (its releases are notified like any other) and links it as the
+                    latest version. Edit the application afterwards to change its commands.
+                  </p>
+                }
               </div>
             }
           </fieldset>

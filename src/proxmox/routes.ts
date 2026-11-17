@@ -22,7 +22,7 @@ import {
   targetLabel,
 } from './domain.ts';
 import type { ContainerScheduler } from './scheduler.ts';
-import { ContainerBusyError, type ContainerService } from './service.ts';
+import { ContainerBusyError, type ContainerService, DetectionUnavailableError } from './service.ts';
 import { ShellNotConfiguredError } from './ssh.ts';
 import type { AppInput, ContainerStore } from './store.ts';
 import { type ContainerUpdater, UpdateAllRunningError, type UpdateRequest } from './updater.ts';
@@ -530,6 +530,46 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           ? Response.json(containers.listRuns(container.id).map(runDto))
           : problem(404, 'Container not found.');
       },
+    },
+    // Suggests applications found in the container with their GitHub repository (nothing is saved).
+    '/api/containers/:id/detect-apps': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/detect-apps'>) =>
+        guard(async () => {
+          const container = findContainer(req.params.id);
+          if (!container) {
+            return problem(404, 'Container not found.');
+          }
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          let detected;
+          try {
+            detected = await service.detectApps(container);
+          } catch (error) {
+            if (error instanceof DetectionUnavailableError) {
+              return problem(409, error.message);
+            }
+            return problem(502, 'Detecting applications failed.', { detail: errorMessage(error) });
+          }
+          const apps = containers.listApps(container.id);
+          const watched = repositories.list();
+          return Response.json(
+            detected.map((d) => {
+              const repo = d.repository
+                ? watched.find((r) => fullName(r).toLowerCase() === d.repository!.toLowerCase())
+                : undefined;
+              return {
+                ...d,
+                repositoryId: repo?.id ?? null,
+                // Already set up: the same repository or the same name in this container.
+                alreadyAdded: apps.some(
+                  (a) =>
+                    (repo !== undefined && a.repositoryId === repo.id) || a.name.toLowerCase() === d.name.toLowerCase(),
+                ),
+              };
+            }),
+          );
+        }),
     },
     '/api/containers/:id/apps': {
       POST: async (req: Bun.BunRequest<'/api/containers/:id/apps'>) => {
