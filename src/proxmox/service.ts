@@ -63,6 +63,11 @@ const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
 const APT_UPGRADE_TIMEOUT_MS = 60 * 60_000;
 const BACKUP_TIMEOUT_MS = 4 * 60 * 60_000;
+/**
+ * Checks whether a running container sees CPU cores raised with `pct set` – Proxmox writes the config at once, but
+ * pvestatd applies the new cpuset only in its next cycle (~10 s), and update scripts check `nproc` right away.
+ */
+const CORES_POLL_ATTEMPTS = 30;
 /** Output kept per run (the tail is preserved). */
 const MAX_OUTPUT_LENGTH = 256 * 1024;
 const OUTPUT_FLUSH_MS = 1000;
@@ -159,6 +164,8 @@ export interface ContainerServiceDeps {
   now?: () => Date;
   /** Pause before reconnecting to a detached command after the SSH connection dropped (default 5 s). */
   reconnectDelayMs?: number;
+  /** Pause between checks whether a container already sees raised CPU cores (default 2 s). */
+  resourcePollMs?: number;
 }
 
 /** Extra time to wait for a detached command after its own timeout (systemd stops it at the timeout). */
@@ -169,6 +176,7 @@ export class ContainerService {
   private readonly deps: ContainerServiceDeps;
   private readonly now: () => Date;
   private readonly reconnectDelayMs: number;
+  private readonly resourcePollMs: number;
   /** Running task per container ID – at most one check/update per container at a time. */
   private readonly active = new Map<number, Promise<Run>>();
   /** Most recent task per container (kept after it finished, for {@link wait}). */
@@ -180,6 +188,7 @@ export class ContainerService {
     this.deps = deps;
     this.now = deps.now ?? (() => new Date());
     this.reconnectDelayMs = deps.reconnectDelayMs ?? 5000;
+    this.resourcePollMs = deps.resourcePollMs ?? 2000;
   }
 
   get shell(): NodeShell {
@@ -484,6 +493,38 @@ export class ContainerService {
       containers.setResourcesToRestore(container, null);
       throw new Error(`Raising the resources failed – update not started. ${describeSshFailure(result)}`);
     }
+    if (typeof plan.raise.cores === 'number') {
+      await this.waitForCores(container, plan.raise.cores, log);
+    }
+  }
+
+  /**
+   * Waits until the container sees `cores` CPUs: `pct set --cores` changes the cpuset of a running container only
+   * when pvestatd rebalances it, and update scripts (community-scripts) refuse to run on too few `nproc`.
+   */
+  private async waitForCores(container: Container, cores: number, log: RunLog): Promise<void> {
+    let seen: number | null = null;
+    for (let attempt = 0; attempt < CORES_POLL_ATTEMPTS; attempt++) {
+      if (attempt > 0) {
+        await Bun.sleep(this.resourcePollMs);
+      }
+      const result = await this.deps.shell.run(`pct exec ${container.vmid} -- nproc`, { timeoutMs: NODE_TIMEOUT_MS });
+      const count = Number.parseInt(result.output.trim(), 10);
+      if (result.exitCode !== 0 || !Number.isInteger(count)) {
+        return; // stopped container or no nproc: nothing to wait for
+      }
+      seen = count;
+      if (count >= cores) {
+        if (attempt > 0) {
+          log.note(`CT ${container.vmid} now sees ${count} CPU cores`);
+        }
+        return;
+      }
+      if (attempt === 0) {
+        log.note(`Waiting for Proxmox to apply the CPU cores (CT ${container.vmid} sees ${count})…`);
+      }
+    }
+    log.note(`CT ${container.vmid} still sees ${seen} CPU cores – starting the update anyway`);
   }
 
   /** Restores resources raised for an update; on failure they stay recorded and are restored on the next start. */

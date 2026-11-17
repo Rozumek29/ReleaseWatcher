@@ -44,7 +44,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, auth: { requireAuth: false } });
+    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, resourcePollMs: 0, auth: { requireAuth: false } });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
@@ -306,6 +306,9 @@ describe('containers API', () => {
 
     shell.on(/^pct config 101$/, { output: 'arch: amd64\ncores: 1\nmemory: 1024\n' });
     shell.on(/^pct set 101 /, { output: '' });
+    // Proxmox applies the cpuset of a running container only in pvestatd's next cycle.
+    let nprocCalls = 0;
+    shell.on(/^pct exec 101 -- nproc$/, () => ({ output: ++nprocCalls < 3 ? '1\n' : '4\n' }));
     const created = await request('POST', `/api/containers/${container.id}/apps`, {
       name: 'Vaultwarden',
       latestSource: 'none',
@@ -323,14 +326,19 @@ describe('containers API', () => {
 
     assert.equal(run?.status, 'failed');
     assert.equal(raisedDuringUpdate, true);
-    const relevant = shell.commands.filter((c) => /^pct (config|set)|cargo build/.test(c));
+    const relevant = shell.commands.filter((c) => /^pct (config|set)|nproc|cargo build/.test(c));
     assert.deepEqual(relevant.map((c) => c.replace(/'.*/s, '')), [
       'pct config 101',
       'pct set 101 --cores 4 --memory 4096',
+      'pct exec 101 -- nproc',
+      'pct exec 101 -- nproc',
+      'pct exec 101 -- nproc',
       'pct exec 101 -- sh -c ',
       'pct set 101 --cores 1 --memory 1024',
     ]);
     assert.match(run?.output ?? '', /Raising resources for the update: 4 cores, 4096 MiB memory/);
+    assert.match(run?.output ?? '', /Waiting for Proxmox to apply the CPU cores \(CT 101 sees 1\)…/);
+    assert.match(run?.output ?? '', /CT 101 now sees 4 CPU cores/);
     assert.match(run?.output ?? '', /Restoring resources: 1 cores, 1024 MiB memory/);
     assert.equal((await request('GET', `/api/containers/${container.id}`)).json().resourcesRaised, false);
   });

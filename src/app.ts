@@ -95,6 +95,8 @@ export interface AppDeps {
   shell?: NodeShell;
   /** Pause before reconnecting to an update on the node after the SSH connection dropped (tests use 0). */
   reconnectDelayMs?: number;
+  /** Pause between checks whether a container already sees CPU cores raised for an update (tests use 0). */
+  resourcePollMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -294,6 +296,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     dispatcher,
     log,
     ...(deps.reconnectDelayMs === undefined ? {} : { reconnectDelayMs: deps.reconnectDelayMs }),
+    ...(deps.resourcePollMs === undefined ? {} : { resourcePollMs: deps.resourcePollMs }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,
