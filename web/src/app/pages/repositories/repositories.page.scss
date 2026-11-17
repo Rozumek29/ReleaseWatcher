@@ -2,27 +2,6 @@
   display: block;
 }
 
-.callout {
-  display: flex;
-  gap: 10px;
-  align-items: flex-start;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-  border-radius: 10px;
-  background: var(--warning-soft);
-  color: var(--warning);
-  font-size: 0.9rem;
-
-  app-icon {
-    margin-top: 2px;
-  }
-
-  a {
-    color: inherit;
-    font-weight: 600;
-  }
-}
-
 .add-card {
   display: flex;
   flex-wrap: wrap;
@@ -50,64 +29,6 @@
   }
 }
 
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.tabs {
-  display: inline-flex;
-  gap: 2px;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--surface-2);
-  overflow-x: auto;
-  max-width: 100%;
-}
-
-.tab {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 5px 12px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 550;
-  cursor: pointer;
-  white-space: nowrap;
-
-  &.active {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: var(--shadow-sm);
-  }
-
-  &:focus-visible {
-    outline: 2px solid var(--accent);
-  }
-}
-
-.tab-count {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-
-  &.danger {
-    color: var(--danger);
-  }
-
-  &.warning {
-    color: var(--warning);
-  }
-}
-
 .toolbar-right {
   display: flex;
   align-items: center;
@@ -132,25 +53,6 @@
       color: var(--text);
       box-shadow: var(--shadow-sm);
     }
-  }
-}
-
-.search {
-  position: relative;
-  flex: 1 1 200px;
-
-  app-icon {
-    position: absolute;
-    top: 50%;
-    left: 11px;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    pointer-events: none;
-  }
-
-  .input {
-    min-height: 34px;
-    padding-left: 34px;
   }
 }
 
@@ -289,52 +191,8 @@
   font-weight: 550;
 }
 
-.empty {
-  padding: 48px 24px;
-  text-align: center;
-
-  h2 {
-    margin: 12px 0 4px;
-    font-size: 1.05rem;
-  }
-
-  p {
-    margin: 0;
-    color: var(--text-muted);
-  }
-}
-
-.empty-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 12px;
-  background: var(--accent-soft);
-  color: var(--accent-strong);
-}
-
 .skeleton {
   height: 76px;
-  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
-}
-
-.spin {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes shimmer {
-  to {
-    background-position: -200% 0;
-  }
 }
 
 /* ---------- Grid layout ---------- */

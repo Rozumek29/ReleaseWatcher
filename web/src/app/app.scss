@@ -341,3 +341,15 @@ nav {
 .auth-layout {
   min-height: 100vh;
 }
+
+/* Each page fades in when navigated to (the routed component is the outlet's next sibling). */
+.content > :not(router-outlet) {
+  animation: page-in 0.24s cubic-bezier(0.22, 1, 0.36, 1) backwards;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}

@@ -296,6 +296,11 @@ To run the published image instead of building locally, replace `build: .` in `d
   releases you already run (installed ≥ release) are not announced. A **Test URL** button previews the result.
   Optional **request headers** (e.g. `Authorization: Bearer …`, `X-Api-Key`) are sent with the request; their
   values are stored encrypted in SQLite and never returned by the API (the UI only sees header names).
+- **Containers** – Proxmox LXC containers (and optionally the host) in a list with a detail pane: filter tabs
+  (updates, errors, working, stopped or paused), search by name, VMID or application, and sorting (needs attention
+  first, VMID, name – remembered per browser). Arrow keys move through the list; the detail pane shows apt packages,
+  applications and their update, check, history and settings actions. On narrow screens the list and the details
+  take turns.
 - **Settings** – Discord webhook, mention and bot name (with a test message), GitHub token with live API quota,
   polling interval. Changes apply immediately; values saved in the UI are stored in SQLite and override
   the environment variables below (clearing a value falls back to the environment).

@@ -97,10 +97,13 @@
 }
 
 @if (loading()) {
-  <div class="list">
-    @for (i of [1, 2]; track i) {
-      <div class="card row skeleton"></div>
-    }
+  <div class="browser">
+    <div class="ct-list-wrap">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="card ct-skeleton skeleton"></div>
+      }
+    </div>
+    <div class="card detail-skeleton skeleton"></div>
   </div>
 } @else if (containers().length === 0) {
   <div class="card empty">
@@ -109,239 +112,362 @@
     <p>Configure the Proxmox node in Settings, then add the containers you want to keep up to date.</p>
   </div>
 } @else {
-  <ul class="list">
-    @for (c of containers(); track c.id) {
-      <li class="card row" [class.paused]="!c.isEnabled" [class.has-error]="!!c.lastError">
-        <div class="row-head">
-          <div class="main">
-            <div class="title-line">
-              @if (c.kind === 'node') {
-                <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
-              } @else {
-                <span class="vmid mono">{{ c.vmid }}</span>
-              }
-              <span class="name">{{ c.name }}</span>
-              @if (c.status) {
-                <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
-              }
-              @if (!c.isEnabled) {
-                <span class="badge">Paused</span>
-              }
-              @if (c.activeRunId !== null) {
-                <button type="button" class="badge badge-accent badge-btn" (click)="showActiveRun(c)" title="Show the live log">
-                  <app-icon name="refresh" [size]="12" class="spin" /> Working… <app-icon name="terminal" [size]="12" />
-                </button>
-              } @else if (c.isBusy && !busyIds().has(c.id)) {
-                <span class="badge badge-accent" title="Waits for its turn in “Update all”"><app-icon name="clock" [size]="12" /> Queued</span>
-              } @else if (isBusy(c)) {
-                <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
-              } @else if (c.updatesAvailable > 0) {
-                <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
-              } @else if (c.lastCheckedAt && !c.lastError && !blockedWhileStopped(c)) {
-                <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
-              }
-            </div>
-            <div class="meta">
-              <span class="meta-item" [title]="c.lastCheckedAt ? (c.lastCheckedAt | date: 'medium') : 'Never checked'">
-                <app-icon name="clock" [size]="14" />
-                checked {{ c.lastCheckedAt ? (c.lastCheckedAt | relativeTime: now()) : 'never' }}
-              </span>
-              @if (c.nextCheckAt) {
-                <span class="meta-item" [title]="'Schedule: ' + cronOf(c)">
-                  <app-icon name="timer" [size]="14" />
-                  next {{ c.nextCheckAt | relativeTime: now() }}
-                </span>
-              }
-              @if (c.effectiveBackupBeforeUpdate && backupStorage()) {
-                <span class="meta-item" title="A vzdump backup is made before updates (can be changed per update)">
-                  backup before updates
-                </span>
-              }
-            </div>
-          </div>
+  <div class="toolbar">
+    <div class="tabs" role="tablist" aria-label="Filter containers">
+      @for (f of filters; track f.value) {
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="filter() === f.value"
+          [attr.aria-selected]="filter() === f.value"
+          (click)="filter.set(f.value)"
+        >
+          {{ f.label }}
+          <span
+            class="tab-count"
+            [class.danger]="f.value === 'errors' && counts().errors > 0"
+            [class.warning]="f.value === 'updates' && counts().updates > 0"
+            >{{ counts()[f.value] }}</span
+          >
+        </button>
+      }
+    </div>
+    <div class="toolbar-right">
+      <label for="ct-sort" class="visually-hidden">Sort</label>
+      <select
+        id="ct-sort"
+        class="input sort"
+        [value]="preferences.containerSort()"
+        (change)="preferences.containerSort.set($any($event.target).value)"
+        title="Sort"
+      >
+        @for (s of sorts; track s.value) {
+          <option [value]="s.value" [selected]="preferences.containerSort() === s.value">{{ s.label }}</option>
+        }
+      </select>
+      <div class="search">
+        <app-icon name="search" [size]="16" />
+        <label for="ct-search" class="visually-hidden">Search containers</label>
+        <input
+          id="ct-search"
+          class="input"
+          type="search"
+          placeholder="Name, VMID or application"
+          [value]="query()"
+          (input)="query.set($any($event.target).value)"
+        />
+      </div>
+    </div>
+  </div>
 
-          <div class="actions">
-            @if (confirming() === 'delete-' + c.id) {
-              <span class="confirm-text">Remove {{ label(c) }}?</span>
-              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
-              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-            } @else if (confirming() === 'update-' + c.id) {
-              <span class="confirm-text warn">Run {{ pendingCount(c) }} update(s) one after another?</span>
-              <label class="backup-check" [class.disabled]="!backupStorage()" title="One backup before the first update">
-                <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
-                Backup first
-                @if (backupStorage(); as storage) {
-                  <span class="muted mono">→ {{ storage }}</span>
-                } @else {
-                  <span class="muted">(choose a storage in Settings)</span>
+  @if (visible().length === 0) {
+    <div class="card empty">
+      <h2>Nothing matches</h2>
+      <p>Try a different search or filter.</p>
+    </div>
+  } @else {
+    <div class="browser" [class.show-detail]="showDetail()">
+      <div class="ct-list-wrap">
+        <ul class="ct-list" aria-label="Containers" (keydown)="onListKeydown($event)">
+          @for (c of visible(); track c.id; let i = $index) {
+            @let state = stateOf(c);
+            <li class="enter" [style.--i]="i">
+              <button
+                type="button"
+                class="ct-item"
+                [attr.data-id]="c.id"
+                [class.selected]="selected()?.id === c.id"
+                [class.paused]="!c.isEnabled"
+                [attr.aria-current]="selected()?.id === c.id ? 'true' : null"
+                (click)="select(c)"
+              >
+                <span class="dot" [class]="'dot dot-' + state" aria-hidden="true"></span>
+                <span class="ct-text">
+                  <span class="ct-title">
+                    @if (c.kind === 'node') {
+                      <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Host</span>
+                    } @else {
+                      <span class="ct-id mono">{{ c.vmid }}</span>
+                    }
+                    <span class="ct-name">{{ c.name }}</span>
+                  </span>
+                  <span class="ct-meta">
+                    @switch (state) {
+                      @case ('working') { Working… }
+                      @case ('queued') { Queued }
+                      @case ('error') { Error }
+                      @case ('paused') { Paused }
+                      @case ('stopped') { Stopped }
+                      @case ('unchecked') { Not checked yet }
+                      @default { checked {{ c.lastCheckedAt | relativeTime: now() }} }
+                    }
+                    @if (c.apps.length > 0) {
+                      · {{ c.apps.length }} app{{ c.apps.length === 1 ? '' : 's' }}
+                    }
+                  </span>
+                </span>
+                @switch (state) {
+                  @case ('working') {
+                    <app-icon class="ct-state accent spin" name="refresh" [size]="14" />
+                  }
+                  @case ('queued') {
+                    <app-icon class="ct-state accent" name="clock" [size]="14" />
+                  }
+                  @case ('error') {
+                    <app-icon class="ct-state danger" name="alert" [size]="14" />
+                  }
+                  @case ('updates') {
+                    <span class="ct-count" [title]="c.updatesAvailable + ' update(s)'">
+                      <app-icon name="arrowUp" [size]="12" />{{ c.updatesAvailable }}
+                    </span>
+                  }
+                  @case ('ok') {
+                    <app-icon class="ct-state success" name="check" [size]="14" />
+                  }
                 }
-              </label>
-              <button type="button" class="btn btn-sm" (click)="updateContainer(c)">Yes</button>
-              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-            } @else {
-              @if (pendingCount(c) > 1) {
-                <button
-                  type="button"
-                  class="btn btn-sm"
-                  (click)="ask('update-' + c.id, c)"
-                  [disabled]="isBusy(c) || !configured()"
-                  title="apt upgrade and all application updates of this container, one after another"
-                >
-                  <app-icon name="arrowUp" [size]="14" />
-                  Update all ({{ pendingCount(c) }})
-                </button>
-              }
-              <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
-                <app-icon name="refresh" [size]="14" />
-                Check
               </button>
-              <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of ' + label(c)" title="History">
-                <app-icon name="history" [size]="16" />
-              </button>
-              <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of ' + label(c)" title="Settings">
-                <app-icon name="sliders" [size]="16" />
-              </button>
-              <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove ' + label(c)" title="Remove">
-                <app-icon name="trash" [size]="16" />
-              </button>
-            }
-          </div>
-        </div>
+            </li>
+          }
+        </ul>
+      </div>
 
-        @if (c.lastError) {
-          <div class="error-line">
-            <app-icon name="alert" [size]="14" />
-            <span class="pre-line">{{ c.lastError }}</span>
-          </div>
-        }
-        @if (c.status === 'stopped') {
-          <p class="stopped-line muted small">
-            <app-icon name="power" [size]="14" />
-            @if (c.startWhenStopped) {
-              <span>
-                The container is stopped. Checks and updates start it temporarily and shut it down again afterwards.
-              </span>
-            } @else {
-              <span>
-                The container is stopped, so apt and applications are not checked and updates cannot run – it is not
-                started automatically. Results below are from the last check while it was running.
-                <button type="button" class="link-btn" (click)="editing.set(c)">Allow a temporary start</button>
-              </span>
-            }
-          </p>
-        }
-
-        <div class="items">
-          @if (c.aptEnabled) {
-            <div class="item">
-              <div class="item-main">
-                <span class="item-name"><app-icon name="download" [size]="14" /> apt</span>
-                @if (c.aptUpgradable.length > 0) {
-                  <button type="button" class="link-btn" (click)="toggleExpanded(c.id)" [attr.aria-expanded]="expanded().has(c.id)">
-                    {{ c.aptUpgradable.length }} upgradable package(s)
-                  </button>
+      @for (c of selectedList(); track c.id) {
+        <section class="card detail fade-in" [class.paused]="!c.isEnabled" [class.has-error]="!!c.lastError" [attr.aria-label]="label(c)">
+          <button type="button" class="btn btn-ghost btn-sm back" (click)="backToList()">
+            <app-icon name="arrowUp" [size]="14" class="back-icon" /> All containers
+          </button>
+          <div class="row-head">
+            <div class="main">
+              <div class="title-line">
+                @if (c.kind === 'node') {
+                  <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
                 } @else {
-                  <span class="muted">{{ c.lastCheckedAt ? 'no pending packages' : 'not checked yet' }}</span>
+                  <span class="vmid mono">{{ c.vmid }}</span>
+                }
+                <span class="name">{{ c.name }}</span>
+                @if (c.status) {
+                  <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
+                }
+                @if (!c.isEnabled) {
+                  <span class="badge">Paused</span>
+                }
+                @if (c.activeRunId !== null) {
+                  <button type="button" class="badge badge-accent badge-btn" (click)="showActiveRun(c)" title="Show the live log">
+                    <app-icon name="refresh" [size]="12" class="spin" /> Working… <app-icon name="terminal" [size]="12" />
+                  </button>
+                } @else if (c.isBusy && !busyIds().has(c.id)) {
+                  <span class="badge badge-accent" title="Waits for its turn in “Update all”"><app-icon name="clock" [size]="12" /> Queued</span>
+                } @else if (isBusy(c)) {
+                  <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
+                } @else if (c.updatesAvailable > 0) {
+                  <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
+                } @else if (c.lastCheckedAt && !c.lastError && !blockedWhileStopped(c)) {
+                  <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
                 }
               </div>
-              @if (c.aptUpgradable.length > 0) {
-                <div class="item-actions">
-                  @if (confirming() === 'apt-' + c.id) {
-                    <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
-                    @if (c.kind === 'node') {
-                      <span class="muted small">apt-get dist-upgrade, no backup</span>
-                    } @else {
-                    <label class="backup-check" [class.disabled]="!backupStorage()">
-                    <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
-                    Backup first
-                    @if (backupStorage(); as storage) {
-                      <span class="muted mono">→ {{ storage }}</span>
-                    } @else {
-                      <span class="muted">(choose a storage in Settings)</span>
-                    }
-                  </label>
-                    }
-                  <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
-                    <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-                  } @else {
-                    <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
-                      <app-icon name="arrowUp" [size]="14" /> Upgrade
-                    </button>
-                  }
-                </div>
-              }
-              @if (expanded().has(c.id)) {
-                <app-apt-packages [packages]="c.aptUpgradable" [listId]="c.id" />
-              }
-            </div>
-          }
-
-          @for (a of c.apps; track a.id) {
-            <div class="item">
-              <div class="item-main">
-                <span class="item-name"><app-icon name="server" [size]="14" /> {{ a.name }}</span>
-                <span class="versions mono">
-                  {{ a.installedVersion ?? '?' }}
-                  @if (a.latestVersion) {
-                    <span [class.arrow]="a.updateAvailable">→</span> {{ a.latestVersion }}
-                  }
+              <div class="meta">
+                <span class="meta-item" [title]="c.lastCheckedAt ? (c.lastCheckedAt | date: 'medium') : 'Never checked'">
+                  <app-icon name="clock" [size]="14" />
+                  checked {{ c.lastCheckedAt ? (c.lastCheckedAt | relativeTime: now()) : 'never' }}
                 </span>
-                @if (a.updateAvailable === true) {
-                  <span class="badge badge-warning">Update available</span>
-                } @else if (a.updateAvailable === false) {
-                  <span class="badge badge-success">Up to date</span>
+                @if (c.nextCheckAt) {
+                  <span class="meta-item" [title]="'Schedule: ' + cronOf(c)">
+                    <app-icon name="timer" [size]="14" />
+                    next {{ c.nextCheckAt | relativeTime: now() }}
+                  </span>
                 }
-                @if (a.repositoryFullName) {
-                  <span class="muted small" title="Latest version from this watched repository">
-                    <app-icon name="github" [size]="12" /> {{ a.repositoryFullName }}
+                @if (c.effectiveBackupBeforeUpdate && backupStorage()) {
+                  <span class="meta-item" title="A vzdump backup is made before updates (can be changed per update)">
+                    backup before updates
                   </span>
                 }
               </div>
-              <div class="item-actions">
-                @if (confirming() === 'app-' + c.id + '-' + a.id) {
-                  <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
-                  <label class="backup-check" [class.disabled]="!backupStorage()">
-                    <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
-                    Backup first
-                    @if (backupStorage(); as storage) {
-                      <span class="muted mono">→ {{ storage }}</span>
-                    } @else {
-                      <span class="muted">(choose a storage in Settings)</span>
-                    }
-                  </label>
-                  <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
-                  <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-                } @else if (a.updateCommand && a.updateAvailable !== false) {
-                  <!-- Hidden when up to date; shown when an update is available or the state is unknown. -->
+            </div>
+  
+            <div class="actions">
+              @if (confirming() === 'delete-' + c.id) {
+                <span class="confirm-text">Remove {{ label(c) }}?</span>
+                <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(c)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else if (confirming() === 'update-' + c.id) {
+                <span class="confirm-text warn">Run {{ pendingCount(c) }} update(s) one after another?</span>
+                <label class="backup-check" [class.disabled]="!backupStorage()" title="One backup before the first update">
+                  <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                  Backup first
+                  @if (backupStorage(); as storage) {
+                    <span class="muted mono">→ {{ storage }}</span>
+                  } @else {
+                    <span class="muted">(choose a storage in Settings)</span>
+                  }
+                </label>
+                <button type="button" class="btn btn-sm" (click)="updateContainer(c)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else {
+                @if (pendingCount(c) > 1) {
                   <button
                     type="button"
                     class="btn btn-sm"
-                    [class.btn-secondary]="!a.updateAvailable"
-                    (click)="ask('app-' + c.id + '-' + a.id, c)"
-                    [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
-                    [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
+                    (click)="ask('update-' + c.id, c)"
+                    [disabled]="isBusy(c) || !configured()"
+                    title="apt upgrade and all application updates of this container, one after another"
                   >
-                    <app-icon name="arrowUp" [size]="14" /> Update
+                    <app-icon name="arrowUp" [size]="14" />
+                    Update all ({{ pendingCount(c) }})
                   </button>
                 }
-              </div>
-              @if (a.error) {
-                <div class="error-line warn"><app-icon name="alert" [size]="14" /> <span>{{ a.error }}</span></div>
+                <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
+                  <app-icon name="refresh" [size]="14" />
+                  Check
+                </button>
+                <button type="button" class="icon-btn" (click)="showHistory(c)" [attr.aria-label]="'History of ' + label(c)" title="History">
+                  <app-icon name="history" [size]="16" />
+                </button>
+                <button type="button" class="icon-btn" (click)="editing.set(c)" [attr.aria-label]="'Settings of ' + label(c)" title="Settings">
+                  <app-icon name="sliders" [size]="16" />
+                </button>
+                <button type="button" class="icon-btn" (click)="confirming.set('delete-' + c.id)" [disabled]="isBusy(c)" [attr.aria-label]="'Remove ' + label(c)" title="Remove">
+                  <app-icon name="trash" [size]="16" />
+                </button>
               }
             </div>
-          } @empty {
-            @if (c.kind !== 'node') {
-            <div class="item muted small">
-              No applications configured.
-              <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
-              to track its version and update it (e.g. <code>update</code> from community-scripts or <code>./pull.sh</code>).
+          </div>
+  
+          @if (c.lastError) {
+            <div class="error-line">
+              <app-icon name="alert" [size]="14" />
+              <span class="pre-line">{{ c.lastError }}</span>
             </div>
-            }
           }
-        </div>
-      </li>
-    }
-  </ul>
+          @if (c.status === 'stopped') {
+            <p class="stopped-line muted small">
+              <app-icon name="power" [size]="14" />
+              @if (c.startWhenStopped) {
+                <span>
+                  The container is stopped. Checks and updates start it temporarily and shut it down again afterwards.
+                </span>
+              } @else {
+                <span>
+                  The container is stopped, so apt and applications are not checked and updates cannot run – it is not
+                  started automatically. Results below are from the last check while it was running.
+                  <button type="button" class="link-btn" (click)="editing.set(c)">Allow a temporary start</button>
+                </span>
+              }
+            </p>
+          }
+  
+          <div class="items">
+            @if (c.aptEnabled) {
+              <div class="item">
+                <div class="item-main">
+                  <span class="item-name"><app-icon name="download" [size]="14" /> apt</span>
+                  @if (c.aptUpgradable.length > 0) {
+                    <button type="button" class="link-btn" (click)="toggleExpanded(c.id)" [attr.aria-expanded]="expanded().has(c.id)">
+                      {{ c.aptUpgradable.length }} upgradable package(s)
+                    </button>
+                  } @else {
+                    <span class="muted">{{ c.lastCheckedAt ? 'no pending packages' : 'not checked yet' }}</span>
+                  }
+                </div>
+                @if (c.aptUpgradable.length > 0) {
+                  <div class="item-actions">
+                    @if (confirming() === 'apt-' + c.id) {
+                      <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
+                      @if (c.kind === 'node') {
+                        <span class="muted small">apt-get dist-upgrade, no backup</span>
+                      } @else {
+                      <label class="backup-check" [class.disabled]="!backupStorage()">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      Backup first
+                      @if (backupStorage(); as storage) {
+                        <span class="muted mono">→ {{ storage }}</span>
+                      } @else {
+                        <span class="muted">(choose a storage in Settings)</span>
+                      }
+                    </label>
+                      }
+                    <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
+                      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                    } @else {
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
+                        <app-icon name="arrowUp" [size]="14" /> Upgrade
+                      </button>
+                    }
+                  </div>
+                }
+                @if (expanded().has(c.id)) {
+                  <app-apt-packages [packages]="c.aptUpgradable" [listId]="c.id" />
+                }
+              </div>
+            }
+  
+            @for (a of c.apps; track a.id) {
+              <div class="item">
+                <div class="item-main">
+                  <span class="item-name"><app-icon name="server" [size]="14" /> {{ a.name }}</span>
+                  <span class="versions mono">
+                    {{ a.installedVersion ?? '?' }}
+                    @if (a.latestVersion) {
+                      <span [class.arrow]="a.updateAvailable">→</span> {{ a.latestVersion }}
+                    }
+                  </span>
+                  @if (a.updateAvailable === true) {
+                    <span class="badge badge-warning">Update available</span>
+                  } @else if (a.updateAvailable === false) {
+                    <span class="badge badge-success">Up to date</span>
+                  }
+                  @if (a.repositoryFullName) {
+                    <span class="muted small" title="Latest version from this watched repository">
+                      <app-icon name="github" [size]="12" /> {{ a.repositoryFullName }}
+                    </span>
+                  }
+                </div>
+                <div class="item-actions">
+                  @if (confirming() === 'app-' + c.id + '-' + a.id) {
+                    <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
+                    <label class="backup-check" [class.disabled]="!backupStorage()">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      Backup first
+                      @if (backupStorage(); as storage) {
+                        <span class="muted mono">→ {{ storage }}</span>
+                      } @else {
+                        <span class="muted">(choose a storage in Settings)</span>
+                      }
+                    </label>
+                    <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
+                    <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                  } @else if (a.updateCommand && a.updateAvailable !== false) {
+                    <!-- Hidden when up to date; shown when an update is available or the state is unknown. -->
+                    <button
+                      type="button"
+                      class="btn btn-sm"
+                      [class.btn-secondary]="!a.updateAvailable"
+                      (click)="ask('app-' + c.id + '-' + a.id, c)"
+                      [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                      [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
+                    >
+                      <app-icon name="arrowUp" [size]="14" /> Update
+                    </button>
+                  }
+                </div>
+                @if (a.error) {
+                  <div class="error-line warn"><app-icon name="alert" [size]="14" /> <span>{{ a.error }}</span></div>
+                }
+              </div>
+            } @empty {
+              @if (c.kind !== 'node') {
+              <div class="item muted small">
+                No applications configured.
+                <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>
+                to track its version and update it (e.g. <code>update</code> from community-scripts or <code>./pull.sh</code>).
+              </div>
+              }
+            }
+          </div>
+        </section>
+      }
+    </div>
+  }
 }
 
 <app-container-settings-dialog

@@ -308,3 +308,230 @@ code {
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* ---------- Shared page pieces ---------- */
+
+.muted {
+  color: var(--text-muted);
+}
+
+/* Warning about missing configuration, with a link to Settings. */
+.callout {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: 0.9rem;
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  a {
+    color: inherit;
+    font-weight: 600;
+  }
+}
+
+.empty {
+  padding: 48px 24px;
+  text-align: center;
+
+  h2 {
+    margin: 12px 0 4px;
+    font-size: 1.05rem;
+  }
+
+  p {
+    margin: 0;
+    color: var(--text-muted);
+  }
+}
+
+.empty-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+/* Loading placeholder; pages set the height. */
+.skeleton {
+  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s infinite;
+}
+
+/* Filter tabs + search above a list. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 550;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease;
+
+  &:hover:not(.active) {
+    color: var(--text);
+  }
+
+  &.active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-sm);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+  }
+}
+
+.tab-count {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+
+  &.danger {
+    color: var(--danger);
+  }
+
+  &.warning {
+    color: var(--warning);
+  }
+}
+
+.search {
+  position: relative;
+  flex: 1 1 200px;
+
+  app-icon {
+    position: absolute;
+    top: 50%;
+    left: 11px;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+  }
+
+  .input {
+    min-height: 34px;
+    padding-left: 34px;
+  }
+}
+
+/* ---------- Motion ---------- */
+
+/*
+ * Short, ease-out and only on transform/opacity. Lists stagger their items with `--i` (the item's index, capped so
+ * long lists don't wait). Everything is switched off under prefers-reduced-motion at the end of this file.
+ */
+:root {
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.spin {
+  animation: spin 0.9s linear infinite;
+}
+
+.enter {
+  animation: rise-in 0.26s var(--ease-out) backwards;
+  animation-delay: calc(min(var(--i, 0), 12) * 24ms);
+}
+
+.fade-in {
+  animation: fade-in 0.18s ease-out backwards;
+}
+
+.btn,
+.icon-btn {
+  transition:
+    background 0.12s,
+    border-color 0.12s,
+    color 0.12s,
+    opacity 0.12s,
+    transform 0.1s ease-out;
+
+  &:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+}
+
+.badge {
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes rise-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

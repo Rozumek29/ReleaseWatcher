@@ -1,13 +1,58 @@
 :host {
   display: block;
+  container-type: inline-size;
 }
 
-/* Full-width page: sections flow into columns on wide screens. */
+/*
+ * Full-width page. Wide screens: Discord, GitHub and Polling side by side (similar heights), the long Proxmox form below
+ * in two columns. Medium: two columns, Polling and Proxmox across. Cards in a row share their height.
+ */
 .sections {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
   gap: 20px;
+}
+
+@container (min-width: 760px) {
+  .sections {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .wide,
+  .polling-section {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (min-width: 1080px) {
+  .sections {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .polling-section {
+    grid-column: auto;
+  }
+}
+
+.proxmox-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  gap: 18px 32px;
+}
+
+.proxmox-col {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-width: 0;
+}
+
+/* Cards in a row share their height; the save buttons sit at the bottom of each card. */
+.section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
 .section-head {
@@ -103,6 +148,7 @@
 }
 
 .section-body {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -126,6 +172,7 @@
 }
 
 .section-actions {
+  margin-top: auto;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -138,6 +185,7 @@
 }
 
 .token-form {
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -232,25 +280,6 @@
 
 .skeleton {
   height: 220px;
-  background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 50%, var(--surface) 75%);
-  background-size: 200% 100%;
-  animation: shimmer 1.2s infinite;
-}
-
-.spin {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes shimmer {
-  to {
-    background-position: -200% 0;
-  }
 }
 
 @media (max-width: 560px) {

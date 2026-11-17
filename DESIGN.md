@@ -156,6 +156,9 @@ Global classes (from `styles.scss`) – use them instead of restyling:
 | `.card` | bordered surface |
 | `.badge` + `-success` / `-warning` / `-danger` / `-accent` | statuses (“Connected”, “Update available”, “Error”) |
 | `.page-header`, `.visually-hidden` | page title block; accessible-only labels |
+| `.toolbar` > `.tabs` (`.tab`, `.tab-count`) + `.search` | filter tabs and search above a list |
+| `.callout`, `.card.empty` + `.empty-icon`, `.skeleton`, `.spin`, `.muted` | missing config warning, empty state, loading, busy icon, secondary text |
+| `.enter`, `.fade-in` | enter animations (see *Motion*) |
 
 Shared components in `web/src/app/shared/`:
 
@@ -189,7 +192,11 @@ Shared components in `web/src/app/shared/`:
   changes (after *Check all now*). Poll runs while they are active, stop when they finish.
 - **Per-browser preferences** (layout etc.) go to `PreferencesService` (localStorage with a safe fallback),
   never to the server.
-- **Motion:** short (0.12–0.2s) transitions; all animations must be disabled under `prefers-reduced-motion`.
+- **Motion:** short (0.12–0.26s), ease-out, only `transform`/`opacity` for movement. Use the global classes from
+  `styles.scss`: `.enter` for list items and cards appearing (stagger with `[style.--i]="$index"`, capped at 12),
+  `.fade-in` for swapped content (e.g. the containers detail pane); buttons press with `scale(0.97)`; pages fade in on
+  navigation (`app.scss`). Use `animation-fill-mode: backwards` so finished animations release. A global
+  `prefers-reduced-motion` rule switches all animations and transitions off – don't override it.
 
 ### 3.6 Accessibility
 
@@ -254,15 +261,13 @@ Shared components in `web/src/app/shared/`:
 
 These exist today; do not copy them into new code:
 
-- Shared UI pieces are duplicated per page: `.callout`, `.empty`, `.skeleton`, `.spin`/`@keyframes spin`,
-  `.muted` live in several component stylesheets, and `pages/containers/dialog.scss` copies the dialog styles of
-  `repository-settings.dialog.scss`. Target: move them to `styles.scss` (dialog styles included) and delete the
-  copies.
+- `pages/containers/dialog.scss` copies the dialog styles of `repository-settings.dialog.scss`. Target: move them
+  to `styles.scss` and delete the copies. (`.callout`, `.empty`, `.skeleton`, `.spin`, `.muted` and the toolbar/tabs/
+  search already live there.)
 - `run-log.dialog.scss` hard-codes terminal colours (`#0f1115`, `#dfe3ea`) – should become tokens
   (e.g. `--terminal-bg`, `--terminal-text`).
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own
   `routes.ts` like `proxmox/routes.ts`, and repositories can be moved out the same way.
-- README → *UI* does not describe the Containers page yet.
 - Unsafe requests (`POST`/`PUT`/`DELETE`) have no CSRF protection: with Basic auth enabled the browser re-sends
   cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/apt-upgrade` accepts an empty
   body. Planned fix: reject unsafe requests whose `Sec-Fetch-Site`/`Origin` is cross-site. New endpoints must not

@@ -117,8 +117,8 @@
   </div>
 } @else {
   <ul class="list" [class.grid]="preferences.repositoryLayout() === 'grid'">
-    @for (repo of visible(); track repo.id) {
-      <li class="card row" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
+    @for (repo of visible(); track repo.id; let i = $index) {
+      <li class="card row enter" [style.--i]="i" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
         <app-avatar class="avatar" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
         <div class="main">
           <div class="title-line">

@@ -8,7 +8,7 @@
 @if (settings(); as s) {
   <div class="sections">
     <!-- Discord -->
-    <section class="card section" aria-labelledby="discord-title">
+    <section class="card section enter" style="--i: 0" aria-labelledby="discord-title">
       <div class="section-head">
         <span class="section-icon discord"><app-icon name="discord" /></span>
         <div class="section-title">
@@ -87,7 +87,7 @@
     </section>
 
     <!-- GitHub -->
-    <section class="card section" aria-labelledby="github-title">
+    <section class="card section enter" style="--i: 1" aria-labelledby="github-title">
       <div class="section-head">
         <span class="section-icon github"><app-icon name="github" /></span>
         <div class="section-title">
@@ -186,7 +186,7 @@
     </section>
 
     <!-- Polling -->
-    <section class="card section" aria-labelledby="polling-title">
+    <section class="card section polling-section enter" style="--i: 2" aria-labelledby="polling-title">
       <div class="section-head">
         <span class="section-icon polling"><app-icon name="timer" /></span>
         <div class="section-title">
@@ -243,7 +243,7 @@
     </section>
 
     <!-- Proxmox node -->
-    <section class="card section" aria-labelledby="proxmox-title">
+    <section class="card section wide enter" style="--i: 3" aria-labelledby="proxmox-title">
       <div class="section-head">
         <span class="section-icon proxmox"><app-icon name="box" /></span>
         <div class="section-title">
@@ -258,131 +258,136 @@
       </div>
 
       <form class="section-body" (ngSubmit)="saveProxmox()">
-        <div class="grid-2">
-          <div class="field">
-            <label for="pve-host">Host</label>
-            <input id="pve-host" class="input mono" name="proxmoxHost" [(ngModel)]="proxmoxHost" placeholder="pve.lan or 192.168.1.10" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxHost']" />
-            @if (errors()['proxmoxHost']; as e) {
-              <span class="error">{{ e }}</span>
-            }
-            <span class="hint">{{ sourceLabel(s.proxmox.hostSource) }}.</span>
-          </div>
-          <div class="grid-2 compact">
+        <div class="proxmox-grid">
+          <div class="proxmox-col">
+            <div class="grid-2">
+              <div class="field">
+                <label for="pve-host">Host</label>
+                <input id="pve-host" class="input mono" name="proxmoxHost" [(ngModel)]="proxmoxHost" placeholder="pve.lan or 192.168.1.10" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxHost']" />
+                @if (errors()['proxmoxHost']; as e) {
+                  <span class="error">{{ e }}</span>
+                }
+                <span class="hint">{{ sourceLabel(s.proxmox.hostSource) }}.</span>
+              </div>
+              <div class="grid-2 compact">
+                <div class="field">
+                  <label for="pve-port">Port</label>
+                  <input id="pve-port" class="input" type="number" name="proxmoxPort" min="1" max="65535" [(ngModel)]="proxmoxPort" [class.invalid]="errors()['proxmoxPort']" />
+                  @if (errors()['proxmoxPort']; as e) {
+                    <span class="error">{{ e }}</span>
+                  }
+                </div>
+                <div class="field">
+                  <label for="pve-user">User</label>
+                  <input id="pve-user" class="input mono" name="proxmoxUser" [(ngModel)]="proxmoxUser" placeholder="root" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxUser']" />
+                  @if (errors()['proxmoxUser']; as e) {
+                    <span class="error">{{ e }}</span>
+                  }
+                </div>
+              </div>
+            </div>
+
             <div class="field">
-              <label for="pve-port">Port</label>
-              <input id="pve-port" class="input" type="number" name="proxmoxPort" min="1" max="65535" [(ngModel)]="proxmoxPort" [class.invalid]="errors()['proxmoxPort']" />
-              @if (errors()['proxmoxPort']; as e) {
+              <label for="pve-key"><app-icon name="key" [size]="14" /> SSH private key</label>
+              <textarea
+                id="pve-key"
+                class="input mono key-input"
+                name="proxmoxSshKey"
+                rows="4"
+                [(ngModel)]="sshKey"
+                [placeholder]="s.proxmox.sshKeyConfigured ? 'A key is configured – paste a new one to replace it' : '-----BEGIN OPENSSH PRIVATE KEY-----'"
+                autocomplete="off"
+                spellcheck="false"
+                [class.invalid]="errors()['proxmoxSshKey']"
+              ></textarea>
+              @if (errors()['proxmoxSshKey']; as e) {
                 <span class="error">{{ e }}</span>
               }
+              <span class="hint">
+                @if (s.proxmox.sshKeyConfigured) {
+                  Configured ({{ s.proxmox.sshKeySource === 'ui' ? 'saved here' : 'from environment' }}) – never shown again.
+                } @else {
+                  Not set.
+                }
+                Only key authentication is used (no passwords); keys protected with a passphrase are not supported.
+                The node's host key is trusted on the first connection and pinned afterwards. A user other than
+                <code>root</code> needs passwordless <code>sudo</code> for <code>pct</code>.
+              </span>
             </div>
+          </div>
+          <div class="proxmox-col">
             <div class="field">
-              <label for="pve-user">User</label>
-              <input id="pve-user" class="input mono" name="proxmoxUser" [(ngModel)]="proxmoxUser" placeholder="root" autocomplete="off" spellcheck="false" [class.invalid]="errors()['proxmoxUser']" />
-              @if (errors()['proxmoxUser']; as e) {
+              <label for="pve-cron">Check schedule (cron)</label>
+              <input id="pve-cron" class="input mono" name="containerCheckCron" [(ngModel)]="checkCron" placeholder="0 */6 * * *" autocomplete="off" spellcheck="false" [class.invalid]="errors()['containerCheckCron']" />
+              @if (errors()['containerCheckCron']; as e) {
                 <span class="error">{{ e }}</span>
               }
+              <span class="hint">
+                {{ sourceLabel(s.proxmox.checkCronSource) }}. <code>minute hour day month weekday</code> in the server's
+                time zone, e.g. <code>0 */6 * * *</code> (every 6 hours). Containers can override it. Updates are never
+                installed automatically.
+              </span>
+            </div>
+
+            <div class="field">
+              <label for="pve-concurrency">Parallel checks</label>
+              <input
+                id="pve-concurrency"
+                class="input"
+                type="number"
+                name="containerCheckConcurrency"
+                [min]="s.proxmox.minCheckConcurrency"
+                [max]="s.proxmox.maxCheckConcurrency"
+                [(ngModel)]="checkConcurrency"
+                [class.invalid]="errors()['containerCheckConcurrency']"
+              />
+              @if (errors()['containerCheckConcurrency']; as e) {
+                <span class="error">{{ e }}</span>
+              }
+              <span class="hint">
+                {{ sourceLabel(s.proxmox.checkConcurrencySource) }}. How many containers are checked at the same time
+                (scheduled checks and "Check all"), {{ s.proxmox.minCheckConcurrency }}–{{ s.proxmox.maxCheckConcurrency }}.
+                Each check uses one SSH connection.
+              </span>
+            </div>
+
+            <div class="field">
+              <label for="pve-backup-storage">Backup storage</label>
+              <div class="storage-row">
+                <select id="pve-backup-storage" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
+                  <option value="">– none (no backups before updates) –</option>
+                  @if (backupStorage && !isListed(backupStorage)) {
+                    <option [value]="backupStorage">{{ backupStorage }}</option>
+                  }
+                  @for (st of storages() ?? []; track st.name) {
+                    <option [value]="st.name" [disabled]="st.status !== 'active'">{{ storageLabel(st) }}</option>
+                  }
+                </select>
+                <button type="button" class="btn btn-ghost btn-sm" (click)="loadStorages()" [disabled]="loadingStorages() || !s.proxmox.configured">
+                  <app-icon name="refresh" [size]="14" /> {{ loadingStorages() ? 'Loading…' : 'Reload' }}
+                </button>
+              </div>
+              @if (errors()['backupStorage']; as e) {
+                <span class="error">{{ e }}</span>
+              }
+              @if (storagesError(); as e) {
+                <span class="error">Could not list storages: {{ e }}</span>
+              }
+              <span class="hint">
+                {{ sourceLabel(s.proxmox.backupStorageSource) }}. Storages of the node that accept backups. Backups are made
+                with <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
+                to the storage's retention (prune) settings.
+              </span>
+            </div>
+
+            <div class="field">
+              <app-switch label="Back up before updates by default" [checked]="backupDefault" (toggled)="backupDefault = !backupDefault" />
+              <span class="hint">
+                {{ sourceLabel(s.proxmox.backupBeforeUpdateSource) }}. Containers can override it, and every update
+                confirmation has a "Backup first" checkbox. A failed backup stops the update.
+              </span>
             </div>
           </div>
-        </div>
-
-        <div class="field">
-          <label for="pve-key"><app-icon name="key" [size]="14" /> SSH private key</label>
-          <textarea
-            id="pve-key"
-            class="input mono key-input"
-            name="proxmoxSshKey"
-            rows="4"
-            [(ngModel)]="sshKey"
-            [placeholder]="s.proxmox.sshKeyConfigured ? 'A key is configured – paste a new one to replace it' : '-----BEGIN OPENSSH PRIVATE KEY-----'"
-            autocomplete="off"
-            spellcheck="false"
-            [class.invalid]="errors()['proxmoxSshKey']"
-          ></textarea>
-          @if (errors()['proxmoxSshKey']; as e) {
-            <span class="error">{{ e }}</span>
-          }
-          <span class="hint">
-            @if (s.proxmox.sshKeyConfigured) {
-              Configured ({{ s.proxmox.sshKeySource === 'ui' ? 'saved here' : 'from environment' }}) – never shown again.
-            } @else {
-              Not set.
-            }
-            Only key authentication is used (no passwords); keys protected with a passphrase are not supported.
-            The node's host key is trusted on the first connection and pinned afterwards. A user other than
-            <code>root</code> needs passwordless <code>sudo</code> for <code>pct</code>.
-          </span>
-        </div>
-
-        <div class="field">
-          <label for="pve-cron">Check schedule (cron)</label>
-          <input id="pve-cron" class="input mono" name="containerCheckCron" [(ngModel)]="checkCron" placeholder="0 */6 * * *" autocomplete="off" spellcheck="false" [class.invalid]="errors()['containerCheckCron']" />
-          @if (errors()['containerCheckCron']; as e) {
-            <span class="error">{{ e }}</span>
-          }
-          <span class="hint">
-            {{ sourceLabel(s.proxmox.checkCronSource) }}. <code>minute hour day month weekday</code> in the server's
-            time zone, e.g. <code>0 */6 * * *</code> (every 6 hours). Containers can override it. Updates are never
-            installed automatically.
-          </span>
-        </div>
-
-        <div class="field">
-          <label for="pve-concurrency">Parallel checks</label>
-          <input
-            id="pve-concurrency"
-            class="input"
-            type="number"
-            name="containerCheckConcurrency"
-            [min]="s.proxmox.minCheckConcurrency"
-            [max]="s.proxmox.maxCheckConcurrency"
-            [(ngModel)]="checkConcurrency"
-            [class.invalid]="errors()['containerCheckConcurrency']"
-          />
-          @if (errors()['containerCheckConcurrency']; as e) {
-            <span class="error">{{ e }}</span>
-          }
-          <span class="hint">
-            {{ sourceLabel(s.proxmox.checkConcurrencySource) }}. How many containers are checked at the same time
-            (scheduled checks and "Check all"), {{ s.proxmox.minCheckConcurrency }}–{{ s.proxmox.maxCheckConcurrency }}.
-            Each check uses one SSH connection.
-          </span>
-        </div>
-
-        <div class="field">
-          <label for="pve-backup-storage">Backup storage</label>
-          <div class="storage-row">
-            <select id="pve-backup-storage" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
-              <option value="">– none (no backups before updates) –</option>
-              @if (backupStorage && !isListed(backupStorage)) {
-                <option [value]="backupStorage">{{ backupStorage }}</option>
-              }
-              @for (st of storages() ?? []; track st.name) {
-                <option [value]="st.name" [disabled]="st.status !== 'active'">{{ storageLabel(st) }}</option>
-              }
-            </select>
-            <button type="button" class="btn btn-ghost btn-sm" (click)="loadStorages()" [disabled]="loadingStorages() || !s.proxmox.configured">
-              <app-icon name="refresh" [size]="14" /> {{ loadingStorages() ? 'Loading…' : 'Reload' }}
-            </button>
-          </div>
-          @if (errors()['backupStorage']; as e) {
-            <span class="error">{{ e }}</span>
-          }
-          @if (storagesError(); as e) {
-            <span class="error">Could not list storages: {{ e }}</span>
-          }
-          <span class="hint">
-            {{ sourceLabel(s.proxmox.backupStorageSource) }}. Storages of the node that accept backups. Backups are made
-            with <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
-            to the storage's retention (prune) settings.
-          </span>
-        </div>
-
-        <div class="field">
-          <app-switch label="Back up before updates by default" [checked]="backupDefault" (toggled)="backupDefault = !backupDefault" />
-          <span class="hint">
-            {{ sourceLabel(s.proxmox.backupBeforeUpdateSource) }}. Containers can override it, and every update
-            confirmation has a "Backup first" checkbox. A failed backup stops the update.
-          </span>
         </div>
 
         @if (nodeTest(); as t) {

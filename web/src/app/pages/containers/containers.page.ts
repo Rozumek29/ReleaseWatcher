@@ -1,12 +1,13 @@
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
+import { Component, DestroyRef, ElementRef, computed, effect, inject, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import { AppSettings, Container, ContainerApp, DiscoveredContainer, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
+import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
@@ -17,6 +18,8 @@ import { targetLabel } from './target';
 
 /** How often the list is refreshed while a container reports a running task. */
 const BUSY_REFRESH_MS = 3000;
+/** Width at which the list and the detail pane stop sitting side by side (same as in the stylesheet). */
+const NARROW_QUERY = '(max-width: 1100px)';
 
 /** Proxmox LXC containers: pending apt/app updates and manual update actions. */
 @Component({
@@ -79,6 +82,49 @@ export class ContainersPage {
     this.containers().filter((c) => this.pendingCount(c) > 0),
   );
 
+  // Browsing many containers: filter tabs, search, sort and the selected container shown in the detail pane.
+  protected readonly preferences = inject(PreferencesService);
+  protected readonly filters = FILTERS;
+  protected readonly sorts = SORTS;
+  protected readonly filter = signal<ContainerFilter>('all');
+  protected readonly query = signal('');
+  protected readonly selectedId = signal<number | null>(null);
+  /** Narrow screens show either the list or the detail pane; true = the detail pane. */
+  protected readonly showDetail = signal(false);
+
+  protected readonly counts = computed(() => {
+    const counts: Record<ContainerFilter, number> = { all: 0, updates: 0, errors: 0, working: 0, inactive: 0 };
+    for (const c of this.containers()) {
+      for (const f of FILTERS) {
+        if (matchesFilter(c, f.value)) {
+          counts[f.value]++;
+        }
+      }
+    }
+    return counts;
+  });
+
+  protected readonly visible = computed(() => {
+    const filter = this.filter();
+    const query = this.query().trim().toLowerCase();
+    const sort = this.preferences.containerSort();
+    return this.containers()
+      .filter((c) => matchesFilter(c, filter) && (!query || searchText(c).includes(query)))
+      .sort((a, b) => compareContainers(a, b, sort));
+  });
+
+  /** The selected container, or the first one in the list when nothing (still visible) is selected. */
+  protected readonly selected = computed(() => {
+    const visible = this.visible();
+    return visible.find((c) => c.id === this.selectedId()) ?? visible[0] ?? null;
+  });
+  /** The selection as a one-item list, so switching containers re-creates (and re-animates) the detail pane. */
+  protected readonly selectedList = computed(() => {
+    const selected = this.selected();
+    return selected ? [selected] : [];
+  });
+
+  private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
@@ -147,6 +193,7 @@ export class ContainersPage {
     try {
       const created = await firstValueFrom(this.api.addContainer(vmid));
       this.containers.update((list) => [...list, created].sort((a, b) => a.vmid - b.vmid));
+      this.selectedId.set(created.id);
       this.scheduleRefresh(); // the first check of the new container runs in the background
       this.discovered.update((list) =>
         list.map((c) => (c.vmid === vmid ? { ...c, added: true } : c)),
@@ -196,6 +243,7 @@ export class ContainersPage {
     try {
       const created = await firstValueFrom(this.api.addNode());
       this.containers.update((list) => [created, ...list]);
+      this.selectedId.set(created.id);
       this.scheduleRefresh();
       this.addOpen.set(false);
       this.toast.success(`Added the Proxmox host (${created.name}) – checking it now.`);
@@ -394,6 +442,79 @@ export class ContainersPage {
     });
   }
 
+  protected select(container: Container): void {
+    this.selectedId.set(container.id);
+    this.confirming.set(null);
+    this.showDetail.set(true);
+    // Narrow screens swap the list for the detail pane – start reading it at its top.
+    this.scrollIntoView('.detail', 'start');
+  }
+
+  /** Narrow screens: back from the detail pane to the list, at the container that was open. */
+  protected backToList(): void {
+    this.showDetail.set(false);
+    const id = this.selected()?.id;
+    this.scrollIntoView(`[data-id="${id}"]`, 'center', true);
+  }
+
+  private scrollIntoView(selector: string, block: ScrollLogicalPosition, focus = false): void {
+    if (typeof matchMedia !== 'function' || !matchMedia(NARROW_QUERY).matches) {
+      return;
+    }
+    setTimeout(() => {
+      const element = this.host.nativeElement.querySelector<HTMLElement>(selector);
+      element?.scrollIntoView({ block });
+      if (focus) {
+        element?.focus({ preventScroll: true });
+      }
+    });
+  }
+
+  /** Arrow keys, Home and End move the selection through the list. */
+  protected onListKeydown(event: KeyboardEvent): void {
+    const list = this.visible();
+    const index = list.findIndex((c) => c.id === this.selected()?.id);
+    const next =
+      event.key === 'ArrowDown' ? index + 1
+      : event.key === 'ArrowUp' ? index - 1
+      : event.key === 'Home' ? 0
+      : event.key === 'End' ? list.length - 1
+      : null;
+    const target = next === null ? undefined : list[Math.max(0, Math.min(list.length - 1, next))];
+    if (!target) {
+      return;
+    }
+    event.preventDefault();
+    this.selectedId.set(target.id);
+    this.confirming.set(null);
+    const listEl = event.currentTarget as HTMLElement;
+    queueMicrotask(() =>
+      listEl.querySelector<HTMLButtonElement>(`[data-id="${target.id}"]`)?.focus(),
+    );
+  }
+
+  /** Short state shown in the list: what needs attention, or that all is well. */
+  protected stateOf(container: Container): ContainerState {
+    if (container.activeRunId !== null || this.isBusy(container)) {
+      return container.activeRunId === null && container.isBusy && !this.busyIds().has(container.id)
+        ? 'queued'
+        : 'working';
+    }
+    if (!container.isEnabled) {
+      return 'paused';
+    }
+    if (hasError(container)) {
+      return 'error';
+    }
+    if (container.updatesAvailable > 0) {
+      return 'updates';
+    }
+    if (container.status === 'stopped') {
+      return 'stopped';
+    }
+    return container.lastCheckedAt ? 'ok' : 'unchecked';
+  }
+
   protected cronOf(container: Container): string {
     return container.checkCron ?? this.globalCron();
   }
@@ -443,4 +564,76 @@ export class ContainersPage {
 
 export function kindLabel(kind: Run['kind']): string {
   return kind === 'check' ? 'Check' : kind === 'apt-upgrade' ? 'apt upgrade' : 'Application update';
+}
+
+export type ContainerFilter = 'all' | 'updates' | 'errors' | 'working' | 'inactive';
+/** State shown for a container in the list (one, by priority). */
+export type ContainerState = 'working' | 'queued' | 'error' | 'updates' | 'paused' | 'stopped' | 'ok' | 'unchecked';
+
+const FILTERS: readonly { value: ContainerFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'updates', label: 'Updates' },
+  { value: 'errors', label: 'Errors' },
+  { value: 'working', label: 'Working' },
+  { value: 'inactive', label: 'Stopped or paused' },
+];
+
+const SORTS: readonly { value: ContainerSort; label: string }[] = [
+  { value: 'attention', label: 'Needs attention first' },
+  { value: 'vmid', label: 'VMID' },
+  { value: 'name', label: 'Name' },
+];
+
+function hasError(c: Container): boolean {
+  return !!c.lastError || c.apps.some((a) => !!a.error);
+}
+
+function matchesFilter(c: Container, filter: ContainerFilter): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'updates':
+      return c.updatesAvailable > 0;
+    case 'errors':
+      return hasError(c);
+    case 'working':
+      return c.isBusy;
+    case 'inactive':
+      return !c.isEnabled || c.status === 'stopped';
+  }
+}
+
+/** Lower = shown higher with "Needs attention first". */
+function attentionRank(c: Container): number {
+  if (c.isBusy) return 0;
+  if (!c.isEnabled) return 5; // paused: not checked or updated, so nothing to act on
+  if (hasError(c)) return 1;
+  if (c.updatesAvailable > 0) return 2;
+  if (c.status === 'stopped') return 4;
+  return 3;
+}
+
+function compareContainers(a: Container, b: Container, sort: ContainerSort): number {
+  // The host stays on top, like the node in Proxmox's own tree.
+  const host = Number(b.kind === 'node') - Number(a.kind === 'node');
+  if (host !== 0) return host;
+  if (sort === 'attention') {
+    const rank = attentionRank(a) - attentionRank(b);
+    if (rank !== 0) return rank;
+  } else if (sort === 'name') {
+    const name = a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true });
+    if (name !== 0) return name;
+  }
+  return a.vmid - b.vmid;
+}
+
+/** What the search box matches: name, VMID, application names and their repositories. */
+function searchText(c: Container): string {
+  return [
+    c.name,
+    c.kind === 'node' ? 'host proxmox' : String(c.vmid),
+    ...c.apps.flatMap((a) => [a.name, a.repositoryFullName ?? '']),
+  ]
+    .join(' ')
+    .toLowerCase();
 }

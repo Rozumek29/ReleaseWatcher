@@ -40,6 +40,12 @@ describe('ContainersPage', () => {
 
   afterEach(() => http.verify());
 
+  /** Picks a container in the list, which shows it in the detail pane. */
+  const select = async (fixture: Parameters<typeof settle>[0], el: HTMLElement, name: string) => {
+    [...el.querySelectorAll<HTMLButtonElement>('.ct-item')].find((b) => b.textContent?.includes(name))!.click();
+    await settle(fixture);
+  };
+
   it('lists containers with pending apt packages and application updates', async () => {
     const { fixture, el } = await create([container()]);
 
@@ -138,19 +144,21 @@ describe('ContainersPage', () => {
   it('updates everything in one container after a confirmation', async () => {
     const single = container({ id: 4, vmid: 104, name: 'single', aptUpgradable: [], updatesAvailable: 1 });
     const { fixture, el } = await create([container(), single]);
-    const rows = el.querySelectorAll<HTMLElement>('li.row');
-    const rowButton = (row: HTMLElement, text: string) =>
-      [...row.querySelectorAll<HTMLButtonElement>('.actions button')].find((b) => b.textContent?.includes(text));
+    const detail = () => el.querySelector<HTMLElement>('.detail')!;
+    const detailButton = (text: string) =>
+      [...detail().querySelectorAll<HTMLButtonElement>('.actions button')].find((b) => b.textContent?.includes(text));
     // Only a container with more than one pending update gets the button.
-    expect(rowButton(rows[1]!, 'Update all')).toBeUndefined();
+    await select(fixture, el, 'single');
+    expect(detailButton('Update all')).toBeUndefined();
 
-    rowButton(rows[0]!, 'Update all (2)')!.click();
+    await select(fixture, el, 'vaultwarden');
+    detailButton('Update all (2)')!.click();
     await settle(fixture);
-    expect(rows[0]!.querySelector('.actions')?.textContent).toContain('Run 2 update(s) one after another?');
-    expect(rows[0]!.querySelector<HTMLInputElement>('.actions .backup-check input')!.checked).toBe(true);
-    rows[0]!.querySelector<HTMLInputElement>('.actions .backup-check input')!.click();
+    expect(detail().querySelector('.actions')?.textContent).toContain('Run 2 update(s) one after another?');
+    expect(detail().querySelector<HTMLInputElement>('.actions .backup-check input')!.checked).toBe(true);
+    detail().querySelector<HTMLInputElement>('.actions .backup-check input')!.click();
 
-    rowButton(rows[0]!, 'Yes')!.click();
+    detailButton('Yes')!.click();
     const request = http.expectOne('/api/containers/1/update-all');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: false });
@@ -163,21 +171,21 @@ describe('ContainersPage', () => {
     // Like a single update, the live log of the running update opens.
     http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
     await settle(fixture);
-    expect(el.querySelector('li.row')?.textContent).toContain('Working…');
-    expect(rowButton(el.querySelector<HTMLElement>('li.row')!, 'Update all')!.disabled).toBe(true);
+    expect(detail().textContent).toContain('Working…');
+    expect(detailButton('Update all')!.disabled).toBe(true);
     expect(el.querySelector('.run-dialog h2')?.textContent).toContain('apt upgrade');
   });
 
   it('opens the live log from the "Working…" badge and follows the next update of "Update all"', async () => {
     const { fixture, el } = await create([container({ isBusy: true, activeRunId: 9 }), container({ id: 2, vmid: 102, name: 'queued', isBusy: true })]);
+    // Waiting for its turn in "update all" – nothing to show yet.
+    await select(fixture, el, 'queued');
+    expect(el.querySelector('.detail .badge-btn')).toBeNull();
+    expect(el.querySelector('.detail')?.textContent).toContain('Queued');
+    await select(fixture, el, 'vaultwarden');
     vi.useFakeTimers();
     try {
-      const rows = el.querySelectorAll<HTMLElement>('li.row');
-      // Waiting for its turn in "update all" – nothing to show yet.
-      expect(rows[1]!.querySelector('.badge-btn')).toBeNull();
-      expect(rows[1]!.textContent).toContain('Queued');
-
-      rows[0]!.querySelector<HTMLButtonElement>('.badge-btn')!.click();
+      el.querySelector<HTMLButtonElement>('.detail .badge-btn')!.click();
       await vi.advanceTimersByTimeAsync(0);
       http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
       await vi.advanceTimersByTimeAsync(0);
@@ -297,7 +305,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     http.expectOne('/api/status').flush({});
 
-    expect(el.querySelectorAll('.list > li').length).toBe(2);
+    expect(el.querySelectorAll('.ct-list > li').length).toBe(2);
     expect(el.querySelector('.add-card')).toBeNull();
   });
 
@@ -332,7 +340,8 @@ describe('ContainersPage', () => {
     await settle(fixture);
     http.expectOne('/api/status').flush({});
 
-    const row = el.querySelector('.list > li')!;
+    // The new host is selected and shown in the detail pane.
+    const row = el.querySelector('.detail')!;
     expect(row.querySelector('.title-line')?.textContent).toContain('Host');
     expect(row.querySelector('.vmid')).toBeNull();
     expect(row.textContent).not.toContain('No applications configured');
@@ -364,5 +373,60 @@ describe('ContainersPage', () => {
     );
     expect(updateButtons.length).toBe(2);
     expect(updateButtons.some((b) => b.disabled)).toBe(false);
+  });
+  it('filters, searches and sorts the list and shows the selected container in the detail pane', async () => {
+    const base = container().apps[0]!;
+    const { fixture, el } = await create([
+      container({ id: 1, vmid: 103, name: 'zigbee', aptUpgradable: [], apps: [], updatesAvailable: 0 }),
+      container({ id: 2, vmid: 102, name: 'broken', lastError: 'ssh failed', aptUpgradable: [], apps: [], updatesAvailable: 0 }),
+      container({ id: 3, vmid: 101, name: 'vaultwarden' }),
+      container({ id: 4, vmid: 104, name: 'media', isEnabled: false, apps: [{ ...base, name: 'Jellyfin' }] }),
+      container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], aptUpgradable: [], updatesAvailable: 0 }),
+    ]);
+    const names = () => [...el.querySelectorAll('.ct-name')].map((n) => n.textContent?.trim());
+    const tab = (label: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('.tab')].find((t) => t.textContent?.includes(label))!;
+
+    // Needs attention first: the host on top, then errors, updates, fine, paused.
+    expect(names()).toEqual(['pve', 'broken', 'vaultwarden', 'zigbee', 'media']);
+    expect(tab('Errors').querySelector('.tab-count')?.textContent?.trim()).toBe('1');
+    expect(tab('Updates').querySelector('.tab-count')?.textContent?.trim()).toBe('2');
+    // Nothing picked yet: the first container is shown.
+    expect(el.querySelector('.detail .name')?.textContent).toContain('pve');
+
+    tab('Updates').click();
+    await settle(fixture);
+    expect(names()).toEqual(['vaultwarden', 'media']);
+    expect(el.querySelector('.detail .name')?.textContent).toContain('vaultwarden');
+
+    tab('All').click();
+    const search = el.querySelector<HTMLInputElement>('#ct-search')!;
+    search.value = 'jelly';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(names()).toEqual(['media']);
+
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    const sort = el.querySelector<HTMLSelectElement>('#ct-sort')!;
+    sort.value = 'name';
+    sort.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(names()).toEqual(['pve', 'broken', 'media', 'vaultwarden', 'zigbee']);
+
+    // Arrow keys move the selection.
+    await select(fixture, el, 'broken');
+    expect(el.querySelector('.detail')?.textContent).toContain('ssh failed');
+    el.querySelector('.ct-list')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+    await settle(fixture);
+    expect(el.querySelector('.detail .name')?.textContent).toContain('media');
+    expect(el.querySelector('.ct-item.selected')?.textContent).toContain('media');
+
+    tab('Errors').click();
+    search.value = 'nothing like this';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelector('.ct-list')).toBeNull();
+    expect(el.textContent).toContain('Nothing matches');
   });
 });
