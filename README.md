@@ -399,7 +399,7 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
 | `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`). While it runs, pass the previous `outputCursor` as `?after=` to receive only new output (`outputAppend: true`); otherwise `output` is the whole log |
 | `GET` | `/health` | Liveness |
-| `GET` | `/api/version` | Running version (`{ "version": "1.1.3" }`), public |
+| `GET` | `/api/version` | Running version (`{ "version": "1.2.0" }`), public |
 
 Everything except `/health`, `/api/version` and the public auth endpoints below needs a session cookie (401 otherwise).
 
