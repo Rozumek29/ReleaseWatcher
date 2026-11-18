@@ -1,141 +1,267 @@
+<div align="center">
+
+<img src="docs/images/logo.svg" width="88" height="88" alt="ReleaseWatcher logo">
+
 # ReleaseWatcher
 
-Watches selected GitHub repositories for new releases and sends a notification to Discord and/or by e-mail.
-It also keeps the LXC containers of a Proxmox node up to date: it checks pending `apt` packages and application
-versions on a cron schedule and runs updates (apt, community-scripts `update`, your own scripts) at the push of a button.
+**Self-hosted release tracker for your homelab.**<br>
+Get notified about new GitHub releases and keep your Proxmox LXC containers up to date – from one small app.
 
-- **Server:** [Bun](https://bun.sh) 1.4+ running TypeScript natively (no build step), `Bun.serve` HTTP server,
-  built-in `bun:sqlite`
-- **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
-- **Notifications:** Discord webhook and e-mail (SMTP, built-in client); optionally one summary per check run;
-  new channels plug in through the `Notifier` interface
-- One runtime dependency (`@simplewebauthn/server` for passkeys) – everything else is built into Bun; releases and
-  the Docker image ship the app as a single self-contained executable (`bun build --compile`)
+[![Version](https://img.shields.io/badge/version-1.2.0-5865f2)](#releases)
+[![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
+[![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)](https://angular.dev)
+[![Docker](https://img.shields.io/badge/ghcr.io-releasewatcher-2496ed?logo=docker&logoColor=white)](#docker)
+[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-e57000?logo=proxmox&logoColor=white)](#proxmox-lxc-containers)
+
+[Features](#features) · [Quick start](#quick-start) · [Installation](#installation) · [Configuration](#configuration) ·
+[API](#api) · [Development](#development)
+
+<br>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/repositories-dark.png">
+  <img src="docs/images/repositories-light.png" alt="Repositories page with watched repositories, installed versions and update badges" width="900">
+</picture>
+
+</div>
+
+---
+
+## Features
+
+**GitHub releases**
+
+- Watch any public or private repository (`owner/repo` or a GitHub URL); pre-releases are opt-in per repository.
+- Notifications on **Discord** (webhook) and by **e-mail** (built-in SMTP client) – one message per release or one
+  summary per check run.
+- **Installed version** of your self-hosted instance (e.g. Vaultwarden's `/api/version`): see
+  *Update available 1.34.1 → 1.34.3* at a glance, and skip releases you already run.
+- Rate-limit friendly: conditional requests with ETags, optional token (global or per repository).
+
+**Proxmox LXC containers**
+
+- Pending **apt** packages and **application** versions of every container (and of the Proxmox host) on a cron
+  schedule, over a single SSH connection – containers need no SSH server.
+- One-click updates: apt upgrades, community-scripts `update`, or your own scripts, with live console output and
+  run history. **Updates never run automatically.**
+- Optional **`vzdump` backup** before every update, **temporary CPU/RAM boost** for heavy updates, temporary start
+  of stopped containers.
+- Updates run as transient systemd units on the node, so they survive a dropped connection or a restart of
+  ReleaseWatcher.
+- **Detect applications** inside a container (community-scripts and well-known apps) and link them to their GitHub
+  repository.
+
+**App**
+
+- A single self-contained executable (Bun runtime + UI) or a Docker image; one SQLite file, no external services.
+- Login with password and/or **passkeys**; secrets encrypted at rest (AES-256-GCM).
+- Clean, responsive UI with light and dark themes; every setting can be changed in the UI without a restart.
+
+<table>
+  <tr>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/containers-dark.png">
+        <img src="docs/images/containers-light.png" alt="Containers page with pending apt packages and application updates">
+      </picture>
+      <p align="center"><sub>Containers – pending apt packages and application updates</sub></p>
+    </td>
+    <td width="50%">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark.png">
+        <img src="docs/images/settings-light.png" alt="Settings page with GitHub token, polling interval and Proxmox node">
+      </picture>
+      <p align="center"><sub>Settings – applied immediately, no restart</sub></p>
+    </td>
+  </tr>
+</table>
+
+## Quick start
+
+```bash
+docker run -d --name releasewatcher --restart unless-stopped \
+  -p 8080:8080 -v releasewatcher-data:/data \
+  ghcr.io/rozumek29/releasewatcher:latest
+
+docker logs releasewatcher 2>&1 | grep setupCode    # one-time code to create your account
+```
+
+Open <http://localhost:8080>, create the account with the setup code, then:
+
+1. **Settings → Notifications** – add a Discord webhook and/or SMTP server and send a test message.
+2. **Settings → General** – add a GitHub token (recommended) and, for containers, your Proxmox node.
+3. **Repositories** – add the repositories you want to watch.
+
+> [!NOTE]
+> If the image is private, log in first with `docker login ghcr.io` (a GitHub token with `read:packages`).
 
 ## How it works
 
-1. You add a repository (`owner/repo` or a GitHub URL) in the UI or via the API. A new database already watches
-   ReleaseWatcher itself (`rozumek29/releasewatcher`, stable releases only) with its own `/api/version` (on
-   `127.0.0.1:PORT`) as the installed-version URL, so the UI shows when an update is available; remove it like any
-   other repository – it is not added again.
+### Release notifications
+
+1. You add a repository in the UI or via the API. A new database already watches ReleaseWatcher itself
+   (`rozumek29/releasewatcher`, stable releases only, with its own `/api/version` as the installed-version URL), so
+   the UI tells you when an update is available. Remove it like any other repository – it is not added again.
 2. The first check only stores a **baseline** (the newest existing release), so you are not spammed with history.
 3. Every `POLL_INTERVAL_MINUTES` (default 15) the poller fetches recent releases using conditional requests
-   (`If-None-Match`/ETag; a `304` does not count against GitHub's rate limit).
-4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check),
-   then the baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
+   (`If-None-Match` / ETag – a `304` does not count against GitHub's rate limit).
+4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check), then the
+   baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
 5. **Settings → Notifications** chooses what is sent (new releases, application updates, apt updates, finished and
    failed updates) and whether one check run sends **one summary** (digest) instead of one message per item. The
-   summary collects what a run of all repositories or of the scheduled containers finds and is sent when the run
-   ends; checking a single repository or container still notifies right away. Held-back items are lost if the
-   process stops before the run ends (they are never sent twice).
+   summary is sent when a run of all repositories or of the scheduled containers ends; checking a single repository
+   or container still notifies right away. Held-back items are lost if the process stops before the run ends (they
+   are never sent twice).
 
-## Proxmox LXC containers
+**Installed version** (repository settings, sliders icon): an optional URL of your self-hosted instance, e.g.
+`https://vault.lan/api/version`. It is read on every check – plain text, a JSON string, common keys like `version`,
+or an explicit JSON path such as `data.version` – and **Test URL** previews the result. Optional request headers
+(`Authorization: Bearer …`, `X-Api-Key`) are stored encrypted and never returned by the API. Releases you already
+run (installed ≥ release) are not announced, and Discord messages include the installed version.
 
-1. In **Settings → Proxmox node** enter the host, SSH user (`root`, or a user allowed to run `pct` through
-   passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent,
-   keys with a passphrase are not supported). The node's host key is trusted on the first connection and pinned in
-   `known_hosts` next to the database. Use **Test connection** to verify.
-2. On the **Containers** page add containers found on the node (`pct list`) – one by one or all at once with
-   **Add all**. Commands run inside a container with
-   `pct exec <vmid> -- sh -lc '…'`, so containers need no SSH server of their own.
-   **Add host** adds the Proxmox node itself (apt only, no applications): it is checked like a container
-   (`apt list --upgradable`, on its own schedule, with notifications) and upgraded with `apt-get dist-upgrade` – the
-   upgrade Proxmox VE requires. There is no backup before host upgrades and the host is never rebooted; reboot it
-   yourself after a kernel update.
-3. Per container you can enable the **apt** check (`apt-get update` + `apt list --upgradable`; upgrade =
-   `apt-get -y upgrade`, keeping existing config files) and override the global check schedule with a cron
-   expression.
-   **Backups before updates:** choose a backup storage in Settings (listed from the node – e.g. a Proxmox Backup
-   Server or `local`) and whether to back up by default; a container can override the default, and every update
-   confirmation has a **Backup first** checkbox. The backup is a `vzdump` in snapshot mode (zstd, except on PBS),
-   retention follows the storage's prune settings, and a failed backup stops the update.
-   **Update all** (Containers page) updates every enabled container with pending updates, one container after
-   another: apt first, then applications with a newer version and an update command. The Proxmox host and
-   stopped containers that may not be started are left out. With **Backup first** each container is backed up
-   once, before its first update, if it is set to back up; a failed update skips the rest of that container.
-   While a container is busy, its **Working…** badge opens the live log of the update in progress (the log moves on
-   to the next update by itself); containers still waiting for their turn show **Queued**.
-   A container with more than one pending update also has its own **Update all (n)** button that runs just its
-   updates the same way (it waits in the queue when another "update all" is running). Applications are listed
-   alphabetically.
-4. Each container can have **applications**:
-   - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
-   - *latest version* – the newest release of a watched GitHub repository, a command, or none,
-   - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`.
-     Enable **TTY** for scripts that need a terminal (it runs in a pseudo-terminal via `script`); every update has a
-     timeout (default 30 min). Update commands run with `PHS_SILENT=1` and `DEBIAN_FRONTEND=noninteractive`, so a
-     plain `update` of community-scripts skips its *Silent / Verbose / Cancel* menu and updates silently.
+### Proxmox LXC containers
 
-   **Detect applications** (container settings) looks inside a running container and suggests what it finds:
-   a community-scripts container (`/usr/bin/update` → `ct/<app>.sh`) with its version file (`~/.<app>` or
-   `/opt/<App>_version.txt`) and `update` as update command, or – without community-scripts – `/opt/*_version.txt`
-   files and version files of well-known applications. The GitHub repository comes from a built-in list of popular
-   applications or from the `# Source:` line of the app's community-scripts script (downloaded from
-   `raw.githubusercontent.com`). Nothing is saved until you click **Add**: that watches the repository (or reuses it
-   when it is already watched) and links it as the latest version; applications already in the container are marked
-   **Added**.
-5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
-   notify Discord / e-mail when something new is pending (each pending item is reported once). A check is a single SSH
-   connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
-   timeout; up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. **Updates never run
-   automatically** – start them from the UI; the console output is shown live and kept in the run history
-   (last 50 runs per container). Only one task runs in a container at a time.
-   **Stopped containers** are not started by default: a check only reads their status (not an error, no
-   notification) and keeps the results of the last check made while it was running; updates are refused until the
-   container runs again (the live status is read before the backup and the update). Enable **Start temporarily when
-   stopped** in the container settings to have checks (scheduled ones too) and updates start it with `pct start`, wait
-   up to a minute for its network and shut it down again afterwards (`pct shutdown`, forced after 2 minutes).
-6. **Updates survive a dropped connection.** Backups, apt upgrades and application updates run on the node as
-   transient systemd units (`systemd-run`, unit `releasewatcher-run-<run>-<step>`, output in
-   `/var/tmp/releasewatcher/`), not inside the SSH session. When the connection drops, ReleaseWatcher reconnects and
-   reads the output again; when ReleaseWatcher itself restarts, it re-attaches to the running update and finishes the
-   run. systemd stops an update at its timeout.
-7. **Resources during updates:** a container can get more **CPU cores** and **memory** for its updates (e.g. an
-   update that compiles Rust). They are raised with `pct set` right before the apt upgrade or application update
-   (never lowered) and set back to the previous values afterwards – also when the update fails. The previous values
-   are saved first, so they are restored on the next start if ReleaseWatcher stopped in between.
+<details>
+<summary><b>Connecting the node</b></summary>
 
-> Interactive scripts (whiptail dialogs) cannot be answered from the UI. When an update shows a prompt – a
-> whiptail/dialog menu, a `[y/N]` question, a dpkg config-file question, “Press Enter” – and prints nothing more for
-> 45 seconds, it is stopped and the run fails with a message instead of waiting for its timeout. Prefer
-> non-interactive update commands.
+In **Settings → General → Proxmox node** enter the host, SSH user (`root`, or a user allowed to run `pct` through
+passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent, no
+keys with a passphrase). The node's host key is trusted on the first connection and pinned in `known_hosts` next to
+the database. **Test connection** verifies the setup.
 
-## Quick start (Docker)
+Tip: restrict the key on the node to ReleaseWatcher's IP (`from="<ip>"` in `authorized_keys`) and use a key
+dedicated to it.
 
-```bash
-cp .env.example .env        # paste your Discord webhook URL (and optionally a GitHub token)
-docker compose up -d --build
+</details>
+
+<details>
+<summary><b>Containers, checks and applications</b></summary>
+
+- **Add containers** found on the node (`pct list`) one by one or with **Add all**. Commands run inside a container
+  with `pct exec <vmid> -- sh -lc '…'`.
+- **Add host** adds the Proxmox node itself (apt only): it is checked like a container and upgraded with
+  `apt-get dist-upgrade`, as Proxmox VE requires. There is no backup before host upgrades and the host is never
+  rebooted – reboot it yourself after a kernel update.
+- **apt check:** `apt-get update` + `apt list --upgradable`; upgrade = `apt-get -y upgrade`, keeping existing
+  config files.
+- **Applications** per container:
+  - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
+  - *latest version* – the newest release of a watched GitHub repository, a command, or none,
+  - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`. Enable **TTY** for scripts
+    that need a terminal. Update commands run with `PHS_SILENT=1` and `DEBIAN_FRONTEND=noninteractive`, so
+    community-scripts' `update` skips its menu. Every update has a timeout (default 30 min).
+- **Detect applications** (container settings) looks inside a running container: a community-scripts container
+  (`/usr/bin/update` → `ct/<app>.sh`) with its version file, or `/opt/*_version.txt` and version files of well-known
+  applications. The GitHub repository comes from a built-in list or from the `# Source:` line of the
+  community-scripts script. Nothing is saved until you click **Add**.
+- **Schedule:** checks run on `CONTAINER_CHECK_CRON` (default every 6 hours, server time zone – set `TZ`); each
+  container can override it. A check is one SSH connection (`pct status` + one `pct exec` with the apt check and all
+  version commands); up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. Each pending item is
+  notified once.
+- **Stopped containers** are not started by default: a check only reads their status and keeps the last results;
+  updates are refused. Enable **Start temporarily when stopped** to have checks and updates start the container
+  (`pct start`), wait for its network and shut it down afterwards.
+
+</details>
+
+<details>
+<summary><b>Updates, backups and resources</b></summary>
+
+- **Updates are manual only.** The console output is shown live and kept in the run history (last 50 runs per
+  container). Only one task runs in a container at a time.
+- **Update all** (Containers page) updates every enabled container with pending updates, one after another: apt
+  first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
+  update skips the rest of that container. A container with several pending updates has its own **Update all (n)**.
+- **Backups before updates:** choose a backup storage (e.g. Proxmox Backup Server or `local`) and a default in
+  Settings; containers can override it and every confirmation has a **Backup first** checkbox. The backup is a
+  `vzdump` in snapshot mode (zstd, except on PBS); retention follows the storage's prune settings; a failed backup
+  stops the update.
+- **Resilient runs:** backups, upgrades and updates run on the node as transient systemd units
+  (`releasewatcher-run-<run>-<step>`, output in `/var/tmp/releasewatcher/`). A dropped connection is re-established
+  and the output re-read; after a restart ReleaseWatcher re-attaches and finishes the run.
+- **Resources during updates:** a container can get more CPU cores and memory for its updates (e.g. one that
+  compiles Rust). They are raised with `pct set` right before the update and restored afterwards – also on failure
+  or after a restart.
+
+> [!WARNING]
+> Interactive prompts (whiptail menus, `[y/N]` questions, dpkg config-file questions) cannot be answered from the
+> UI. An update that shows one and prints nothing for 45 seconds is stopped with a message. Prefer non-interactive
+> update commands.
+
+</details>
+
+## Installation
+
+| Method | Best for | Needs |
+| --- | --- | --- |
+| [Docker](#docker) | any Docker host | Docker |
+| [`bun run deploy`](#proxmox-lxc-one-command) | a dedicated Proxmox LXC, installed from your computer | Bun + SSH access to the node |
+| [Manual](#manual-install-systemd) | any Linux x64 machine | nothing – one executable |
+
+### Docker
+
+Images are published to `ghcr.io/rozumek29/releasewatcher` for every release:
+
+| Tag | Example | Updated on |
+| --- | --- | --- |
+| `latest` | – | every stable release |
+| `<major>.<minor>` | `1.2` | every patch release of that line |
+| `<version>` | `1.2.0` | never (pinned) |
+| `beta-<version>` | `beta-1.3.0` | pre-releases only |
+
+`docker-compose.yml` with the published image:
+
+```yaml
+services:
+  releasewatcher:
+    image: ghcr.io/rozumek29/releasewatcher:1.2
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - releasewatcher-data:/data   # database, encryption key, known_hosts, setup code
+    env_file:
+      - path: .env                  # optional – everything can be set in the UI
+        required: false
+
+volumes:
+  releasewatcher-data:
 ```
 
-Open http://localhost:8080. The SQLite database lives in the `releasewatcher-data` volume.
+The repository's own `docker-compose.yml` builds the image from source instead (`docker compose up -d --build`).
+The image runs the compiled executable as an unprivileged user on `debian:trixie-slim` with the OpenSSH client
+(used to reach the Proxmox node).
 
-## Native install (systemd, e.g. in its own LXC)
+### Proxmox LXC (one command)
 
-**One command from your computer** (needs SSH access to the Proxmox node and a running Debian/Ubuntu LXC with
-*Nesting* enabled – Proxmox's default):
+From a clone of this repository on your computer – needs SSH access to the Proxmox node and a running Debian/Ubuntu
+LXC with *Nesting* enabled (Proxmox's default):
 
 ```bash
+bun install
 bun run deploy -- --ct 251            # first install and every later update
 ```
 
-It builds the executable, uploads it through the node (`pct push`) and runs `deploy/install.sh` inside the container:
-system user, directories, systemd service and `/etc/releasewatcher/releasewatcher.env`. On the first install it
-prints the **setup code** to create your account in the UI (see Login). Running it again updates the app (the
-previous executable stays as `releasewatcher.previous`) and keeps the configuration, the account and the data.
+It builds the executable, uploads it through the node (`pct push`) and runs `deploy/install.sh` in the container:
+system user, directories, systemd service and `/etc/releasewatcher/releasewatcher.env`. The first install prints the
+**setup code**. Running it again updates the app (the previous executable is kept as `releasewatcher.previous`) and
+keeps the configuration, the account and the data.
 
-- The node host, SSH user, port and key default to what your local instance has in **Settings → Proxmox node**;
-  override with `--node <host>`, `--user`, `--port`, `--identity <key file>`.
-- `--db` also copies your local database (repositories, containers, tokens, settings) when the container has none
-  yet; `--force-db` replaces an existing one.
-- `deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
+| Option | Description |
+| --- | --- |
+| `--node <host>`, `--user`, `--port`, `--identity <key file>` | SSH access to the node; default to **Settings → Proxmox node** of your local instance |
+| `--db` | also copy your local database when the container has none yet |
+| `--force-db` | replace an existing database in the container |
 
-### Manual install
+`deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
 
-The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node or
-Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. As root in the container:
+### Manual install (systemd)
+
+The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node
+or Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. As root:
 
 ```bash
-# 1. Dependencies: the OpenSSH client reaches the Proxmox node
+# 1. Dependencies (the OpenSSH client reaches the Proxmox node)
 apt-get update && apt-get install -y openssh-client ca-certificates
 
 # 2. System user and directories
@@ -144,271 +270,233 @@ install -d -o releasewatcher -g releasewatcher -m 750 /var/lib/releasewatcher   
 install -d -m 755 /opt/releasewatcher                                           # executable
 install -d -o root -g releasewatcher -m 750 /etc/releasewatcher                 # configuration
 
-# 3. Executable – from the GitHub release (private repository: `gh release download v1.2.3 -R <owner>/ReleaseWatcher
-#    -p 'releasewatcher-*-linux-x64'` or the release page) or built with `bun scripts/compile.ts --target=bun-linux-x64`
-install -m 755 releasewatcher-1.2.3-linux-x64 /opt/releasewatcher/releasewatcher
+# 3. Executable from the GitHub release
+gh release download v1.2.0 -R rozumek29/releasewatcher -p 'releasewatcher-*-linux-x64'
+install -m 755 releasewatcher-1.2.0-linux-x64 /opt/releasewatcher/releasewatcher
 
 # 4. Configuration (optional – everything can be set in the UI; behind a reverse proxy set PUBLIC_URL)
 install -m 640 -g releasewatcher .env.example /etc/releasewatcher/releasewatcher.env
-nano /etc/releasewatcher/releasewatcher.env
-# SSH key as a file instead of pasting it in the UI:
-#   install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key
-#   PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key   (in releasewatcher.env)
 
 # 5. Service (deploy/releasewatcher.service from this repository)
 install -m 644 releasewatcher.service /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now releasewatcher
-journalctl -u releasewatcher -f                      # logs (JSON lines)
-cat /var/lib/releasewatcher/setup-code               # one-time code to create the account in the UI
+systemctl daemon-reload && systemctl enable --now releasewatcher
+cat /var/lib/releasewatcher/setup-code               # one-time code to create the account
 ```
 
-Open `http://<container-ip>:8080`. `DATABASE_PATH` is set by the unit (`/var/lib/releasewatcher/releasewatcher.db`);
-the pinned host key of the node is stored next to it.
+Open `http://<container-ip>:8080`. Logs: `journalctl -u releasewatcher -f` (JSON lines).
 
-- **Update:** replace `/opt/releasewatcher/releasewatcher` with the new executable and `systemctl restart releasewatcher`
-  (database migrations run on start). Keep the old file to roll back.
-- **Version:** `/opt/releasewatcher/releasewatcher --version` prints the installed version and exits (nothing else
-  starts) – use it as the *version command* when ReleaseWatcher's own container is in the Containers page.
-- **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all three `releasewatcher.db*`
-  files, plus `encryption.key` that decrypts the secrets in it) and `/etc/releasewatcher`.
-- **Hardening:** the unit runs as an unprivileged user with a read-only system (`ProtectSystem=strict`, writes only
-  to `/var/lib/releasewatcher`). In an unprivileged LXC this needs *nesting* (Proxmox enables it by default); if the
-  service fails with `status=226/NAMESPACE`, enable *Options → Features → Nesting* or remove the hardening lines.
-- **SSH key on the node:** restrict it to the container's IP (`from="<container-ip>"` in `authorized_keys`).
+<details>
+<summary><b>Operating a native install</b></summary>
 
-## Login
+- **Update:** replace `/opt/releasewatcher/releasewatcher` and `systemctl restart releasewatcher` (migrations run on
+  start). Keep the old file to roll back.
+- **Version:** `releasewatcher --version` prints the installed version and exits – use it as the *version command*
+  when ReleaseWatcher's own container is on the Containers page.
+- **SSH key as a file:** `install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key` and set
+  `PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key`.
+- **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all `releasewatcher.db*`
+  files, **plus `encryption.key`**) and `/etc/releasewatcher`.
+- **Hardening:** the unit runs as an unprivileged user with a read-only system (`ProtectSystem=strict`). In an
+  unprivileged LXC this needs *nesting*; if the service fails with `status=226/NAMESPACE`, enable
+  *Options → Features → Nesting* or remove the hardening lines.
 
-The UI and the API require a login – **one account** that can sign in with its **password** and/or **passkeys**.
+</details>
 
-- **First start:** without an account the app logs a one-time **setup code** (also in `setup-code` next to the
-  database, and printed by `bun run deploy`). The UI shows the setup screen: enter the code, a user name and a
-  password (10+ characters). Without the code nobody else can claim a fresh installation.
-- **Upgrading from Basic auth** (installs made with an earlier `bun run deploy` have a generated password in
-  `/etc/releasewatcher/releasewatcher.env` – `grep BASIC_AUTH` it): if `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` are
-  set and no account exists, the
-  account is created with them on the first start – just sign in with the same credentials.
-- **Passkeys** (Account page → *Add passkey*) need a secure context: **HTTPS with a host name** (or `localhost`).
-  Put the app behind a reverse proxy (Caddy, Nginx Proxy Manager, Traefik …) and set
-  `PUBLIC_URL=https://watcher.example.com` (pins the WebAuthn relying party) and `TRUST_PROXY=true`. A passkey is bound
-  to that host name. The password keeps working everywhere.
-- **Sessions:** HttpOnly, `SameSite=Strict` cookie (`Secure` over HTTPS), 30 days, extended while you use the app;
-  the Account page lists them and signs them out. Changing the password signs out all other sessions. Repeated
-  failed logins lock the client out with growing delays; state-changing requests from other sites are refused.
-- **Reset the login** (forgot the password, no passkey at hand) – removes the account, its passkeys and sessions,
-  nothing else:
+## Login and security
 
-  ```bash
-  # in the container (on the node: prefix each command with `pct exec <vmid> --`)
-  sed -i '/^BASIC_AUTH_/d' /etc/releasewatcher/releasewatcher.env   # else the old credentials come back on restart
-  runuser -u releasewatcher -- env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db \
-    /opt/releasewatcher/releasewatcher --reset-login
-  systemctl restart releasewatcher
-  cat /var/lib/releasewatcher/setup-code
-  ```
+The UI and the API require a login – **one account** that signs in with a **password** and/or **passkeys**.
 
-  Then open the UI and create the account again with the new setup code.
+- **First start:** the app logs a one-time **setup code** (also written to `setup-code` next to the database).
+  Enter it in the UI with a user name and a password (10+ characters) – nobody else can claim a fresh installation.
+- **Passkeys** (Account → *Add passkey*) need HTTPS with a host name (or `localhost`). Put the app behind a reverse
+  proxy (Caddy, Nginx Proxy Manager, Traefik …) and set `PUBLIC_URL=https://watcher.example.com` and
+  `TRUST_PROXY=true`.
+- **Sessions:** HttpOnly `SameSite=Strict` cookie (`Secure` over HTTPS), 30 days, extended while in use; listed and
+  revocable on the Account page. Repeated failed logins lock the client out with growing delays, and
+  state-changing requests from other sites are refused.
+- **Secrets at rest** – Discord webhook, SMTP password, GitHub tokens, the SSH private key and installed-version
+  header values – are encrypted with AES-256-GCM. The key comes from `ENCRYPTION_KEY` or from `encryption.key`,
+  generated next to the database. **Back up the key**: without it the app refuses to start on that database. The
+  API never returns secrets (only masked hints).
+- Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens.
 
-## Local development
+> [!CAUTION]
+> **The UI can run commands as root on your Proxmox node.** Keep it on a private network or behind HTTPS – over plain
+> HTTP the password and the session cookie travel in clear text. The server also fetches the installed-version URLs
+> you configure (usually LAN addresses).
 
-Requirements: Bun 1.4.4+ and Node.js 26 (the Angular CLI still runs on Node; Bun is only its package
-manager). The server and the Angular UI are one Bun workspace, so a single `bun install` in the repository
-root installs both.
+<details>
+<summary><b>Upgrading from Basic auth</b></summary>
 
-Bun loads `.env` from the working directory automatically.
+Installs made with an earlier `bun run deploy` have a generated password in `/etc/releasewatcher/releasewatcher.env`
+(`grep BASIC_AUTH` it). When `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` are set and no account exists, the
+account is created with them on the first start – sign in with the same credentials.
+
+</details>
+
+<details>
+<summary><b>Reset the login</b> (forgot the password, no passkey at hand)</summary>
+
+Removes the account, its passkeys and sessions – nothing else:
 
 ```bash
-cp .env.example .env        # fill in DISCORD_WEBHOOK_URL (or set it later in the UI)
-bun install
-bun start                   # builds the UI if needed, then serves app + API on http://localhost:8080
+# in the container (on the node: prefix each command with `pct exec <vmid> --`)
+sed -i '/^BASIC_AUTH_/d' /etc/releasewatcher/releasewatcher.env   # else the old credentials come back on restart
+runuser -u releasewatcher -- env DATABASE_PATH=/var/lib/releasewatcher/releasewatcher.db \
+  /opt/releasewatcher/releasewatcher --reset-login
+systemctl restart releasewatcher
+cat /var/lib/releasewatcher/setup-code
 ```
 
-`bun start` rebuilds the UI only when `web/` changed since the last build, so later starts are instant.
+Then create the account again with the new setup code.
 
-For development with live reload:
+</details>
 
-```bash
-bun run dev                 # API on :8080 (restarts on change) + Angular dev server on http://localhost:4200
-```
+## Configuration
 
-Open http://localhost:4200; the Angular dev server proxies `/api` to the API on :8080 (`web/proxy.conf.json`,
-adjust it if you change `PORT`).
+Everything below can be set with environment variables (or `.env` in the working directory – see
+[`.env.example`](.env.example)). Most of it can also be changed in **Settings**: values saved in the UI are stored
+in SQLite, apply immediately and override the environment; clearing a value falls back to the environment.
 
-| Script              | What it does                                                         |
-| ------------------- | -------------------------------------------------------------------- |
-| `bun start`         | build the UI if it is missing or outdated, start the app             |
-| `bun run dev`       | API in watch mode + Angular dev server, side by side (`--parallel`)  |
-| `bun run build`     | force a production build of the UI into `public/`                    |
-| `bun run serve`     | start the app without touching the UI build                          |
-| `bun run test`      | server tests (`bun test`) + UI tests (Vitest)                        |
-| `bun run typecheck` | type-check the server (TypeScript 7)                                 |
-| `bun run compile`   | single-file executable (server + UI) into `dist/` for this platform  |
-| `bun run package`   | release artifacts in `release/` (see Releases)                       |
-| `bun run deploy`    | build and install/update the app in a Proxmox LXC (see Native install) |
-
-Use `bun run test`, not plain `bun test` – the latter runs only the server tests (`bunfig.toml` limits
-it to `test/`).
-
-## Releases
-
-`bun run package` builds both release artifacts in `release/`:
-
-- `releasewatcher-<version>/` – server sources + production UI + runtime dependencies for Bun (no `bun install`
-  needed):
-
-  ```bash
-  cp .env.example .env   # optional, settings can also be changed in the UI
-  bun start              # http://localhost:8080
-  ```
-
-- `releasewatcher-<version>-linux-x64` – one self-contained executable (`bun build --compile --bytecode`,
-  Bun runtime and UI embedded); the target machine needs nothing installed:
-
-  ```bash
-  chmod +x releasewatcher-1.2.3-linux-x64
-  ./releasewatcher-1.2.3-linux-x64   # reads .env from the working directory
-  ```
-
-  About 110 MB – almost all of it is the Bun runtime (our code and UI are ~5 MB). The release also has it packed
-  as `releasewatcher-<version>-linux-x64.tar.xz` (~40 MB download): `tar -xJf releasewatcher-1.2.3-linux-x64.tar.xz`.
-
-Compile flags live in `scripts/compile.ts`; the target is `TARGET` in `scripts/package.ts`.
-The Docker image runs the same kind of executable on a distroless base (no Bun, Node or shell inside).
-
-Pushing a tag runs `.github/workflows/release.yml`:
-
-| Tag          | GitHub Release                                                    | Docker image (`ghcr.io/<owner>/releasewatcher`) |
-| ------------ | ----------------------------------------------------------------- | ----------------------------------------------- |
-| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip` + `releasewatcher-1.2.3-linux-x64` (+ `.tar.xz`) | `1.2.3`, `1.2`, `latest`       |
-| `beta-1.2.3` | pre-release with the same files                                   | `beta-1.2.3`                                    |
-
-```bash
-git tag v1.2.3 && git push origin v1.2.3
-```
-
-Push only the tag – the workflow creates the GitHub Release with the files. A release created by hand on github.com
-has no files (and makes the workflow's `gh release create` fail if it already exists for that tag).
-
-To run the published image instead of building locally, replace `build: .` in `docker-compose.yml` with
-`image: ghcr.io/<owner>/releasewatcher:latest` (log in with `docker login ghcr.io` if the package is private).
-
-## UI
-
-- **Repositories** – add/remove repositories, filter (active, paused, errors), search, toggle pre-releases
-  and pausing per repository, check a single repository on demand.
-- **List or grid** layout for repositories (toggle in the Repositories toolbar; remembered per browser).
-- Each repository shows its owner's GitHub avatar (also used as the author icon in Discord messages).
-- **Repository settings** (sliders icon) – optional **installed version URL** of your self-hosted instance,
-  e.g. Vaultwarden's `https://vault.lan/api/version`. The version is read on every check (plain text, a JSON
-  string, common keys like `version`, or an explicit JSON dot path such as `data.version`). You then see
-  *Update available 1.31.0 → 1.32.0* / *Up to date*, Discord messages include the installed version, and
-  releases you already run (installed ≥ release) are not announced. A **Test URL** button previews the result.
-  Optional **request headers** (e.g. `Authorization: Bearer …`, `X-Api-Key`) are sent with the request; their
-  values are stored encrypted in SQLite and never returned by the API (the UI only sees header names).
-- **Containers** – Proxmox LXC containers (and optionally the host) in a list with a detail pane: filter tabs
-  (updates, errors, working, stopped or paused), search by name, VMID or application, and sorting (needs attention
-  first, VMID, name – remembered per browser). Arrow keys move through the list; the detail pane shows apt packages,
-  applications and their update, check, history and settings actions. On narrow screens the list and the details
-  take turns.
-- **Settings** – two tabs. *General*: GitHub token with live API quota, polling interval, Proxmox node.
-  *Notifications* (`/settings?tab=notifications`): Discord webhook, mention and bot name; e-mail (SMTP server,
-  STARTTLS/TLS, login, sender, recipients); each with a test message; and *What to send* – switches per notification
-  type and the one-summary-per-check mode. Changes apply immediately; values saved in the UI are stored in SQLite and override
-  the environment variables below (clearing a value falls back to the environment).
-- The sidebar shows when the next check runs and has a **Check all now** button; its footer shows the running
-  version and links to the GitHub repository.
-- The server keeps the built UI in memory: files with a build hash in their name are served with
-  `Cache-Control: immutable` (one year), `index.html` and icons are revalidated with an `ETag` (`304 Not Modified`),
-  and text files are sent zstd-compressed to browsers that accept it. API responses are `Cache-Control: no-store`.
-
-## Configuration (environment variables / `.env`)
+<details open>
+<summary><b>Notifications</b></summary>
 
 | Variable | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `DISCORD_WEBHOOK_URL` | – | Discord channel webhook. Empty = Discord disabled. |
 | `DISCORD_MENTION` | – | Text above the embed, e.g. `@here` or `<@&ROLE_ID>`. |
 | `DISCORD_USERNAME` | `ReleaseWatcher` | Display name of the webhook. |
 | `DISCORD_AVATAR_URL` | – | Avatar of the webhook. |
 | `DISCORD_MAX_BODY_LENGTH` | `1500` | Release notes are truncated to this length. |
-| `SMTP_HOST` | – | SMTP server for e-mail notifications. E-mail is enabled when host, `EMAIL_FROM` and `EMAIL_TO` are set. |
+| `SMTP_HOST` | – | SMTP server. E-mail is enabled when host, `EMAIL_FROM` and `EMAIL_TO` are set. |
 | `SMTP_PORT` | `587` | SMTP port. |
-| `SMTP_SECURITY` | `starttls` | `starttls` (plain connection upgraded with STARTTLS, usually 587), `tls` (TLS from the start, usually 465) or `none`. Certificates are always verified. |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | Login (AUTH PLAIN or LOGIN); empty = no login. The password is stored encrypted when saved in the UI and never returned by the API. |
+| `SMTP_SECURITY` | `starttls` | `starttls` (usually 587), `tls` (usually 465) or `none`. Certificates are always verified. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | Login (AUTH PLAIN or LOGIN); empty = no login. |
 | `EMAIL_FROM` | – | Sender, `alerts@example.com` or `ReleaseWatcher <alerts@example.com>`. |
 | `EMAIL_TO` | – | Recipients, comma-separated (up to 20). |
 | `EMAIL_MAX_BODY_LENGTH` | `5000` | Release notes in e-mails are truncated to this length. |
-| `NOTIFICATION_DIGEST` | `false` | `true` = what one check run finds is sent as one summary message per channel. |
-| `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos – fine-grained token with access to those repositories and **Contents: Read-only** (Metadata: Read-only is added automatically); a classic token needs `repo`. Fine-grained tokens cannot read repositories of another user you only collaborate on – give such a repository its own token (of the owner) in its settings; per-repository tokens override this one and are never returned by the API. |
+| `NOTIFICATION_DIGEST` | `false` | `true` = what one check run finds is sent as one summary per channel. |
+
+</details>
+
+<details open>
+<summary><b>GitHub and polling</b></summary>
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GITHUB_TOKEN` | – | Optional PAT – raises the limit from 60 to 5000 requests/hour and allows private repositories (fine-grained: **Contents: Read-only**; classic: `repo`). A repository can have its own token, e.g. for a repository of another user. |
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
-| `DATABASE_PATH` | `releasewatcher.db` | SQLite file. |
-| `ENCRYPTION_KEY` | – | Key for secrets in the database: 32 bytes, base64 or hex (`openssl rand -base64 32`). Empty = `encryption.key` next to the database, generated on the first start. See *Security note*. |
-| `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
-| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
-| `PROXMOX_HOST` | – | Proxmox node for container checks. Empty = containers disabled. |
+
+> Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check (fewer with ETag
+> hits), so for more than ~10 repositories at a 15-minute interval add a token.
+
+</details>
+
+<details open>
+<summary><b>Proxmox</b></summary>
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PROXMOX_HOST` | – | Proxmox node. Empty = containers disabled. |
 | `PROXMOX_SSH_PORT` | `22` | SSH port of the node. |
 | `PROXMOX_SSH_USER` | `root` | SSH user; non-root users need passwordless `sudo` for `pct`. |
 | `PROXMOX_SSH_KEY_FILE` | – | Path to the private key (read at start; the key can also be pasted in the UI). |
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
-| `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default container check schedule (5-field cron, `@daily`, …). |
-| `CONTAINER_CHECK_CONCURRENCY` | `3` | How many containers are checked at the same time (1–10). |
-| `PROXMOX_BACKUP_STORAGE` | – | Storage for backups (`vzdump`) made before updates. |
-| `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default (containers and single updates can change it). |
-| `PUBLIC_URL` | – | Public address behind a reverse proxy, e.g. `https://watcher.example.com`; pins the origin and the passkey relying party; container notifications on Discord link to its Containers page. |
-| `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` (login lockout, session list) – only behind a proxy that sets it. |
-| `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from Basic auth: create the login account with these credentials when none exists. |
+| `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default check schedule (5-field cron, `@daily`, …). |
+| `CONTAINER_CHECK_CONCURRENCY` | `3` | Containers checked at the same time (1–10). |
+| `PROXMOX_BACKUP_STORAGE` | – | Storage for `vzdump` backups made before updates. |
+| `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default. |
 
-> Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check
-> (fewer with ETag hits), so for more than ~10 repositories at a 15 min interval add a token.
+</details>
+
+<details open>
+<summary><b>Server, login and storage</b></summary>
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` / `HOST` | `8080` / `0.0.0.0` | HTTP binding. |
+| `DATABASE_PATH` | `releasewatcher.db` | SQLite file (`/data/releasewatcher.db` in Docker). |
+| `ENCRYPTION_KEY` | – | Key for secrets in the database: 32 bytes, base64 or hex (`openssl rand -base64 32`). Empty = `encryption.key` next to the database. |
+| `PUBLIC_URL` | – | Public address behind a reverse proxy; pins the origin and the passkey relying party, and Discord container notifications link to it. |
+| `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` – only behind a proxy that sets it. |
+| `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from Basic auth (see above). |
+| `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
+| `TZ` | system | Time zone of the cron schedules. |
+
+</details>
+
+> [!TIP]
+> Set `ENCRYPTION_KEY` in the environment (or as a Docker secret) instead of relying on `encryption.key` when you
+> want a copy of the whole data directory to be useless without it.
 
 ## API
 
+A JSON REST API under `/api` – the same one the UI uses. Everything except `/health`, `/api/version` and the public
+auth endpoints requires a session cookie (`401` otherwise). Errors are
+[problem details](https://www.rfc-editor.org/rfc/rfc9457) (`{ status, title, detail?, errors? }`); long operations
+return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
+
+<details>
+<summary><b>Repositories, settings and status</b></summary>
+
 | Method | Route | Description |
-|---|---|---|
+| --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
-| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` – the token is optional, see below |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases": true, "isEnabled": true, "installedVersionUrl"?: "https://…", "installedVersionField"?: "data.version", "installedVersionHeaders"?: [{ "name": "Authorization", "value": "Bearer …" }] }` – a header with `value: null` keeps the saved value; `"githubToken"`: omit = keep, `null` = remove |
-| `POST` | `/api/installed-version/test` | `{ "url": "https://…", "field": null, "headers": [], "repositoryId"?: 1 }` → detected version and response preview |
+| `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"? }` – a header with `value: null` keeps the saved value; `githubToken`: omit = keep, `null` = remove |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately |
-| `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |
-| `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers, or only to `{ "notifier": "email" }` (`409` when that one is not configured); ignores the notification types and digest mode |
-| `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
-| `PUT` | `/api/settings` | Partial update; `null` resets a value to the environment default |
-| `GET` | `/api/status` | App version, poller state (next/last run), repository and container counts |
+| `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
+| `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |
+| `POST` | `/api/notifiers/test` | Send a test release to all enabled notifiers, or only to `{ "notifier": "email" }` (`409` when not configured) |
+| `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
+| `PUT` | `/api/settings` | Partial update; omitted = keep, `null` = reset to the environment value |
+| `GET` | `/api/status` | App version, poller state, repository and container counts |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
+| `GET` | `/api/version` | Running version, e.g. `{ "version": "1.2.0" }` (public) |
+| `GET` | `/health` | Liveness (public) |
+
+</details>
+
+<details>
+<summary><b>Proxmox containers and runs</b></summary>
+
+| Method | Route | Description |
+| --- | --- | --- |
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
-| `GET` | `/api/proxmox/storages` | Storages that accept backups (`pvesm status --content backup`) |
-| `GET` | `/api/containers` | Added containers with their applications and pending updates; `isBusy` and `activeRunId` (the run in progress – its live log is `GET /api/runs/:id`) |
-| `POST` | `/api/containers` | `{ "vmid": 101, "name"?: "…" }` – adds a container and starts a check |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?: true \| false \| null, "startWhenStopped"?: true \| false, "checkCron"?: "0 3 * * *" \| null, "updateCores"?: 4 \| null, "updateMemoryMb"?: 4096 \| null }` – `null` = global default (resources: unchanged), omitted = keep |
-| `DELETE` | `/api/containers/:id` | Remove a container (409 while a task runs) |
-| `POST` | `/api/containers/node` | Add the Proxmox host itself (`kind: "node"`, `vmid: 0`, named after `hostname`) and start a check → `201`; `409` when already added. apt-upgrade of the host runs `dist-upgrade` without a backup (`{ "backup": true }` → `409`) |
-| `POST` | `/api/containers/add-all` | Add every container of the node not added yet and queue their checks → `201` with the added containers (`200` with `[]` when there is nothing to add) |
-| `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (202) |
-| `POST` | `/api/containers/update-all` | Update every enabled container with pending updates one after another – apt, then applications; not the Proxmox host. Body `{ backup?: boolean }` (`false` = no backups, otherwise each container's default). 202 with `{ containers, updates }`, 409 while running |
-| `POST` | `/api/containers/:id/update-all` | Run every pending update of one container one after another (apt, then applications) – queued next to a running "update all". Body `{ backup?: boolean }` overrides the container's default (one backup before the first update). 202 with `{ containers, updates }` (200 with zeros when nothing is pending), 409 while its updates are queued or running |
+| `GET` | `/api/proxmox/storages` | Storages that accept backups |
+| `GET` | `/api/containers` | Added containers with applications, pending updates, `isBusy` and `activeRunId` |
+| `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container and start a check |
+| `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
+| `POST` | `/api/containers/add-all` | Add every container of the node not added yet |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"? }` – `null` = global default, omitted = keep |
+| `DELETE` | `/api/containers/:id` | Remove a container (`409` while a task runs) |
+| `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (`202`) |
+| `POST` | `/api/containers/update-all` | Update every enabled container with pending updates, one after another; `{ "backup"? }` → `202` with `{ containers, updates }` |
+| `POST` | `/api/containers/:id/update-all` | Run all pending updates of one container; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
-| `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` → `202` with the run; optional `{ "backup": true \| false }` overrides the backup default |
+| `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` (host: `dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
-| `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container: `[{ "name", "slug", "versionCommand", "installedVersion", "updateCommand", "repository", "repositoryId", "alreadyAdded" }]` (nothing is saved; `409` for a stopped container or the host) |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
-| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202` with the run; optional `{ "backup": true \| false }` |
+| `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |
+| `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container (nothing is saved) |
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
-| `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`). While it runs, pass the previous `outputCursor` as `?after=` to receive only new output (`outputAppend: true`); otherwise `output` is the whole log |
-| `GET` | `/health` | Liveness |
-| `GET` | `/api/version` | Running version (`{ "version": "1.2.0" }`), public |
+| `GET` | `/api/runs/:id` | One run with its output; while running, pass the previous `outputCursor` as `?after=` to get only new output |
 
-Everything except `/health`, `/api/version` and the public auth endpoints below needs a session cookie (401 otherwise).
+</details>
 
-| Method | Path | Description |
+<details>
+<summary><b>Authentication</b></summary>
+
+| Method | Route | Description |
 | --- | --- | --- |
 | `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys }` (public) |
 | `POST` | `/api/auth/setup` | `{ "code", "username", "password" }` – first account, only while none exists (public) |
-| `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; 429 after repeated failures) |
-| `POST` | `/api/auth/passkey/options` / `/api/auth/passkey/login` | Passkey sign-in: options with a `challengeId`, then `{ challengeId, response }` (public) |
+| `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; `429` after repeated failures) |
+| `POST` | `/api/auth/passkey/options`, `/api/auth/passkey/login` | Passkey sign-in: options with a `challengeId`, then `{ challengeId, response }` (public) |
 | `POST` | `/api/auth/logout` | End the current session |
 | `PUT` | `/api/auth/account` | `{ "currentPassword", "username"?, "newPassword"? }` – a new password signs out other sessions |
 | `GET` / `POST` | `/api/auth/passkeys` | List passkeys / register one (`{ name, response }` after `POST /api/auth/passkeys/options`) |
@@ -416,83 +504,118 @@ Everything except `/health`, `/api/version` and the public auth endpoints below 
 | `GET` / `DELETE` | `/api/auth/sessions` | List sessions / sign out all other sessions |
 | `DELETE` | `/api/auth/sessions/:id` | Sign out one session |
 
-## Adding a new notifier (e.g. Slack, Teams, e-mail)
+</details>
 
-1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()` for releases,
-   `notifyContainerUpdates()` for pending container updates, `notifyUpdateResult()` for finished/failed updates and
-   `notifyDigest()` for a summary of several of them).
-2. Register it in `src/notifiers/index.ts`. Notifiers receive their options through a callback, so values
-   changed in the UI (`settings.current`) apply without a restart:
+## Development
 
-```ts
-export function createNotifiers(config: Config, settings: SettingsService): Notifier[] {
-  return [
-    new DiscordNotifier(() => ({ ...config.discord, webhookUrl: settings.current.discordWebhookUrl /* … */ })),
-    new SlackNotifier(() => ({ ...config.slack, webhookUrl: settings.current.slackWebhookUrl })),
-  ];
-}
+**Requirements:** [Bun](https://bun.sh) 1.4.4+ and Node.js 26 (the Angular CLI runs on Node; Bun is its package
+manager). The server and the UI are one Bun workspace.
+
+```bash
+cp .env.example .env        # optional – everything can also be set in the UI
+bun install
+bun run dev                 # API on :8080 (watch) + Angular dev server on http://localhost:4200
 ```
 
-3. If the channel should be configurable from the UI, add its fields to `Settings` in `src/settings.ts`
-   (with validation), to the settings DTO and `PUT /api/settings` schema in `src/app.ts`, and to the
-   Settings page in `web/`.
+The Angular dev server proxies `/api` to :8080 (`web/proxy.conf.json`). `bun start` serves the production build on
+<http://localhost:8080> and rebuilds the UI only when `web/` changed.
 
-`NotificationDispatcher` sends every notification to all enabled notifiers, applies the notification types from
-the settings and collects digests (`dispatcher.batch()` around a check run); a failure in one channel does not block
-the others. The UI picks up the new channel automatically.
+| Script | What it does |
+| --- | --- |
+| `bun start` | build the UI if missing or outdated, start the app |
+| `bun run dev` | API in watch mode + Angular dev server |
+| `bun run build` | production build of the UI into `public/` |
+| `bun run serve` | start the app without touching the UI build |
+| `bun run test` | server tests (`bun test`) + UI tests (Vitest) – use this, not plain `bun test` |
+| `bun run typecheck` | type-check the server (TypeScript 7) |
+| `bun run compile` | single-file executable (server + UI) into `dist/` |
+| `bun run package` | release artifacts in `release/` |
+| `bun run deploy` | build and install/update the app in a Proxmox LXC |
 
-## Project layout
+Before opening a pull request run the same checks as CI:
 
+```bash
+bun run typecheck && bun run test && bun run build
 ```
+
+**Tech stack:** Bun 1.4 (`Bun.serve`, `bun:sqlite`, TypeScript run natively), Angular 22 (standalone components,
+signals, zoneless), SQLite. The only runtime dependency of the server is `@simplewebauthn/server` (passkeys).
+
+Contributor guides: [`AGENTS.md`](AGENTS.md) (workflow, conventions, secrets, checklists) and
+[`DESIGN.md`](DESIGN.md) (architecture, API conventions, UI design system).
+
+<details>
+<summary><b>Project layout</b></summary>
+
+```text
 src/
   main.ts            entry point: config, DB, HTTP server, poller, graceful shutdown
   app.ts             HTTP routes (Bun.serve) + static UI with SPA fallback
-  log.ts             minimal JSON-lines logger
-  embedded-ui.ts     UI files embedded into the compiled executable (filled by scripts/compile.ts)
-  validation.ts      request body/param validation
   domain.ts          types, repository-name parsing, new-release selection
-  db.ts              bun:sqlite store with simple versioned migrations
-  secret-box.ts      AES-256-GCM encryption of secrets stored in the database + key loading
-  github.ts          GitHub REST client (ETag aware)
-  checker.ts         checks one/all repositories, dispatches notifications
+  version.ts         version parsing/comparison, installed-version reading
+  checker.ts         checks repositories, dispatches notifications
   poller.ts          interval scheduler (interval can change at runtime)
+  github.ts          GitHub REST client (ETag aware)
+  db.ts              bun:sqlite store with versioned migrations
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars
-  version.ts         version parsing/comparison, reading the installed version of a self-hosted app
-  auth/              login: account + passkeys (@simplewebauthn/server) + sessions, setup code, routes
-  cron.ts            5-field cron parser (container check schedule)
-  http.ts            problem-details response helpers
-  notifiers/         Notifier interface, dispatcher (types, digest), Discord, e-mail + minimal SMTP client
-  proxmox/           LXC containers: SSH client (system OpenSSH), pct/apt parsing, store, service
-                     (checks + updates + run log), cron scheduler, HTTP routes
+  secret-box.ts      AES-256-GCM encryption of secrets at rest
+  auth/              account, passkeys, sessions, setup code, routes
+  notifiers/         Notifier interface, dispatcher (types, digest), Discord, e-mail + SMTP client
+  proxmox/           SSH client, pct/apt parsing, store, service (checks, updates, runs), scheduler, routes
+  cron.ts · http.ts · validation.ts · log.ts · static-ui.ts · embedded-ui.ts
 test/                bun:test tests
-deploy/
-  releasewatcher.service  systemd unit for a native install (see "Native install")
-  install.sh              installs/updates the service inside the target machine (used by deploy-lxc.ts)
-scripts/
-  ensure-web.ts      builds the UI for `bun start` when needed
-  compile.ts         `bun build --compile` flags, used by `bun run compile`, packaging and the Dockerfile
-  package.ts         builds the release folder for `bun run package`
-  deploy-lxc.ts      `bun run deploy`: build + install/update in a Proxmox LXC through the node
 web/                 Angular UI (builds into public/)
-  src/app/app.*              shell: sidebar, poller status, toasts
-  src/app/pages/repositories watched repositories
-  src/app/pages/containers   Proxmox LXC containers, applications, run log
-  src/app/pages/settings     General (GitHub, polling, Proxmox node) and Notifications (Discord, e-mail, types) tabs
-  src/app/pages/login, setup, account   sign-in, first-run setup, password / passkeys / sessions
+deploy/              systemd unit + install.sh for native installs
+scripts/             compile, package, deploy-lxc, ensure-web
 ```
 
-## Security note
+</details>
 
-The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
-Secrets in the SQLite file – the Discord webhook URL, the SMTP password, GitHub tokens (global and per repository),
-the Proxmox SSH private key and installed-version header values – are **encrypted with AES-256-GCM**. The key comes from
-`ENCRYPTION_KEY` or, when it is not set, from `encryption.key`, generated next to the database on the first start
-(plain-text secrets of older versions are encrypted then). A copied database or backup alone does not reveal the
-secrets; to also protect against someone who can read the whole data directory, set `ENCRYPTION_KEY` in the
-environment (e.g. `/etc/releasewatcher/releasewatcher.env` or a Docker secret) instead of using the key file.
-**Back up the key** – without it the app refuses to start on that database (restore the key or delete the database).
-**The UI can run commands as root on your Proxmox node.** It requires a login (see Login); keep it on a private
-network or behind HTTPS (reverse proxy) – over plain HTTP the password and the session cookie travel in clear text.
-Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens. The SSH private key is stored encrypted in the SQLite file
-when pasted in the UI (or read from `PROXMOX_SSH_KEY_FILE`); it is never returned by the API. Consider a dedicated
-key used only by ReleaseWatcher.
+<details>
+<summary><b>Adding a notifier</b> (Slack, Teams, …)</summary>
+
+1. Implement `Notifier` from `src/notifiers/notifier.ts`: `notify()` for releases, `notifyContainerUpdates()` for
+   pending container updates, `notifyUpdateResult()` for finished/failed updates and `notifyDigest()` for summaries.
+2. Register it in `src/notifiers/index.ts`. Options come through a callback, so values changed in the UI apply
+   without a restart:
+
+   ```ts
+   export function createNotifiers(config: Config, settings: SettingsService): Notifier[] {
+     return [
+       new DiscordNotifier(() => ({ ...config.discord, webhookUrl: settings.current.discordWebhookUrl /* … */ })),
+       new SlackNotifier(() => ({ ...config.slack, webhookUrl: settings.current.slackWebhookUrl })),
+     ];
+   }
+   ```
+
+3. To configure it from the UI, add its fields to `Settings` in `src/settings.ts`, the settings DTO and
+   `PUT /api/settings` schema in `src/app.ts`, and the Settings page in `web/`.
+
+`NotificationDispatcher` sends every notification to all enabled notifiers, applies the notification types and
+collects digests; a failure in one channel does not block the others.
+
+</details>
+
+## Releases
+
+Push a tag – `.github/workflows/release.yml` builds and publishes everything:
+
+| Tag | GitHub Release | Docker image |
+| --- | --- | --- |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64` (+ `.tar.xz`) | `1.2.3`, `1.2`, `latest` |
+| `beta-1.2.3` | pre-release with the same files | `beta-1.2.3` |
+
+```bash
+git tag v1.2.3 && git push origin v1.2.3
+```
+
+Push only the tag – a release created by hand on github.com has no files and makes the workflow fail.
+
+Release artifacts (`bun run package`):
+
+- **`releasewatcher-<version>-linux-x64`** – one self-contained executable (`bun build --compile --bytecode`, Bun
+  runtime and UI embedded). About 110 MB, almost all of it the Bun runtime; also packed as `.tar.xz` (~40 MB).
+- **`releasewatcher-<version>.zip`** – server sources, production UI and runtime dependencies for an installed Bun
+  (`bun start`, no `bun install` needed).
+
+Compile flags live in `scripts/compile.ts`; the target is `TARGET` in `scripts/package.ts`.
