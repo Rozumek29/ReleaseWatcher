@@ -201,10 +201,14 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE container_runs ADD COLUMN resume TEXT;`,
 ];
 
+/** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
+export const SELF_REPOSITORY = { owner: 'rozumek29', name: 'releasewatcher' } as const;
+
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
   private readonly db: Database;
   private readonly secrets: SecretBox;
+  private isNew = false;
 
   /**
    * `secrets` encrypts tokens, keys and header values. It may be omitted only for an in-memory database (tests):
@@ -227,6 +231,29 @@ export class RepositoryStore {
       this.db.close();
       throw error;
     }
+  }
+
+  /** True when this instance created the database (it had no schema yet), false for an existing one. */
+  get created(): boolean {
+    return this.isNew;
+  }
+
+  /**
+   * Adds ReleaseWatcher's own repository to a database created just now. Called once at startup, so a user who
+   * removes the repository later does not get it back. `installedVersionUrl` (this server's `/api/version`) lets the
+   * checker compare the running version with the latest release. Returns the added repository, or `null`.
+   */
+  seedNewDatabase(installedVersionUrl: string | null = null): WatchedRepository | null {
+    if (!this.isNew || this.exists(SELF_REPOSITORY.owner, SELF_REPOSITORY.name)) {
+      return null;
+    }
+    const repo = this.add(SELF_REPOSITORY.owner, SELF_REPOSITORY.name, false);
+    if (installedVersionUrl) {
+      repo.installedVersionUrl = installedVersionUrl;
+      repo.installedVersionField = 'version';
+      this.save(repo);
+    }
+    return repo;
   }
 
   /** The shared connection (used by other stores such as `ContainerStore`). */
@@ -393,6 +420,7 @@ export class RepositoryStore {
 
   private migrate(): void {
     const { user_version: version } = this.db.query<{ user_version: number }, []>('PRAGMA user_version').get()!;
+    this.isNew = version === 0;
     const apply = this.db.transaction((index: number) => {
       this.db.exec(MIGRATIONS[index]!);
       this.db.exec(`PRAGMA user_version = ${index + 1}`);

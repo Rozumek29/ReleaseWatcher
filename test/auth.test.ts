@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { afterEach, describe, it } from 'bun:test';
+import { APP_VERSION } from '../src/app-version.ts';
 import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
@@ -64,7 +65,7 @@ describe('login', () => {
     return browser;
   };
 
-  it('starts in setup mode: only the UI, /health and the auth endpoints are public', async () => {
+  it('starts in setup mode: only the UI, /health, /api/version and the auth endpoints are public', async () => {
     await start();
     const browser = client();
     assert.deepEqual((await browser.request('GET', '/api/auth/state')).json(), {
@@ -77,6 +78,9 @@ describe('login', () => {
     assert.equal((await browser.request('GET', '/api/settings')).status, 401);
     assert.equal((await browser.request('POST', '/api/containers/check-all')).status, 401);
     assert.equal((await browser.request('GET', '/health')).status, 200);
+    const version = await browser.request('GET', '/api/version');
+    assert.equal(version.status, 200);
+    assert.deepEqual(version.json(), { version: APP_VERSION });
   });
 
   it('creates the account only with the setup code, then signs in', async () => {

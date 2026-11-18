@@ -13,7 +13,10 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
 
 ## How it works
 
-1. You add a repository (`owner/repo` or a GitHub URL) in the UI or via the API.
+1. You add a repository (`owner/repo` or a GitHub URL) in the UI or via the API. A new database already watches
+   ReleaseWatcher itself (`rozumek29/releasewatcher`, stable releases only) with its own `/api/version` (on
+   `127.0.0.1:PORT`) as the installed-version URL, so the UI shows when an update is available; remove it like any
+   other repository – it is not added again.
 2. The first check only stores a **baseline** (the newest existing release), so you are not spammed with history.
 3. Every `POLL_INTERVAL_MINUTES` (default 15) the poller fetches recent releases using conditional requests
    (`If-None-Match`/ETag; a `304` does not count against GitHub's rate limit).
@@ -380,8 +383,9 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
 | `GET` | `/api/runs/:id` | One run with its console output (poll while `status` is `running`). While it runs, pass the previous `outputCursor` as `?after=` to receive only new output (`outputAppend: true`); otherwise `output` is the whole log |
 | `GET` | `/health` | Liveness |
+| `GET` | `/api/version` | Running version (`{ "version": "1.1.3" }`), public |
 
-Everything except `/health` and the public auth endpoints below needs a session cookie (401 otherwise).
+Everything except `/health`, `/api/version` and the public auth endpoints below needs a session cookie (401 otherwise).
 
 | Method | Path | Description |
 | --- | --- | --- |

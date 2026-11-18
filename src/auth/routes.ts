@@ -7,6 +7,7 @@ import type { Session } from './store.ts';
 /** Routes reachable without a session (everything else under /api requires one). */
 export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   '/health',
+  '/api/version',
   '/api/auth/state',
   '/api/auth/setup',
   '/api/auth/login',

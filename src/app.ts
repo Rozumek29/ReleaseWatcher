@@ -622,6 +622,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         },
 
         '/api/status': { GET: () => Response.json(statusDto()) },
+        // Public: lets ReleaseWatcher itself (or any monitor) read the running version without a session.
+        '/api/version': { GET: () => Response.json({ version: APP_VERSION }) },
         // Checks all enabled repositories right away.
         '/api/check-all': {
           POST: async () => {

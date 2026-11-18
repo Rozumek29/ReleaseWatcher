@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { compareVersions, extractVersion, fetchInstalledVersion, InstalledVersionError, validateHeaders } from '../src/version.ts';
+import {
+  compareVersions,
+  extractVersion,
+  fetchInstalledVersion,
+  InstalledVersionError,
+  localVersionUrl,
+  validateHeaders,
+} from '../src/version.ts';
+
+describe('localVersionUrl', () => {
+  it('uses the loopback address for a wildcard bind and keeps a specific one', () => {
+    assert.equal(localVersionUrl('0.0.0.0', 8080), 'http://127.0.0.1:8080/api/version');
+    assert.equal(localVersionUrl('::', 9000), 'http://127.0.0.1:9000/api/version');
+    assert.equal(localVersionUrl('192.168.1.5', 8080), 'http://192.168.1.5:8080/api/version');
+    assert.equal(localVersionUrl('fd00::5', 8080), 'http://[fd00::5]:8080/api/version');
+  });
+});
 
 describe('compareVersions', () => {
   const cases: [string, string, '<' | '=' | '>'][] = [

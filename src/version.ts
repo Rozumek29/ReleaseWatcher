@@ -202,6 +202,16 @@ export async function fetchInstalledVersion(
   return { version, preview: body.length > 300 ? `${body.slice(0, 300)}…` : body };
 }
 
+/**
+ * URL of this server's own `/api/version` endpoint as reachable from the same machine. A wildcard bind address
+ * (`0.0.0.0`, `::`) is replaced by the loopback address; IPv6 addresses are put in brackets.
+ */
+export function localVersionUrl(host: string, port: number): string {
+  const wildcard = host === '' || host === '0.0.0.0' || host === '::' || host === '[::]';
+  const address = wildcard ? '127.0.0.1' : host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `http://${address}:${port}/api/version`;
+}
+
 export function validateVersionUrl(value: string): string | null {
   try {
     const url = new URL(value);

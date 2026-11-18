@@ -12,6 +12,7 @@ import { createNotifiers } from './notifiers/index.ts';
 import { SshShell } from './proxmox/ssh.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
+import { localVersionUrl } from './version.ts';
 
 // `--version` prints the version and exits before touching the configuration, the database or the port – usable as
 // the version command of the container app that runs ReleaseWatcher itself.
@@ -40,6 +41,10 @@ if (process.argv.includes('--reset-login')) {
   console.log('Login reset: the account, its passkeys and all sessions were removed.');
   console.log('Open the UI and create the account again with the setup code from the log / setup-code file.');
   process.exit(0);
+}
+const seeded = store.seedNewDatabase(localVersionUrl(config.host, config.port));
+if (seeded) {
+  log.info({ repository: `${seeded.owner}/${seeded.name}` }, 'New database – watching ReleaseWatcher itself for new releases');
 }
 const settings = new SettingsService(store, config);
 const notifiers = createNotifiers(config, settings);
