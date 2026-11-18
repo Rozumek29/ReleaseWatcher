@@ -1,16 +1,38 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, BackupStorage, RateLimit, SettingSource, SettingsPatch } from '../../core/models';
+import {
+  AppSettings,
+  BackupStorage,
+  NotificationPreferences,
+  RateLimit,
+  SettingSource,
+  SettingsPatch,
+  SmtpSecurity,
+} from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 
-type Section = 'discord' | 'github' | 'polling' | 'proxmox';
+type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'proxmox';
+type Tab = 'general' | 'notifications';
+
+/** Default port of each SMTP security mode (used when the port still has the previous mode's default). */
+const SMTP_PORTS: Record<SmtpSecurity, number> = { starttls: 587, tls: 465, none: 25 };
+
+/** The notification kinds shown as switches, in order. */
+const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'>; label: string; hint: string }[] = [
+  { key: 'releases', label: 'New releases', hint: 'A watched repository published a new release.' },
+  { key: 'appUpdates', label: 'Application updates', hint: 'A newer version of an application in a container.' },
+  { key: 'aptUpdates', label: 'apt package updates', hint: 'Upgradable packages in a container or on the Proxmox host.' },
+  { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or apt upgrade started here completed.' },
+  { key: 'updateFailed', label: 'Update failed', hint: 'An update or apt upgrade started here failed.' },
+];
 
 const INTERVAL_PRESETS = [5, 15, 30, 60, 180, 360, 1440];
 
@@ -24,11 +46,19 @@ export class SettingsPage implements OnInit {
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
   private readonly statusService = inject(StatusService);
+  private readonly router = inject(Router);
+  private readonly route = inject(ActivatedRoute);
+
+  protected readonly tab = signal<Tab>(
+    this.route.snapshot.queryParamMap.get('tab') === 'notifications' ? 'notifications' : 'general',
+  );
 
   protected readonly settings = signal<AppSettings | null>(null);
   protected readonly saving = signal<Section | null>(null);
   protected readonly errors = signal<Record<string, string>>({});
-  protected readonly testing = signal(false);
+  /** Channel whose test is being sent. */
+  protected readonly testing = signal<string | null>(null);
+  protected readonly showSmtpPassword = signal(false);
   protected readonly rateLimit = signal<RateLimit | null>(null);
   protected readonly rateLimitError = signal<string | null>(null);
   protected readonly loadingRateLimit = signal(false);
@@ -54,6 +84,23 @@ export class SettingsPage implements OnInit {
   protected checkConcurrency: number | null = 3;
   protected backupStorage = '';
   protected backupDefault = false;
+  protected smtpHost = '';
+  protected smtpPort: number | null = 587;
+  protected smtpSecurity: SmtpSecurity = 'starttls';
+  protected smtpUsername = '';
+  protected smtpPassword = '';
+  protected emailFrom = '';
+  protected emailTo = '';
+  protected preferences: NotificationPreferences = {
+    digest: false,
+    releases: true,
+    appUpdates: true,
+    aptUpdates: true,
+    updateSucceeded: false,
+    updateFailed: false,
+  };
+
+  protected readonly kinds = NOTIFICATION_KINDS;
 
   protected readonly presets = INTERVAL_PRESETS;
 
@@ -87,6 +134,71 @@ export class SettingsPage implements OnInit {
 
   protected async resetWebhook(): Promise<void> {
     await this.save('discord', { discordWebhookUrl: null }, 'Webhook removed.');
+  }
+
+  protected selectTab(tab: Tab): void {
+    this.tab.set(tab);
+    void this.router.navigate([], {
+      relativeTo: this.route,
+      queryParams: { tab: tab === 'general' ? null : tab },
+      replaceUrl: true,
+    });
+  }
+
+  /** Switching the security mode also switches a port that still has the old mode's default. */
+  protected setSmtpSecurity(security: SmtpSecurity): void {
+    if (this.smtpPort === null || Object.values(SMTP_PORTS).includes(Number(this.smtpPort))) {
+      this.smtpPort = SMTP_PORTS[security];
+    }
+    this.smtpSecurity = security;
+  }
+
+  protected async saveEmail(): Promise<void> {
+    const port = this.smtpPort === null || `${this.smtpPort}` === '' ? null : Number(this.smtpPort);
+    const patch: SettingsPatch = {
+      // Empty values reset to the environment default.
+      smtpHost: this.smtpHost.trim() || null,
+      smtpPort: port,
+      smtpSecurity: this.smtpSecurity,
+      smtpUsername: this.smtpUsername.trim() || null,
+      emailFrom: this.emailFrom.trim() || null,
+      emailTo: this.emailTo.trim() || null,
+    };
+    // The password is never shown; an empty field keeps the saved one.
+    if (this.smtpPassword) {
+      patch.smtpPassword = this.smtpPassword;
+    }
+    await this.save('email', patch, 'E-mail settings saved.');
+  }
+
+  protected async resetSmtpPassword(): Promise<void> {
+    await this.save('email', { smtpPassword: null }, 'SMTP password removed.');
+  }
+
+  protected toggle(key: keyof NotificationPreferences): void {
+    this.preferences = { ...this.preferences, [key]: !this.preferences[key] };
+  }
+
+  protected async saveNotifications(): Promise<void> {
+    const p = this.preferences;
+    await this.save(
+      'notifications',
+      {
+        notificationDigest: p.digest,
+        notifyReleases: p.releases,
+        notifyAppUpdates: p.appUpdates,
+        notifyAptUpdates: p.aptUpdates,
+        notifyUpdateSucceeded: p.updateSucceeded,
+        notifyUpdateFailed: p.updateFailed,
+      },
+      'Notification settings saved.',
+    );
+  }
+
+  protected notificationsChanged(s: AppSettings): boolean {
+    return (Object.keys(this.preferences) as (keyof NotificationPreferences)[]).some(
+      (key) => this.preferences[key] !== s.notifications[key],
+    );
   }
 
   protected async saveGitHub(): Promise<void> {
@@ -179,21 +291,26 @@ export class SettingsPage implements OnInit {
     }
   }
 
-  protected async sendTest(): Promise<void> {
-    this.testing.set(true);
+  /** Sends a sample release through one channel. */
+  protected async sendTest(channel: 'discord' | 'email'): Promise<void> {
+    this.testing.set(channel);
     try {
-      const result = await firstValueFrom(this.api.sendTestNotification());
+      const result = await firstValueFrom(this.api.sendTestNotification(channel));
       if (result.failed.length > 0) {
-        this.toast.error(`Sending failed via ${result.failed.join(', ')}. Check the webhook URL and server logs.`);
+        this.toast.error(
+          channel === 'email'
+            ? 'Sending the test e-mail failed. Check the server, login and addresses – the server log has the details.'
+            : 'Sending to Discord failed. Check the webhook URL and server logs.',
+        );
       } else if (result.sent.length === 0) {
-        this.toast.error('No notification channel is configured.');
+        this.toast.error(`${channel === 'email' ? 'E-mail' : 'Discord'} is not configured.`);
       } else {
-        this.toast.success(`Test notification sent via ${result.sent.join(', ')}.`);
+        this.toast.success(channel === 'email' ? 'Test e-mail sent.' : 'Test notification sent to Discord.');
       }
     } catch (error) {
       this.toast.error(error);
     } finally {
-      this.testing.set(false);
+      this.testing.set(null);
     }
   }
 
@@ -263,6 +380,22 @@ export class SettingsPage implements OnInit {
     this.checkConcurrency = settings.proxmox.checkConcurrency;
     this.backupStorage = settings.proxmox.backupStorage ?? '';
     this.backupDefault = settings.proxmox.backupBeforeUpdate;
+    this.smtpHost = settings.email.smtpHost ?? '';
+    this.smtpPort = settings.email.smtpPort;
+    this.smtpSecurity = settings.email.smtpSecurity;
+    this.smtpUsername = settings.email.smtpUsername ?? '';
+    this.smtpPassword = '';
+    this.emailFrom = settings.email.from ?? '';
+    this.emailTo = settings.email.to ?? '';
+    const n = settings.notifications;
+    this.preferences = {
+      digest: n.digest,
+      releases: n.releases,
+      appUpdates: n.appUpdates,
+      aptUpdates: n.aptUpdates,
+      updateSucceeded: n.updateSucceeded,
+      updateFailed: n.updateFailed,
+    };
   }
 }
 

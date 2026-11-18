@@ -5,89 +5,20 @@
   </div>
 </header>
 
+<div class="tabs settings-tabs" role="tablist" aria-label="Settings">
+  <button type="button" role="tab" class="tab" id="tab-general" aria-controls="panel-general" [class.active]="tab() === 'general'" [attr.aria-selected]="tab() === 'general'" (click)="selectTab('general')">
+    <app-icon name="sliders" [size]="15" /> General
+  </button>
+  <button type="button" role="tab" class="tab" id="tab-notifications" aria-controls="panel-notifications" [class.active]="tab() === 'notifications'" [attr.aria-selected]="tab() === 'notifications'" (click)="selectTab('notifications')">
+    <app-icon name="bell" [size]="15" /> Notifications
+  </button>
+</div>
+
 @if (settings(); as s) {
-  <div class="sections">
-    <!-- Discord -->
-    <section class="card section enter" style="--i: 0" aria-labelledby="discord-title">
-      <div class="section-head">
-        <span class="section-icon discord"><app-icon name="discord" /></span>
-        <div class="section-title">
-          <h2 id="discord-title">Discord</h2>
-          <p>Release notifications are posted to a channel through a webhook.</p>
-        </div>
-        @if (s.discord.webhookConfigured) {
-          <span class="badge badge-success"><app-icon name="check" [size]="12" /> Connected</span>
-        } @else {
-          <span class="badge badge-warning">Not configured</span>
-        }
-      </div>
-
-      <form class="section-body" (ngSubmit)="saveDiscord()">
-        <div class="field">
-          <label for="webhook">Webhook URL</label>
-          <div class="input-with-action">
-            <input
-              id="webhook"
-              class="input mono"
-              name="webhook"
-              [type]="showWebhook() ? 'text' : 'password'"
-              [(ngModel)]="webhookUrl"
-              [class.invalid]="errors()['discordWebhookUrl']"
-              [placeholder]="s.discord.webhookUrlMasked ?? 'https://discord.com/api/webhooks/…'"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <button type="button" class="btn btn-ghost btn-sm" (click)="showWebhook.set(!showWebhook())">
-              {{ showWebhook() ? 'Hide' : 'Show' }}
-            </button>
-          </div>
-          @if (errors()['discordWebhookUrl']; as e) {
-            <span class="error">{{ e }}</span>
-          }
-          <span class="hint">
-            {{ sourceLabel(s.discord.webhookSource) }}.
-            Discord → channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.
-            Leave empty to keep the current one.
-          </span>
-        </div>
-
-        <div class="grid-2">
-          <div class="field">
-            <label for="mention">Mention</label>
-            <input id="mention" class="input" name="mention" [(ngModel)]="mention" placeholder="@here, @everyone or <@&ROLE_ID>" autocomplete="off" />
-            @if (errors()['discordMention']; as e) {
-              <span class="error">{{ e }}</span>
-            }
-            <span class="hint">Optional text posted above each release.</span>
-          </div>
-          <div class="field">
-            <label for="username">Bot name</label>
-            <input id="username" class="input" name="username" [(ngModel)]="username" placeholder="ReleaseWatcher" autocomplete="off" />
-            @if (errors()['discordUsername']; as e) {
-              <span class="error">{{ e }}</span>
-            }
-            <span class="hint">Name shown as the message author.</span>
-          </div>
-        </div>
-
-        <div class="section-actions">
-          @if (s.discord.webhookSource === 'ui') {
-            <button type="button" class="btn btn-danger-ghost" (click)="resetWebhook()" [disabled]="saving() === 'discord'">Remove webhook</button>
-          }
-          <span class="spacer"></span>
-          <button type="button" class="btn btn-secondary" (click)="sendTest()" [disabled]="testing() || !s.discord.webhookConfigured">
-            <app-icon name="send" [size]="15" />
-            {{ testing() ? 'Sending…' : 'Send test' }}
-          </button>
-          <button type="submit" class="btn" [disabled]="saving() === 'discord'">
-            {{ saving() === 'discord' ? 'Saving…' : 'Save' }}
-          </button>
-        </div>
-      </form>
-    </section>
-
+  @if (tab() === 'general') {
+  <div class="sections fade-in" id="panel-general" role="tabpanel" aria-labelledby="tab-general">
     <!-- GitHub -->
-    <section class="card section enter" style="--i: 1" aria-labelledby="github-title">
+    <section class="card section enter" style="--i: 0" aria-labelledby="github-title">
       <div class="section-head">
         <span class="section-icon github"><app-icon name="github" /></span>
         <div class="section-title">
@@ -186,7 +117,7 @@
     </section>
 
     <!-- Polling -->
-    <section class="card section polling-section enter" style="--i: 2" aria-labelledby="polling-title">
+    <section class="card section enter" style="--i: 1" aria-labelledby="polling-title">
       <div class="section-head">
         <span class="section-icon polling"><app-icon name="timer" /></span>
         <div class="section-title">
@@ -243,7 +174,7 @@
     </section>
 
     <!-- Proxmox node -->
-    <section class="card section wide enter" style="--i: 3" aria-labelledby="proxmox-title">
+    <section class="card section wide enter" style="--i: 2" aria-labelledby="proxmox-title">
       <div class="section-head">
         <span class="section-icon proxmox"><app-icon name="box" /></span>
         <div class="section-title">
@@ -410,6 +341,249 @@
       </form>
     </section>
   </div>
+  } @else {
+  <div class="sections notifications fade-in" id="panel-notifications" role="tabpanel" aria-labelledby="tab-notifications">
+    <!-- Discord -->
+    <section class="card section enter" style="--i: 0" aria-labelledby="discord-title">
+      <div class="section-head">
+        <span class="section-icon discord"><app-icon name="discord" /></span>
+        <div class="section-title">
+          <h2 id="discord-title">Discord</h2>
+          <p>Notifications are posted to a channel through a webhook.</p>
+        </div>
+        @if (s.discord.webhookConfigured) {
+          <span class="badge badge-success"><app-icon name="check" [size]="12" /> Connected</span>
+        } @else {
+          <span class="badge badge-warning">Not configured</span>
+        }
+      </div>
+
+      <form class="section-body" (ngSubmit)="saveDiscord()">
+        <div class="field">
+          <label for="webhook">Webhook URL</label>
+          <div class="input-with-action">
+            <input
+              id="webhook"
+              class="input mono"
+              name="webhook"
+              [type]="showWebhook() ? 'text' : 'password'"
+              [(ngModel)]="webhookUrl"
+              [class.invalid]="errors()['discordWebhookUrl']"
+              [placeholder]="s.discord.webhookUrlMasked ?? 'https://discord.com/api/webhooks/…'"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" class="btn btn-ghost btn-sm" (click)="showWebhook.set(!showWebhook())">
+              {{ showWebhook() ? 'Hide' : 'Show' }}
+            </button>
+          </div>
+          @if (errors()['discordWebhookUrl']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.discord.webhookSource) }}.
+            Discord → channel settings → Integrations → Webhooks → New Webhook → Copy Webhook URL.
+            Leave empty to keep the current one.
+          </span>
+        </div>
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="mention">Mention</label>
+            <input id="mention" class="input" name="mention" [(ngModel)]="mention" placeholder="@here, @everyone or <@&ROLE_ID>" autocomplete="off" />
+            @if (errors()['discordMention']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">Optional text posted above each message.</span>
+          </div>
+          <div class="field">
+            <label for="username">Bot name</label>
+            <input id="username" class="input" name="username" [(ngModel)]="username" placeholder="ReleaseWatcher" autocomplete="off" />
+            @if (errors()['discordUsername']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">Name shown as the message author.</span>
+          </div>
+        </div>
+
+        <div class="section-actions">
+          @if (s.discord.webhookSource === 'ui') {
+            <button type="button" class="btn btn-danger-ghost" (click)="resetWebhook()" [disabled]="saving() === 'discord'">Remove webhook</button>
+          }
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-secondary" (click)="sendTest('discord')" [disabled]="testing() === 'discord' || !s.discord.webhookConfigured">
+            <app-icon name="send" [size]="15" />
+            {{ testing() === 'discord' ? 'Sending…' : 'Send test' }}
+          </button>
+          <button type="submit" class="btn" [disabled]="saving() === 'discord'">
+            {{ saving() === 'discord' ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- E-mail -->
+    <section class="card section enter" style="--i: 1" aria-labelledby="email-title">
+      <div class="section-head">
+        <span class="section-icon email"><app-icon name="mail" /></span>
+        <div class="section-title">
+          <h2 id="email-title">E-mail</h2>
+          <p>Notifications are sent through your SMTP server.</p>
+        </div>
+        @if (s.email.configured) {
+          <span class="badge badge-success"><app-icon name="check" [size]="12" /> Configured</span>
+        } @else {
+          <span class="badge badge-warning">Not configured</span>
+        }
+      </div>
+
+      <form class="section-body" (ngSubmit)="saveEmail()">
+        <div class="grid-2">
+          <div class="field">
+            <label for="smtp-host">SMTP server</label>
+            <input id="smtp-host" class="input mono" name="smtpHost" [(ngModel)]="smtpHost" placeholder="smtp.gmail.com" autocomplete="off" spellcheck="false" [class.invalid]="errors()['smtpHost']" />
+            @if (errors()['smtpHost']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">{{ sourceLabel(s.email.smtpHostSource) }}.</span>
+          </div>
+          <div class="grid-2 compact">
+            <div class="field">
+              <label for="smtp-security">Security</label>
+              <select id="smtp-security" class="input" name="smtpSecurity" [ngModel]="smtpSecurity" (ngModelChange)="setSmtpSecurity($event)" [class.invalid]="errors()['smtpSecurity']">
+                <option value="starttls">STARTTLS</option>
+                <option value="tls">TLS</option>
+                <option value="none">None</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="smtp-port">Port</label>
+              <input id="smtp-port" class="input" type="number" name="smtpPort" min="1" max="65535" [(ngModel)]="smtpPort" [class.invalid]="errors()['smtpPort']" />
+            </div>
+          </div>
+        </div>
+        @if (errors()['smtpPort'] || errors()['smtpSecurity']; as e) {
+          <span class="error">{{ e }}</span>
+        }
+
+        <div class="grid-2">
+          <div class="field">
+            <label for="smtp-user">User name</label>
+            <input id="smtp-user" class="input" name="smtpUsername" [(ngModel)]="smtpUsername" placeholder="alerts@example.com" autocomplete="off" spellcheck="false" [class.invalid]="errors()['smtpUsername']" />
+            @if (errors()['smtpUsername']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">Leave empty for a server without login.</span>
+          </div>
+          <div class="field">
+            <label for="smtp-password">Password</label>
+            <div class="input-with-action">
+              <input
+                id="smtp-password"
+                class="input"
+                name="smtpPassword"
+                [type]="showSmtpPassword() ? 'text' : 'password'"
+                [(ngModel)]="smtpPassword"
+                [class.invalid]="errors()['smtpPassword']"
+                [placeholder]="s.email.smtpPasswordConfigured ? '••••••••' : 'App password'"
+                autocomplete="new-password"
+                spellcheck="false"
+              />
+              <button type="button" class="btn btn-ghost btn-sm" (click)="showSmtpPassword.set(!showSmtpPassword())">
+                {{ showSmtpPassword() ? 'Hide' : 'Show' }}
+              </button>
+            </div>
+            @if (errors()['smtpPassword']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            <span class="hint">
+              @if (s.email.smtpPasswordConfigured) {
+                {{ sourceLabel(s.email.smtpPasswordSource) }}. Leave empty to keep the current one.
+              } @else {
+                Gmail and Outlook need an app password (account security settings → App passwords).
+              }
+            </span>
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="email-from">From</label>
+          <input id="email-from" class="input" name="emailFrom" [(ngModel)]="emailFrom" placeholder="ReleaseWatcher <alerts@example.com>" autocomplete="off" spellcheck="false" [class.invalid]="errors()['emailFrom']" />
+          @if (errors()['emailFrom']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">Sender address – most servers accept only the address you log in with.</span>
+        </div>
+
+        <div class="field">
+          <label for="email-to">To</label>
+          <input id="email-to" class="input" name="emailTo" [(ngModel)]="emailTo" placeholder="me@example.com, team@example.com" autocomplete="off" spellcheck="false" [class.invalid]="errors()['emailTo']" />
+          @if (errors()['emailTo']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">{{ sourceLabel(s.email.toSource) }}. Separate several recipients with commas.</span>
+        </div>
+
+        <div class="section-actions">
+          @if (s.email.smtpPasswordSource === 'ui') {
+            <button type="button" class="btn btn-danger-ghost" (click)="resetSmtpPassword()" [disabled]="saving() === 'email'">Remove password</button>
+          }
+          <span class="spacer"></span>
+          <button type="button" class="btn btn-secondary" (click)="sendTest('email')" [disabled]="testing() === 'email' || !s.email.configured">
+            <app-icon name="send" [size]="15" />
+            {{ testing() === 'email' ? 'Sending…' : 'Send test' }}
+          </button>
+          <button type="submit" class="btn" [disabled]="saving() === 'email'">
+            {{ saving() === 'email' ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
+    <!-- What to send -->
+    <section class="card section kinds-section enter" style="--i: 2" aria-labelledby="kinds-title">
+      <div class="section-head">
+        <span class="section-icon bell"><app-icon name="bell" /></span>
+        <div class="section-title">
+          <h2 id="kinds-title">What to send</h2>
+          <p>Applies to every channel.</p>
+        </div>
+      </div>
+
+      <form class="section-body" (ngSubmit)="saveNotifications()">
+        <ul class="kinds" aria-label="Notification types">
+          @for (kind of kinds; track kind.key) {
+            <li>
+              <app-switch [label]="kind.label" [showLabel]="false" [checked]="preferences[kind.key]" (toggled)="toggle(kind.key)" />
+              <div class="kind-text">
+                <span class="kind-label" (click)="toggle(kind.key)">{{ kind.label }}</span>
+                <span class="hint">{{ kind.hint }}</span>
+              </div>
+            </li>
+          }
+        </ul>
+
+        <div class="digest">
+          <app-switch label="Send one summary per check" [showLabel]="false" [checked]="preferences.digest" (toggled)="toggle('digest')" />
+          <div class="kind-text">
+            <span class="kind-label" (click)="toggle('digest')">Send one summary per check</span>
+            <span class="hint">
+              Everything found while all repositories or the scheduled containers are checked goes out as one message
+              instead of one message each. Checks of a single repository or container still notify right away.
+            </span>
+          </div>
+        </div>
+
+        <div class="section-actions">
+          <span class="spacer"></span>
+          <button type="submit" class="btn" [disabled]="saving() === 'notifications' || !notificationsChanged(s)">
+            {{ saving() === 'notifications' ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </section>
+  </div>
+  }
 } @else {
   <div class="sections">
     @for (i of [1, 2, 3]; track i) {

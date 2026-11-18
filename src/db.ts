@@ -3,7 +3,7 @@ import type { WatchedRepository } from './domain.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
 /** Settings whose values are secrets and are stored encrypted. */
-export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set(['discordWebhookUrl', 'githubToken', 'proxmoxSshKey']);
+export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set(['discordWebhookUrl', 'githubToken', 'proxmoxSshKey', 'smtpPassword']);
 
 /** Known plain text stored encrypted in `app_meta` to detect a wrong encryption key at startup. */
 const KEY_CHECK_NAME = 'secretsKeyCheck';

@@ -1,10 +1,15 @@
 import { ownerAvatarUrl } from '../domain.ts';
 import {
   type ContainerUpdatesNotification,
+  digestSummary,
+  type NotificationEvent,
   notificationFullName,
   notificationRepoUrl,
   type Notifier,
   type ReleaseNotification,
+  targetName,
+  updateLabel,
+  type UpdateResultNotification,
 } from './notifier.ts';
 
 export interface DiscordOptions {
@@ -46,6 +51,16 @@ export class DiscordNotifier implements Notifier {
   async notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void> {
     const options = this.getOptions();
     await this.post(options, buildContainerPayload(notification, options));
+  }
+
+  async notifyUpdateResult(notification: UpdateResultNotification): Promise<void> {
+    const options = this.getOptions();
+    await this.post(options, buildUpdateResultPayload(notification, options));
+  }
+
+  async notifyDigest(events: readonly NotificationEvent[]): Promise<void> {
+    const options = this.getOptions();
+    await this.post(options, buildDigestPayload(events, options));
   }
 
   private async post(options: DiscordOptions, payload: object): Promise<void> {
@@ -145,10 +160,7 @@ export function buildContainerPayload(
     ...(options.avatarUrl ? { avatar_url: options.avatarUrl } : {}),
     embeds: [
       {
-        title: truncate(
-          `${notification.isNode ? 'Proxmox host' : `CT ${notification.vmid}`} (${notification.containerName}): updates available`,
-          256,
-        ),
+        title: truncate(`${targetName(notification)}: updates available`, 256),
         ...(containersUrl ? { url: containersUrl } : {}),
         description: truncate(lines.join('\n'), Math.max(options.maxBodyLength, 200)),
         color: CONTAINER_COLOR,
@@ -161,6 +173,91 @@ export function buildContainerPayload(
       : {}),
   };
 }
+
+const SUCCESS_COLOR = 0x2ecc71; // green
+const FAILURE_COLOR = 0xe74c3c; // red
+const DIGEST_COLOR = 0x5865f2; // accent
+/** Discord limit of an embed description. */
+const MAX_DESCRIPTION = 4096;
+
+export function buildUpdateResultPayload(
+  notification: UpdateResultNotification,
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'publicUrl'>,
+) {
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  return {
+    ...messageHeader(options),
+    embeds: [
+      {
+        title: truncate(`${targetName(notification)}: ${updateLabel(notification)} ${notification.succeeded ? 'finished' : 'failed'}`, 256),
+        ...(containersUrl ? { url: containersUrl } : {}),
+        ...(notification.detail ? { description: truncate(notification.detail, 1000) } : {}),
+        color: notification.succeeded ? SUCCESS_COLOR : FAILURE_COLOR,
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
+/** Several notifications as one message: one embed with a section per kind. */
+export function buildDigestPayload(
+  events: readonly NotificationEvent[],
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'publicUrl'>,
+) {
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  const releases: string[] = [];
+  const containers: string[] = [];
+  const results: string[] = [];
+  for (const event of events) {
+    switch (event.type) {
+      case 'release': {
+        const { release } = event.release;
+        const installed = event.release.installedVersion ? ` (installed ${event.release.installedVersion})` : '';
+        releases.push(
+          `• **${notificationFullName(event.release)}** [${release.tag}](${release.htmlUrl})${release.isPrerelease ? ' · pre-release' : ''}${installed}`,
+        );
+        break;
+      }
+      case 'container-updates': {
+        const { updates } = event;
+        const parts = [
+          ...updates.apps.map((a) => `${a.name} ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`),
+          ...(updates.aptPackages.length > 0 ? [`${updates.aptPackages.length} apt package(s)`] : []),
+        ];
+        containers.push(`• **${targetName(updates)}**: ${parts.join(', ')}`);
+        break;
+      }
+      case 'update-result':
+        results.push(
+          `• ${event.result.succeeded ? '✅' : '❌'} **${targetName(event.result)}**: ${updateLabel(event.result)} ${event.result.succeeded ? 'finished' : 'failed'}`,
+        );
+        break;
+    }
+  }
+  const blocks = [
+    ...(releases.length > 0 ? [`**New releases**\n${releases.join('\n')}`] : []),
+    ...(containers.length > 0 ? [`**Container updates**\n${containers.join('\n')}`] : []),
+    ...(results.length > 0 ? [`**Finished updates**\n${results.join('\n')}`] : []),
+  ];
+  return {
+    ...messageHeader(options),
+    embeds: [
+      {
+        title: truncate(digestSummary(events), 256),
+        ...(containersUrl && events.some((e) => e.type !== 'release') ? { url: containersUrl } : {}),
+        description: truncate(blocks.join('\n\n'), MAX_DESCRIPTION),
+        color: DIGEST_COLOR,
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
+const messageHeader = (options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention'>) => ({
+  ...(options.mention ? { content: options.mention } : {}),
+  ...(options.username ? { username: options.username } : {}),
+  ...(options.avatarUrl ? { avatar_url: options.avatarUrl } : {}),
+});
 
 const ACTION_ROW = 1;
 const BUTTON = 2;

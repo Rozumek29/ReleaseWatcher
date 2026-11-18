@@ -2,6 +2,9 @@ import type { Config } from './config.ts';
 import { validateCron } from './cron.ts';
 import { STORAGE_ID_PATTERN } from './proxmox/domain.ts';
 import type { RepositoryStore } from './db.ts';
+import { DEFAULT_NOTIFICATION_PREFERENCES } from './notifiers/dispatcher.ts';
+import { parseAddress, parseRecipients } from './notifiers/email.ts';
+import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
 export interface Settings {
@@ -23,7 +26,34 @@ export interface Settings {
   backupStorage: string | null;
   /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
   backupBeforeUpdate: boolean;
+  smtpHost: string | null;
+  smtpPort: number;
+  smtpSecurity: SmtpSecurity;
+  smtpUsername: string | null;
+  /** Secret. */
+  smtpPassword: string | null;
+  emailFrom: string | null;
+  /** Comma-separated recipients. */
+  emailTo: string | null;
+  /** Send the notifications of one check run as one summary. */
+  notificationDigest: boolean;
+  notifyReleases: boolean;
+  notifyAppUpdates: boolean;
+  notifyAptUpdates: boolean;
+  notifyUpdateSucceeded: boolean;
+  notifyUpdateFailed: boolean;
 }
+
+/** On/off settings (stored as "true"/"false"). */
+const BOOLEAN_SETTINGS: ReadonlySet<SettingKey> = new Set([
+  'backupBeforeUpdate',
+  'notificationDigest',
+  'notifyReleases',
+  'notifyAppUpdates',
+  'notifyAptUpdates',
+  'notifyUpdateSucceeded',
+  'notifyUpdateFailed',
+]);
 
 export const MIN_CHECK_CONCURRENCY = 1;
 export const MAX_CHECK_CONCURRENCY = 10;
@@ -69,12 +99,27 @@ export class SettingsService {
       containerCheckConcurrency: config.proxmox.checkConcurrency,
       backupStorage: config.proxmox.backupStorage,
       backupBeforeUpdate: config.proxmox.backupBeforeUpdate,
+      smtpHost: config.email.smtpHost,
+      smtpPort: config.email.smtpPort,
+      smtpSecurity: config.email.smtpSecurity,
+      smtpUsername: config.email.smtpUsername,
+      smtpPassword: config.email.smtpPassword,
+      emailFrom: config.email.from,
+      emailTo: config.email.to,
+      notificationDigest: config.notificationDigest,
+      notifyReleases: DEFAULT_NOTIFICATION_PREFERENCES.releases,
+      notifyAppUpdates: DEFAULT_NOTIFICATION_PREFERENCES.appUpdates,
+      notifyAptUpdates: DEFAULT_NOTIFICATION_PREFERENCES.aptUpdates,
+      notifyUpdateSucceeded: DEFAULT_NOTIFICATION_PREFERENCES.updateSucceeded,
+      notifyUpdateFailed: DEFAULT_NOTIFICATION_PREFERENCES.updateFailed,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
 
   get current(): Settings {
     const o = this.overrides;
+    const flag = (key: SettingKey & keyof Settings): boolean =>
+      o[key] !== undefined ? o[key] === 'true' : (this.defaults[key] as boolean);
     return {
       discordWebhookUrl: o.discordWebhookUrl ?? this.defaults.discordWebhookUrl,
       discordMention: o.discordMention ?? this.defaults.discordMention,
@@ -91,8 +136,20 @@ export class SettingsService {
           ? Number(o.containerCheckConcurrency)
           : this.defaults.containerCheckConcurrency,
       backupStorage: o.backupStorage ?? this.defaults.backupStorage,
-      backupBeforeUpdate:
-        o.backupBeforeUpdate !== undefined ? o.backupBeforeUpdate === 'true' : this.defaults.backupBeforeUpdate,
+      backupBeforeUpdate: flag('backupBeforeUpdate'),
+      smtpHost: o.smtpHost ?? this.defaults.smtpHost,
+      smtpPort: o.smtpPort !== undefined ? Number(o.smtpPort) : this.defaults.smtpPort,
+      smtpSecurity: (o.smtpSecurity as SmtpSecurity | undefined) ?? this.defaults.smtpSecurity,
+      smtpUsername: o.smtpUsername ?? this.defaults.smtpUsername,
+      smtpPassword: o.smtpPassword ?? this.defaults.smtpPassword,
+      emailFrom: o.emailFrom ?? this.defaults.emailFrom,
+      emailTo: o.emailTo ?? this.defaults.emailTo,
+      notificationDigest: flag('notificationDigest'),
+      notifyReleases: flag('notifyReleases'),
+      notifyAppUpdates: flag('notifyAppUpdates'),
+      notifyAptUpdates: flag('notifyAptUpdates'),
+      notifyUpdateSucceeded: flag('notifyUpdateSucceeded'),
+      notifyUpdateFailed: flag('notifyUpdateFailed'),
     };
   }
 
@@ -142,6 +199,12 @@ export class SettingsService {
 }
 
 function validate(key: SettingKey, value: string): void {
+  if (BOOLEAN_SETTINGS.has(key)) {
+    if (value !== 'true' && value !== 'false') {
+      throw new SettingsValidationError(key, 'Must be true or false.');
+    }
+    return;
+  }
   switch (key) {
     case 'discordWebhookUrl': {
       let url: URL;
@@ -207,11 +270,46 @@ function validate(key: SettingKey, value: string): void {
         throw new SettingsValidationError(key, 'Enter a Proxmox storage ID, e.g. "local" or "pbs".');
       }
       return;
-    case 'backupBeforeUpdate':
-      if (value !== 'true' && value !== 'false') {
-        throw new SettingsValidationError(key, 'Must be true or false.');
+    case 'smtpHost':
+      if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(value) || value.length > 253) {
+        throw new SettingsValidationError(key, 'Enter a host name or IP address, e.g. smtp.gmail.com.');
       }
       return;
+    case 'smtpPort': {
+      const port = Number(value);
+      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
+        throw new SettingsValidationError(key, 'Port must be between 1 and 65535.');
+      }
+      return;
+    }
+    case 'smtpSecurity':
+      if (!(SMTP_SECURITY as readonly string[]).includes(value)) {
+        throw new SettingsValidationError(key, `Security must be one of: ${SMTP_SECURITY.join(', ')}.`);
+      }
+      return;
+    case 'smtpUsername':
+    case 'smtpPassword':
+      if (value.length > 500 || /[\r\n]/.test(value)) {
+        throw new SettingsValidationError(key, 'Must be a single line of at most 500 characters.');
+      }
+      return;
+    case 'emailFrom':
+      if (!parseAddress(value)) {
+        throw new SettingsValidationError(key, 'Enter an address like alerts@example.com or "ReleaseWatcher <alerts@example.com>".');
+      }
+      return;
+    case 'emailTo': {
+      let recipients: string[];
+      try {
+        recipients = parseRecipients(value);
+      } catch (error) {
+        throw new SettingsValidationError(key, (error as Error).message);
+      }
+      if (recipients.length === 0 || recipients.length > 20) {
+        throw new SettingsValidationError(key, 'Enter between 1 and 20 recipients.');
+      }
+      return;
+    }
     case 'containerCheckConcurrency': {
       const count = Number(value);
       if (!Number.isInteger(count) || count < MIN_CHECK_CONCURRENCY || count > MAX_CHECK_CONCURRENCY) {

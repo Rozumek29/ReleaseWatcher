@@ -2,7 +2,13 @@ import type { ReleaseInfo } from '../src/domain.ts';
 import type { ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
 import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
-import type { ContainerUpdatesNotification, Notifier, ReleaseNotification } from '../src/notifiers/notifier.ts';
+import type {
+  ContainerUpdatesNotification,
+  NotificationEvent,
+  Notifier,
+  ReleaseNotification,
+  UpdateResultNotification,
+} from '../src/notifiers/notifier.ts';
 
 export const silentLog = { info() {}, warn() {}, error() {} };
 
@@ -57,6 +63,8 @@ export class RecordingNotifier implements Notifier {
   fail = false;
   readonly sent: ReleaseNotification[] = [];
   readonly containerSent: ContainerUpdatesNotification[] = [];
+  readonly resultsSent: UpdateResultNotification[] = [];
+  readonly digests: NotificationEvent[][] = [];
 
   async notify(notification: ReleaseNotification): Promise<void> {
     if (this.fail) {
@@ -70,6 +78,20 @@ export class RecordingNotifier implements Notifier {
       throw new Error('boom');
     }
     this.containerSent.push(notification);
+  }
+
+  async notifyUpdateResult(notification: UpdateResultNotification): Promise<void> {
+    if (this.fail) {
+      throw new Error('boom');
+    }
+    this.resultsSent.push(notification);
+  }
+
+  async notifyDigest(events: readonly NotificationEvent[]): Promise<void> {
+    if (this.fail) {
+      throw new Error('boom');
+    }
+    this.digests.push([...events]);
   }
 }
 

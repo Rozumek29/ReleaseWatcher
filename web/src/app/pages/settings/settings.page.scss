@@ -3,9 +3,14 @@
   container-type: inline-size;
 }
 
+.settings-tabs {
+  margin-bottom: 20px;
+}
+
 /*
- * Full-width page. Wide screens: Discord, GitHub and Polling side by side (similar heights), the long Proxmox form below
- * in two columns. Medium: two columns, Polling and Proxmox across. Cards in a row share their height.
+ * Full-width page, one tab at a time. General: GitHub and Polling side by side, the long Proxmox form below in two
+ * columns. Notifications: Discord, E-mail and "What to send" – three columns on wide screens. Cards in a row share their
+ * height.
  */
 .sections {
   display: grid;
@@ -19,19 +24,14 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .wide,
-  .polling-section {
+  .wide {
     grid-column: 1 / -1;
   }
 }
 
-@container (min-width: 1080px) {
-  .sections {
+@container (min-width: 1180px) {
+  .sections.notifications {
     grid-template-columns: repeat(3, minmax(0, 1fr));
-  }
-
-  .polling-section {
-    grid-column: auto;
   }
 }
 
@@ -91,9 +91,67 @@
     color: var(--success);
   }
 
-  &.proxmox {
+  &.proxmox,
+  &.bell {
     background: var(--warning-soft);
     color: var(--warning);
+  }
+
+  &.email {
+    background: var(--success-soft);
+    color: var(--success);
+  }
+}
+
+.kinds {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.kinds li,
+.digest {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+
+  app-switch {
+    margin-top: 1px;
+  }
+}
+
+.digest {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.kind-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.kind-label {
+  font-size: 0.9rem;
+  font-weight: 550;
+  cursor: pointer;
+}
+
+.kind-text .hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+/* Two columns of cards: "What to send" spans both, its switches in columns. */
+@container (min-width: 760px) and (max-width: 1179px) {
+  .kinds-section {
+    grid-column: 1 / -1;
+  }
+
+  .kinds {
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
   }
 }
 

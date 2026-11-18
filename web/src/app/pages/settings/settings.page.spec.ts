@@ -1,6 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { provideRouter, Router } from '@angular/router';
 import { AppSettings } from '../../core/models';
 import { settle } from '../../testing';
 import { SettingsPage } from './settings.page';
@@ -28,13 +29,35 @@ const settings: AppSettings = {
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },
+  email: {
+    configured: false,
+    smtpHost: null,
+    smtpHostSource: null,
+    smtpPort: 587,
+    smtpSecurity: 'starttls',
+    smtpUsername: null,
+    smtpPasswordConfigured: false,
+    smtpPasswordSource: null,
+    from: null,
+    to: null,
+    toSource: null,
+  },
+  notifications: {
+    digest: false,
+    digestSource: 'env',
+    releases: true,
+    appUpdates: true,
+    aptUpdates: true,
+    updateSucceeded: false,
+    updateFailed: false,
+  },
 };
 
 describe('SettingsPage', () => {
   it('saves the Discord webhook and shows field errors', async () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPage],
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).compileComponents();
     const http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(SettingsPage);
@@ -46,8 +69,12 @@ describe('SettingsPage', () => {
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
-    expect(el.textContent).toContain('Not configured');
     expect(el.querySelector('.quota-meta')?.textContent).toContain('42');
+
+    el.querySelector<HTMLButtonElement>('#tab-notifications')!.click();
+    await settle(fixture);
+    expect(el.querySelector('#tab-notifications')?.getAttribute('aria-selected')).toBe('true');
+    expect(el.textContent).toContain('Not configured');
 
     const input = el.querySelector<HTMLInputElement>('#webhook')!;
     input.value = 'not-a-url';
@@ -69,7 +96,7 @@ describe('SettingsPage', () => {
   it('saves the Proxmox node without sending an untouched SSH key and tests the connection', async () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPage],
-      providers: [provideHttpClient(), provideHttpClientTesting()],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
     }).compileComponents();
     const http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(SettingsPage);
@@ -131,5 +158,79 @@ describe('SettingsPage', () => {
     await settle(fixture);
     expect(section.querySelector('.node-test')?.textContent).toContain('pve-manager/9.1.1');
     http.verify();
+  });
+
+  it('opens the Notifications tab from the URL, saves e-mail and the notification types', async () => {
+    await TestBed.configureTestingModule({
+      imports: [SettingsPage],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+    }).compileComponents();
+    await TestBed.inject(Router).navigateByUrl('/?tab=notifications');
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(SettingsPage);
+    fixture.detectChanges();
+    http.expectOne('/api/settings').flush({
+      ...settings,
+      email: { ...settings.email, smtpPasswordConfigured: true, smtpPasswordSource: 'ui' },
+    });
+    await settle(fixture);
+    http.expectOne('/api/github/rate-limit').flush(null);
+    http.expectOne('/api/proxmox/storages').flush([]);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('section[aria-labelledby=proxmox-title]')).toBeNull();
+    const email = el.querySelector<HTMLElement>('section[aria-labelledby=email-title]')!;
+    const type = (selector: string, value: string) => {
+      const input = email.querySelector<HTMLInputElement>(selector)!;
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+    };
+    type('#smtp-host', 'smtp.example.com');
+    const security = email.querySelector<HTMLSelectElement>('#smtp-security')!;
+    security.value = 'tls';
+    security.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(email.querySelector<HTMLInputElement>('#smtp-port')!.value).toBe('465');
+    type('#smtp-user', 'alerts@example.com');
+    type('#email-from', 'alerts@example.com');
+    type('#email-to', 'me@example.com');
+    email.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+
+    const save = http.expectOne('/api/settings');
+    // The saved password is kept: an empty field is not sent.
+    expect(save.request.body).toEqual({
+      smtpHost: 'smtp.example.com',
+      smtpPort: 465,
+      smtpSecurity: 'tls',
+      smtpUsername: 'alerts@example.com',
+      emailFrom: 'alerts@example.com',
+      emailTo: 'me@example.com',
+    });
+    save.flush({ ...settings, email: { ...settings.email, configured: true } });
+    await settle(fixture);
+
+    [...email.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Send test'))!.click();
+    const test = http.expectOne('/api/notifiers/test');
+    expect(test.request.body).toEqual({ notifier: 'email' });
+    test.flush({ sent: ['email'], failed: [] });
+    await settle(fixture);
+
+    const kinds = el.querySelector<HTMLElement>('section[aria-labelledby=kinds-title]')!;
+    const submit = kinds.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    expect(submit.disabled).toBe(true);
+    kinds.querySelector<HTMLElement>('[role=switch][aria-label="Update failed"]')!.click();
+    kinds.querySelector<HTMLElement>('.digest [role=switch]')!.click();
+    await settle(fixture);
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    expect(http.expectOne('/api/settings').request.body).toEqual({
+      notificationDigest: true,
+      notifyReleases: true,
+      notifyAppUpdates: true,
+      notifyAptUpdates: true,
+      notifyUpdateSucceeded: false,
+      notifyUpdateFailed: true,
+    });
   });
 });

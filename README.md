@@ -1,13 +1,14 @@
 # ReleaseWatcher
 
-Watches selected GitHub repositories for new releases and sends a notification (Discord today, more channels later).
+Watches selected GitHub repositories for new releases and sends a notification to Discord and/or by e-mail.
 It also keeps the LXC containers of a Proxmox node up to date: it checks pending `apt` packages and application
 versions on a cron schedule and runs updates (apt, community-scripts `update`, your own scripts) at the push of a button.
 
 - **Server:** [Bun](https://bun.sh) 1.4+ running TypeScript natively (no build step), `Bun.serve` HTTP server,
   built-in `bun:sqlite`
 - **UI:** Angular 22 (standalone, signals, zoneless), served by the server from `public/`
-- **Notifications:** Discord webhook; new channels plug in through the `Notifier` interface
+- **Notifications:** Discord webhook and e-mail (SMTP, built-in client); optionally one summary per check run;
+  new channels plug in through the `Notifier` interface
 - One runtime dependency (`@simplewebauthn/server` for passkeys) – everything else is built into Bun; releases and
   the Docker image ship the app as a single self-contained executable (`bun build --compile`)
 
@@ -19,6 +20,11 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    (`If-None-Match`/ETag; a `304` does not count against GitHub's rate limit).
 4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check),
    then the baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
+5. **Settings → Notifications** chooses what is sent (new releases, application updates, apt updates, finished and
+   failed updates) and whether one check run sends **one summary** (digest) instead of one message per item. The
+   summary collects what a run of all repositories or of the scheduled containers finds and is sent when the run
+   ends; checking a single repository or container still notifies right away. Held-back items are lost if the
+   process stops before the run ends (they are never sent twice).
 
 ## Proxmox LXC containers
 
@@ -66,7 +72,7 @@ versions on a cron schedule and runs updates (apt, community-scripts `update`, y
    when it is already watched) and links it as the latest version; applications already in the container are marked
    **Added**.
 5. Checks run on the cron schedule (`CONTAINER_CHECK_CRON`, default every 6 hours, server time zone – set `TZ`) and
-   notify Discord when something new is pending (each pending item is reported once). A check is a single SSH
+   notify Discord / e-mail when something new is pending (each pending item is reported once). A check is a single SSH
    connection: `pct status` plus one `pct exec` running the apt check and all version commands, each with its own
    timeout; up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. **Updates never run
    automatically** – start them from the UI; the console output is shown live and kept in the run history
@@ -301,8 +307,10 @@ To run the published image instead of building locally, replace `build: .` in `d
   first, VMID, name – remembered per browser). Arrow keys move through the list; the detail pane shows apt packages,
   applications and their update, check, history and settings actions. On narrow screens the list and the details
   take turns.
-- **Settings** – Discord webhook, mention and bot name (with a test message), GitHub token with live API quota,
-  polling interval. Changes apply immediately; values saved in the UI are stored in SQLite and override
+- **Settings** – two tabs. *General*: GitHub token with live API quota, polling interval, Proxmox node.
+  *Notifications* (`/settings?tab=notifications`): Discord webhook, mention and bot name; e-mail (SMTP server,
+  STARTTLS/TLS, login, sender, recipients); each with a test message; and *What to send* – switches per notification
+  type and the one-summary-per-check mode. Changes apply immediately; values saved in the UI are stored in SQLite and override
   the environment variables below (clearing a value falls back to the environment).
 - The sidebar shows when the next check runs and has a **Check all now** button; its footer shows the running
   version and links to the GitHub repository.
@@ -319,6 +327,14 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `DISCORD_USERNAME` | `ReleaseWatcher` | Display name of the webhook. |
 | `DISCORD_AVATAR_URL` | – | Avatar of the webhook. |
 | `DISCORD_MAX_BODY_LENGTH` | `1500` | Release notes are truncated to this length. |
+| `SMTP_HOST` | – | SMTP server for e-mail notifications. E-mail is enabled when host, `EMAIL_FROM` and `EMAIL_TO` are set. |
+| `SMTP_PORT` | `587` | SMTP port. |
+| `SMTP_SECURITY` | `starttls` | `starttls` (plain connection upgraded with STARTTLS, usually 587), `tls` (TLS from the start, usually 465) or `none`. Certificates are always verified. |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` | – | Login (AUTH PLAIN or LOGIN); empty = no login. The password is stored encrypted when saved in the UI and never returned by the API. |
+| `EMAIL_FROM` | – | Sender, `alerts@example.com` or `ReleaseWatcher <alerts@example.com>`. |
+| `EMAIL_TO` | – | Recipients, comma-separated (up to 20). |
+| `EMAIL_MAX_BODY_LENGTH` | `5000` | Release notes in e-mails are truncated to this length. |
+| `NOTIFICATION_DIGEST` | `false` | `true` = what one check run finds is sent as one summary message per channel. |
 | `GITHUB_TOKEN` | – | Optional PAT. Raises the limit from 60 to 5000 requests/hour; needed for private repos – fine-grained token with access to those repositories and **Contents: Read-only** (Metadata: Read-only is added automatically); a classic token needs `repo`. Fine-grained tokens cannot read repositories of another user you only collaborate on – give such a repository its own token (of the owner) in its settings; per-repository tokens override this one and are never returned by the API. |
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
@@ -352,8 +368,8 @@ To run the published image instead of building locally, replace `build: .` in `d
 | `POST` | `/api/installed-version/test` | `{ "url": "https://…", "field": null, "headers": [], "repositoryId"?: 1 }` → detected version and response preview |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately |
-| `GET` | `/api/notifiers` | Registered notifiers and whether they are configured |
-| `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers |
+| `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |
+| `POST` | `/api/notifiers/test` | Send a fake release to all enabled notifiers, or only to `{ "notifier": "email" }` (`409` when that one is not configured); ignores the notification types and digest mode |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; `null` resets a value to the environment default |
 | `GET` | `/api/status` | App version, poller state (next/last run), repository and container counts |
@@ -399,7 +415,8 @@ Everything except `/health` and the public auth endpoints below needs a session 
 ## Adding a new notifier (e.g. Slack, Teams, e-mail)
 
 1. Implement `Notifier` from `src/notifiers/notifier.ts` (`name`, `isEnabled`, `notify()` for releases,
-   `notifyContainerUpdates()` for pending container updates).
+   `notifyContainerUpdates()` for pending container updates, `notifyUpdateResult()` for finished/failed updates and
+   `notifyDigest()` for a summary of several of them).
 2. Register it in `src/notifiers/index.ts`. Notifiers receive their options through a callback, so values
    changed in the UI (`settings.current`) apply without a restart:
 
@@ -416,8 +433,9 @@ export function createNotifiers(config: Config, settings: SettingsService): Noti
    (with validation), to the settings DTO and `PUT /api/settings` schema in `src/app.ts`, and to the
    Settings page in `web/`.
 
-`NotificationDispatcher` sends every release to all enabled notifiers; a failure in one channel
-does not block the others. The UI picks up the new channel automatically.
+`NotificationDispatcher` sends every notification to all enabled notifiers, applies the notification types from
+the settings and collects digests (`dispatcher.batch()` around a check run); a failure in one channel does not block
+the others. The UI picks up the new channel automatically.
 
 ## Project layout
 
@@ -439,7 +457,7 @@ src/
   auth/              login: account + passkeys (@simplewebauthn/server) + sessions, setup code, routes
   cron.ts            5-field cron parser (container check schedule)
   http.ts            problem-details response helpers
-  notifiers/         Notifier interface, dispatcher, Discord
+  notifiers/         Notifier interface, dispatcher (types, digest), Discord, e-mail + minimal SMTP client
   proxmox/           LXC containers: SSH client (system OpenSSH), pct/apt parsing, store, service
                      (checks + updates + run log), cron scheduler, HTTP routes
 test/                bun:test tests
@@ -455,15 +473,15 @@ web/                 Angular UI (builds into public/)
   src/app/app.*              shell: sidebar, poller status, toasts
   src/app/pages/repositories watched repositories
   src/app/pages/containers   Proxmox LXC containers, applications, run log
-  src/app/pages/settings     Discord, GitHub, polling, Proxmox node settings
+  src/app/pages/settings     General (GitHub, polling, Proxmox node) and Notifications (Discord, e-mail, types) tabs
   src/app/pages/login, setup, account   sign-in, first-run setup, password / passkeys / sessions
 ```
 
 ## Security note
 
 The server fetches the installed-version URLs you configure (usually LAN addresses) – keep the UI private.
-Secrets in the SQLite file – the Discord webhook URL, GitHub tokens (global and per repository), the Proxmox SSH
-private key and installed-version header values – are **encrypted with AES-256-GCM**. The key comes from
+Secrets in the SQLite file – the Discord webhook URL, the SMTP password, GitHub tokens (global and per repository),
+the Proxmox SSH private key and installed-version header values – are **encrypted with AES-256-GCM**. The key comes from
 `ENCRYPTION_KEY` or, when it is not set, from `encryption.key`, generated next to the database on the first start
 (plain-text secrets of older versions are encrypted then). A copied database or backup alone does not reveal the
 secrets; to also protect against someone who can read the whole data directory, set `ENCRYPTION_KEY` in the

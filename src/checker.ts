@@ -67,13 +67,16 @@ export class ReleaseChecker {
     repo.installedVersionCheckedAt = this.now().toISOString();
   }
 
+  /** Checks all enabled repositories as one run (in digest mode its notifications go out as one summary). */
   async checkAll(signal?: AbortSignal): Promise<void> {
-    for (const repo of this.store.listEnabled()) {
-      if (signal?.aborted) {
-        return;
+    await this.dispatcher.batch(async () => {
+      for (const repo of this.store.listEnabled()) {
+        if (signal?.aborted) {
+          return;
+        }
+        await this.check(repo);
       }
-      await this.check(repo);
-    }
+    });
   }
 
   /** Checks a single repository. Mutates and persists the passed entity. */

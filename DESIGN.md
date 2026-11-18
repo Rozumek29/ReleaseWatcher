@@ -21,15 +21,15 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
                  │ Poller (interval) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub │
-                 │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord   │
+                 │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord/SMTP│
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
                  │                                                                                │
                  │ RepositoryStore / ContainerStore (bun:sqlite) · SettingsService (DB over env)   │
                  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, Discord and the
-  Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, Discord, the
+  user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`. A feature folder owns its
@@ -58,6 +58,10 @@ This file does not repeat those; it describes the **shape** of the system, the *
   cleared after undoing it, so a restart can finish the job.
 - At most one task per container at a time (`ContainerService`); schedulers only check, never update.
 - Release notifications advance the baseline after **each** dispatched release (no duplicates after a crash).
+- Notifications go through `NotificationDispatcher` only: it applies the notification types from the settings and,
+  in digest mode, collects everything raised inside `dispatcher.batch()` (a run of all repositories, scheduled or
+  "check all" container checks) into one `notifyDigest()` per channel when the last open batch ends. Wrap new
+  multi-item runs in `batch()`; single on-demand actions stay outside it and notify right away.
 
 ---
 

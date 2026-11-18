@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
 
 /** Application configuration read from environment variables (see .env.example). */
 export interface Config {
@@ -22,6 +23,20 @@ export interface Config {
     mention: string | null;
     maxBodyLength: number;
   };
+  email: {
+    smtpHost: string | null;
+    smtpPort: number;
+    smtpSecurity: SmtpSecurity;
+    smtpUsername: string | null;
+    smtpPassword: string | null;
+    /** Sender, "a@example.com" or "Name <a@example.com>". */
+    from: string | null;
+    /** Recipients, comma-separated. */
+    to: string | null;
+    maxBodyLength: number;
+  };
+  /** Collect the notifications of one check run into one summary message. */
+  notificationDigest: boolean;
   proxmox: {
     host: string | null;
     port: number;
@@ -68,6 +83,17 @@ export function loadConfig(env: Env = process.env): Config {
       mention: str(env, 'DISCORD_MENTION'),
       maxBodyLength: int(env, 'DISCORD_MAX_BODY_LENGTH', 1500),
     },
+    email: {
+      smtpHost: str(env, 'SMTP_HOST'),
+      smtpPort: int(env, 'SMTP_PORT', 587),
+      smtpSecurity: smtpSecurity(str(env, 'SMTP_SECURITY')),
+      smtpUsername: str(env, 'SMTP_USERNAME'),
+      smtpPassword: str(env, 'SMTP_PASSWORD'),
+      from: str(env, 'EMAIL_FROM'),
+      to: str(env, 'EMAIL_TO'),
+      maxBodyLength: int(env, 'EMAIL_MAX_BODY_LENGTH', 5000),
+    },
+    notificationDigest: (str(env, 'NOTIFICATION_DIGEST') ?? 'false').toLowerCase() === 'true',
     proxmox: {
       host: str(env, 'PROXMOX_HOST'),
       port: int(env, 'PROXMOX_SSH_PORT', 22),
@@ -102,6 +128,14 @@ function int(env: Env, key: string, fallback: number): number {
     throw new Error(`Environment variable ${key} must be a non-negative number, got "${raw}".`);
   }
   return value;
+}
+
+function smtpSecurity(value: string | null): SmtpSecurity {
+  const normalized = (value ?? 'starttls').toLowerCase();
+  if (!(SMTP_SECURITY as readonly string[]).includes(normalized)) {
+    throw new Error(`SMTP_SECURITY must be one of ${SMTP_SECURITY.join(', ')}, got "${value}".`);
+  }
+  return normalized as SmtpSecurity;
 }
 
 function readKeyFile(path: string): string {

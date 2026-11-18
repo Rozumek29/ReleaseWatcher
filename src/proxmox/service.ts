@@ -512,23 +512,48 @@ export class ContainerService {
   /** Runs `task` in the background for an existing run and finishes the run with its result. */
   private track(container: Container, run: Run, log: RunLog, task: (log: RunLog) => Promise<TaskResult>): void {
     const promise = (async () => {
+      let finished: Run;
       try {
         const result = await task(log);
-        return log.finish(result.ok, result.exitCode);
+        finished = log.finish(result.ok, result.exitCode);
       } catch (error) {
         log.note(`Failed: ${error instanceof Error ? error.message : String(error)}`);
         this.deps.log.warn({ err: error, vmid: container.vmid, kind: run.kind }, 'Container task failed');
-        return log.finish(false, null);
+        finished = log.finish(false, null);
       } finally {
         this.active.delete(container.id);
         this.activeRuns.delete(container.id);
         this.logs.delete(run.id);
       }
+      // After the container is free again: sending can take a few seconds (SMTP).
+      try {
+        await this.notifyUpdateResult(container, finished);
+      } catch (error) {
+        this.deps.log.error({ err: error, vmid: container.vmid }, 'Sending the update result failed');
+      }
+      return finished;
     })();
     this.active.set(container.id, promise);
     this.activeRuns.set(container.id, run.id);
     this.logs.set(run.id, log);
     this.latest.set(container.id, promise);
+  }
+
+  /** Reports a finished update (checks are reported by {@link notifyNewUpdates}). */
+  private async notifyUpdateResult(container: Container, run: Run): Promise<void> {
+    if (run.kind === 'check') {
+      return;
+    }
+    const app = run.appId === null ? null : this.deps.containers.getApp(container.id, run.appId);
+    await this.deps.dispatcher.dispatchUpdateResult({
+      vmid: container.vmid,
+      isNode: container.kind === 'node',
+      containerName: container.name,
+      kind: run.kind,
+      appName: app?.name ?? null,
+      succeeded: run.status === 'succeeded',
+      detail: lastNote(run.output, run.status === 'succeeded'),
+    });
   }
 
   /** Waits for the most recent task of a container (tests, scheduler). */
@@ -1019,7 +1044,9 @@ export class ContainerService {
         .filter((a) => appUpdateAvailable(a))
         .map((a) => ({ name: a.name, installedVersion: a.installedVersion, latestVersion: a.latestVersion })),
     });
-    if (result.sent.length > 0) {
+    if (result.queued) {
+      log.note('Notification queued for the summary of this check run');
+    } else if (result.sent.length > 0) {
       log.note(`Notification sent (${result.sent.join(', ')})`);
     }
   }
@@ -1035,4 +1062,17 @@ function describeStep(result: StepResult | undefined): string {
   }
   const text = result.output.trim();
   return text ? `exit code ${result.exitCode}: ${text.slice(-500)}` : `exit code ${result.exitCode}`;
+}
+
+/** The status line explaining a failed update ("Update failed – exit code 1", "Backup failed – …"); null when it succeeded. */
+function lastNote(output: string, succeeded: boolean): string | null {
+  if (succeeded) {
+    return null;
+  }
+  const notes = output
+    .split('\n')
+    .filter((line) => line.startsWith('» '))
+    .map((line) => line.slice(2).trim());
+  const reason = notes.findLast((line) => /\bfail/i.test(line) || /\bcancel|\bstopped at\b|timed out/i.test(line));
+  return (reason ?? notes.at(-1) ?? null)?.slice(0, 500) ?? null;
 }

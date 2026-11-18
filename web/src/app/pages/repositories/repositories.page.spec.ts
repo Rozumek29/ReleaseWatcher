@@ -72,7 +72,7 @@ describe('RepositoriesPage', () => {
 
   it('points to settings when no notifier is configured', async () => {
     const { el } = await render([], false);
-    expect(el.querySelector('.callout a')?.getAttribute('href')).toBe('/settings');
+    expect(el.querySelector('.callout a')?.getAttribute('href')).toBe('/settings?tab=notifications');
     expect(el.querySelector('.empty h2')?.textContent).toContain('No repositories yet');
   });
 

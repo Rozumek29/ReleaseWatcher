@@ -167,6 +167,30 @@ describe('containers API', () => {
     assert.match(run?.output ?? '', /Backing up CT 101 to storage "pbs"/);
   });
 
+  it('notifies about finished and failed updates when switched on', async () => {
+    const container = await addContainer();
+    shell.on(/apt-get -y/, { output: 'E: Could not get lock\n', exitCode: 100 });
+
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`, { backup: false });
+    await app.containers.wait(container.id);
+    assert.equal(notifier.resultsSent.length, 0); // off by default
+
+    await request('PUT', '/api/settings', { notifyUpdateFailed: true, notifyUpdateSucceeded: true });
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`, { backup: false });
+    await app.containers.wait(container.id);
+    assert.equal(notifier.resultsSent.length, 1);
+    assert.deepEqual(
+      { ...notifier.resultsSent[0], detail: undefined },
+      { vmid: 101, isNode: false, containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
+    );
+    assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
+
+    shell.on(/apt-get -y/, { output: 'done\n' });
+    await request('POST', `/api/containers/${container.id}/apt-upgrade`, { backup: false });
+    await app.containers.wait(container.id);
+    assert.deepEqual([notifier.resultsSent[1]?.succeeded, notifier.resultsSent[1]?.detail], [true, null]);
+  });
+
   it('chooses whether to back up: per update, per container, then the global default', async () => {
     const container = await addContainer();
     const dto = (await request('GET', `/api/containers/${container.id}`)).json();

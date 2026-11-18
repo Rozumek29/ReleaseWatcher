@@ -15,6 +15,7 @@ describe('HTTP API', () => {
   let app: App;
   let source: FakeSource;
   let notifier: RecordingNotifier;
+  let store: RepositoryStore;
   let lastHeaders: readonly { name: string; value: string }[] = [];
   let baseUrl: URL;
 
@@ -35,7 +36,7 @@ describe('HTTP API', () => {
     source = new FakeSource();
     source.releases = [release('v1', 1)];
     notifier = new RecordingNotifier();
-    const store = new RepositoryStore(':memory:');
+    store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({ POLL_INTERVAL_MINUTES: '15' }));
     app = await buildApp({
       store,
@@ -196,6 +197,83 @@ describe('HTTP API', () => {
 
     const badInterval = await inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: 0 } });
     assert.ok(badInterval.json().errors.pollIntervalMinutes);
+  });
+
+  it('saves e-mail and notification settings without returning the SMTP password', async () => {
+    const initial = (await inject('/api/settings')).json();
+    assert.equal(initial.email.configured, false);
+    assert.equal(initial.email.smtpPort, 587);
+    assert.equal(initial.email.smtpSecurity, 'starttls');
+    assert.deepEqual(initial.notifications, {
+      digest: false,
+      digestSource: 'env',
+      releases: true,
+      appUpdates: true,
+      aptUpdates: true,
+      updateSucceeded: false,
+      updateFailed: false,
+    });
+
+    const updated = await inject({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: {
+        smtpHost: 'smtp.example.com',
+        smtpPort: 465,
+        smtpSecurity: 'tls',
+        smtpUsername: 'alerts',
+        smtpPassword: 'smtp-secret-value',
+        emailFrom: 'ReleaseWatcher <alerts@example.com>',
+        emailTo: 'me@example.com, you@example.com',
+        notificationDigest: true,
+        notifyAptUpdates: false,
+      },
+    });
+    assert.equal(updated.statusCode, 200);
+    const body = updated.json();
+    assert.equal(JSON.stringify(body).includes('smtp-secret-value'), false);
+    assert.equal(body.email.smtpPasswordConfigured, true);
+    assert.equal(body.email.smtpPasswordSource, 'ui');
+    assert.equal(body.email.to, 'me@example.com, you@example.com');
+    assert.equal(body.notifications.digest, true);
+    assert.equal(body.notifications.aptUpdates, false);
+    // Encrypted at rest.
+    const stored = store.database.query<{ value: string }, []>("SELECT value FROM settings WHERE key = 'smtpPassword'").get();
+    assert.ok(stored && !stored.value.includes('smtp-secret-value'));
+
+    // Omitted = keep, null = remove.
+    const kept = (await inject({ method: 'PUT', url: '/api/settings', payload: { smtpPort: 587 } })).json();
+    assert.equal(kept.email.smtpPasswordConfigured, true);
+    const removed = (await inject({ method: 'PUT', url: '/api/settings', payload: { smtpPassword: null } })).json();
+    assert.equal(removed.email.smtpPasswordConfigured, false);
+  });
+
+  it('validates e-mail settings', async () => {
+    const put = (payload: object) => inject({ method: 'PUT', url: '/api/settings', payload });
+    assert.ok((await put({ emailTo: 'me@example.com, nope' })).json().errors.emailTo);
+    assert.ok((await put({ emailFrom: 'x' })).json().errors.emailFrom);
+    assert.ok((await put({ smtpSecurity: 'ssl' })).json().errors.smtpSecurity);
+    assert.ok((await put({ smtpPort: 70000 })).json().errors.smtpPort);
+  });
+
+  it('tests a single notification channel', async () => {
+    const one = await inject({ method: 'POST', url: '/api/notifiers/test', payload: { notifier: 'recording' } });
+    assert.deepEqual(one.json(), { sent: ['recording'], failed: [] });
+    const missing = await inject({ method: 'POST', url: '/api/notifiers/test', payload: { notifier: 'email' } });
+    assert.equal(missing.statusCode, 409);
+  });
+
+  it('sends the releases of one check run as a digest', async () => {
+    await inject({ method: 'PUT', url: '/api/settings', payload: { notificationDigest: true } });
+    await add('acme/widget');
+    source.releases = [release('v3', 3), release('v2', 2), release('v1', 1)];
+    await inject({ method: 'POST', url: '/api/check-all' });
+    assert.equal(notifier.sent.length, 0);
+    assert.equal(notifier.digests.length, 1);
+    assert.deepEqual(
+      notifier.digests[0]?.map((e) => (e.type === 'release' ? e.release.release.tag : e.type)),
+      ['v2', 'v3'],
+    );
   });
 
   it('reports status and runs a check of all repositories', async () => {

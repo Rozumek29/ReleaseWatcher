@@ -63,8 +63,9 @@ export class ApiService {
     return this.http.get<Notifier[]>(`${this.baseUrl}/notifiers`);
   }
 
-  sendTestNotification(): Observable<TestNotificationResult> {
-    return this.http.post<TestNotificationResult>(`${this.baseUrl}/notifiers/test`, {});
+  /** Sends a sample release to every enabled channel, or only to `notifier` (e.g. "email"). */
+  sendTestNotification(notifier?: string): Observable<TestNotificationResult> {
+    return this.http.post<TestNotificationResult>(`${this.baseUrl}/notifiers/test`, notifier ? { notifier } : {});
   }
 
   getSettings(): Observable<AppSettings> {

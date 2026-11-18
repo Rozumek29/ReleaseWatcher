@@ -21,6 +21,7 @@ export class ContainerScheduler {
   private readonly defaultCron: () => string;
   private readonly concurrency: () => number;
   private readonly log: Pick<Logger, 'warn' | 'error'>;
+  private readonly batch: <T>(task: () => Promise<T>) => Promise<T>;
   private readonly cache = new Map<string, CronSchedule | null>();
 
   constructor(deps: {
@@ -30,12 +31,15 @@ export class ContainerScheduler {
     /** Maximum number of checks running at the same time (read on every dispatch). */
     concurrency?: () => number;
     log: Pick<Logger, 'warn' | 'error'>;
+    /** Groups the checks queued together into one run of notifications (digest mode). */
+    batch?: <T>(task: () => Promise<T>) => Promise<T>;
   }) {
     this.store = deps.store;
     this.service = deps.service;
     this.defaultCron = deps.defaultCron;
     this.concurrency = deps.concurrency ?? (() => 1);
     this.log = deps.log;
+    this.batch = deps.batch ?? ((task) => task());
   }
 
   /** Schedule of a container (null when its expression is invalid). */
@@ -73,30 +77,30 @@ export class ContainerScheduler {
 
   /** Queues the checks due at `now` (exposed for tests). Resolves when the queue is empty. */
   tick(now: Date): Promise<void> {
-    if (this.service.shell.isConfigured) {
-      for (const container of this.store.listEnabled()) {
-        if (this.scheduleOf(container)?.matches(now)) {
-          this.enqueue(container.id, 'schedule');
-        }
-      }
-    }
-    return this.idle();
+    const due = this.service.shell.isConfigured
+      ? this.store.listEnabled().filter((container) => this.scheduleOf(container)?.matches(now))
+      : [];
+    return due.length === 0 ? this.idle() : this.queueAll(due.map((c) => c.id), 'schedule');
   }
 
   /** Queues a check of all enabled containers (manual "check all"). Resolves when the queue is empty. */
   checkAll(): Promise<void> {
-    for (const container of this.store.listEnabled()) {
-      this.enqueue(container.id, 'manual');
-    }
-    return this.idle();
+    return this.queueAll(this.store.listEnabled().map((c) => c.id), 'manual');
   }
 
   /** Queues a manual check of the given containers (e.g. after adding several at once). */
   checkMany(containerIds: readonly number[]): Promise<void> {
-    for (const id of containerIds) {
-      this.enqueue(id, 'manual');
-    }
-    return this.idle();
+    return this.queueAll(containerIds, 'manual');
+  }
+
+  /** Queues checks as one batch and resolves when the queue is empty. */
+  private queueAll(containerIds: readonly number[], trigger: RunTrigger): Promise<void> {
+    return this.batch(() => {
+      for (const id of containerIds) {
+        this.enqueue(id, trigger);
+      }
+      return this.idle();
+    });
   }
 
   /** Resolves when nothing is queued or running. */

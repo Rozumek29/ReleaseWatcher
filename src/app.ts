@@ -29,7 +29,7 @@ import {
   type SettingsService,
 } from './settings.ts';
 import { scanDirectory, StaticUi } from './static-ui.ts';
-import { parseId, readBody, RequestValidationError, type ObjectSchema, type Schema } from './validation.ts';
+import { parseId, readBody, RequestValidationError, validate, type ObjectSchema, type Schema } from './validation.ts';
 import {
   compareVersions,
   fetchInstalledVersion,
@@ -220,7 +220,25 @@ const settingsSchema: ObjectSchema = {
     containerCheckConcurrency: { type: 'integer', nullable: true },
     backupStorage: { type: 'string', nullable: true, maxLength: 100 },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
+    smtpHost: { type: 'string', nullable: true, maxLength: 253 },
+    smtpPort: { type: 'integer', nullable: true },
+    smtpSecurity: { type: 'string', nullable: true, maxLength: 20 },
+    smtpUsername: { type: 'string', nullable: true, maxLength: 500 },
+    smtpPassword: { type: 'string', nullable: true, maxLength: 500 },
+    emailFrom: { type: 'string', nullable: true, maxLength: 500 },
+    emailTo: { type: 'string', nullable: true, maxLength: 5000 },
+    notificationDigest: { type: 'boolean', nullable: true },
+    notifyReleases: { type: 'boolean', nullable: true },
+    notifyAppUpdates: { type: 'boolean', nullable: true },
+    notifyAptUpdates: { type: 'boolean', nullable: true },
+    notifyUpdateSucceeded: { type: 'boolean', nullable: true },
+    notifyUpdateFailed: { type: 'boolean', nullable: true },
   },
+};
+
+const testNotificationSchema: ObjectSchema = {
+  type: 'object',
+  properties: { notifier: { type: 'string', nullable: true, maxLength: 50 } },
 };
 
 /** The UI files to serve: the ones embedded into a compiled executable, else the files of `publicDir`. */
@@ -233,7 +251,17 @@ async function loadUi(deps: Pick<AppDeps, 'publicDir' | 'embeddedUi'>): Promise<
 
 export async function buildApp(deps: AppDeps): Promise<App> {
   const log = deps.log ?? createLogger('info');
-  const dispatcher = new NotificationDispatcher(deps.notifiers, log);
+  const dispatcher = new NotificationDispatcher(deps.notifiers, log, () => {
+    const current = deps.settings.current;
+    return {
+      digest: current.notificationDigest,
+      releases: current.notifyReleases,
+      appUpdates: current.notifyAppUpdates,
+      aptUpdates: current.notifyAptUpdates,
+      updateSucceeded: current.notifyUpdateSucceeded,
+      updateFailed: current.notifyUpdateFailed,
+    };
+  });
   const checker = new ReleaseChecker({
     store: deps.store,
     source: deps.source,
@@ -270,6 +298,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     service: containers,
     defaultCron: () => settings.current.containerCheckCron,
     concurrency: () => settings.current.containerCheckConcurrency,
+    batch: (task) => dispatcher.batch(task),
     log,
   });
   const updater = new ContainerUpdater({ store: containerStore, service: containers, log });
@@ -314,6 +343,29 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         backupStorageSource: settings.sourceOf('backupStorage'),
         backupBeforeUpdate: current.backupBeforeUpdate,
         backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
+      },
+      email: {
+        configured: deps.notifiers.some((n) => n.name === 'email' && n.isEnabled),
+        smtpHost: current.smtpHost,
+        smtpHostSource: settings.sourceOf('smtpHost'),
+        smtpPort: current.smtpPort,
+        smtpSecurity: current.smtpSecurity,
+        smtpUsername: current.smtpUsername,
+        // The password itself is never returned.
+        smtpPasswordConfigured: !!current.smtpPassword,
+        smtpPasswordSource: settings.sourceOf('smtpPassword'),
+        from: current.emailFrom,
+        to: current.emailTo,
+        toSource: settings.sourceOf('emailTo'),
+      },
+      notifications: {
+        digest: current.notificationDigest,
+        digestSource: settings.sourceOf('notificationDigest'),
+        releases: current.notifyReleases,
+        appUpdates: current.notifyAppUpdates,
+        aptUpdates: current.notifyAptUpdates,
+        updateSucceeded: current.notifyUpdateSucceeded,
+        updateFailed: current.notifyUpdateFailed,
       },
     };
   };
@@ -595,11 +647,18 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         '/api/notifiers': {
           GET: () => Response.json(deps.notifiers.map((n) => ({ name: n.name, isEnabled: n.isEnabled }))),
         },
-        // Sends a fake release to every enabled notifier to verify the configuration.
+        // Sends a fake release to every enabled notifier (or only `notifier`) to verify the configuration.
         '/api/notifiers/test': {
-          POST: async () =>
-            Response.json(
-              await dispatcher.dispatch({
+          POST: async (req) => {
+            // The body is optional: without it every enabled channel is tested.
+            const text = await req.text();
+            const body = text.trim() ? (validate(parseJson(text), testNotificationSchema, 'body') as { notifier?: string | null }) : {};
+            const name = body.notifier ?? undefined;
+            if (name !== undefined && !deps.notifiers.some((n) => n.name === name && n.isEnabled)) {
+              return problem(409, 'Channel not configured', { detail: `The ${name} channel is not configured.` });
+            }
+            return Response.json(
+              await dispatcher.test({
                 owner: 'releasewatcher',
                 repository: 'test',
                 release: {
@@ -612,8 +671,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
                   authorLogin: null,
                   authorAvatarUrl: null,
                 },
-              }),
-            ),
+              }, name),
+            );
+          },
         },
 
         '/api/settings': {
@@ -662,4 +722,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   return { checker, poller, scheduler, updater, containers, auth, log, listen, close };
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new RequestValidationError('body must be valid JSON');
+  }
 }

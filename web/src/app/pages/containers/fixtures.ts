@@ -24,6 +24,28 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },
+  email: {
+    configured: false,
+    smtpHost: null,
+    smtpHostSource: null,
+    smtpPort: 587,
+    smtpSecurity: 'starttls',
+    smtpUsername: null,
+    smtpPasswordConfigured: false,
+    smtpPasswordSource: null,
+    from: null,
+    to: null,
+    toSource: null,
+  },
+  notifications: {
+    digest: false,
+    digestSource: 'env',
+    releases: true,
+    appUpdates: true,
+    aptUpdates: true,
+    updateSucceeded: false,
+    updateFailed: false,
+  },
 });
 
 export const container = (overrides: Partial<Container> = {}): Container => ({

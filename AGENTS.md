@@ -102,7 +102,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 ### Secrets
 
-- Installed-version header values, the Discord webhook URL, the GitHub token (global and per repository), the
+- Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
   Proxmox SSH private key, password hashes, session tokens and the setup code are secrets (the key is exposed only as `sshKeyConfigured`, a repository token as
   `hasOwnToken` + masked value). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
@@ -142,8 +142,8 @@ When changing an endpoint, also update the API table in `README.md`.
 
 ## Common changes – checklist
 
-- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`, both `notify` and
-  `notifyContainerUpdates`), register it in
+- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`: `notify`, `notifyContainerUpdates`,
+  `notifyUpdateResult` and `notifyDigest`), register it in
   `src/notifiers/index.ts`; if configurable from the UI, see “New setting”.
 - **New setting:** `Settings` + `current` + `validate()` in `src/settings.ts`, env default in `src/config.ts`
   (and `.env.example`), DTO + `PUT /api/settings` schema in `src/app.ts`, `models.ts` + Settings page in

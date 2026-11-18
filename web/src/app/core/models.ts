@@ -117,6 +117,36 @@ export interface AppSettings {
     backupBeforeUpdate: boolean;
     backupBeforeUpdateSource: SettingSource;
   };
+  email: {
+    /** True when host, sender and recipients are set. */
+    configured: boolean;
+    smtpHost: string | null;
+    smtpHostSource: SettingSource;
+    smtpPort: number;
+    smtpSecurity: SmtpSecurity;
+    smtpUsername: string | null;
+    /** The password itself is never returned. */
+    smtpPasswordConfigured: boolean;
+    smtpPasswordSource: SettingSource;
+    from: string | null;
+    /** Comma-separated recipients. */
+    to: string | null;
+    toSource: SettingSource;
+  };
+  notifications: NotificationPreferences & { digestSource: SettingSource };
+}
+
+/** `starttls`: port 587, upgraded with STARTTLS; `tls`: TLS from the start (465); `none`: unencrypted. */
+export type SmtpSecurity = 'starttls' | 'tls' | 'none';
+
+/** Which notifications are sent, and whether one check run sends one summary (digest). */
+export interface NotificationPreferences {
+  digest: boolean;
+  releases: boolean;
+  appUpdates: boolean;
+  aptUpdates: boolean;
+  updateSucceeded: boolean;
+  updateFailed: boolean;
 }
 
 /** A storage on the node that accepts backups. */
@@ -138,6 +168,19 @@ export interface SettingsPatch {
   proxmoxPort?: number | null;
   proxmoxUser?: string | null;
   proxmoxSshKey?: string | null;
+  smtpHost?: string | null;
+  smtpPort?: number | null;
+  smtpSecurity?: SmtpSecurity | null;
+  smtpUsername?: string | null;
+  smtpPassword?: string | null;
+  emailFrom?: string | null;
+  emailTo?: string | null;
+  notificationDigest?: boolean | null;
+  notifyReleases?: boolean | null;
+  notifyAppUpdates?: boolean | null;
+  notifyAptUpdates?: boolean | null;
+  notifyUpdateSucceeded?: boolean | null;
+  notifyUpdateFailed?: boolean | null;
   containerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
   backupStorage?: string | null;
