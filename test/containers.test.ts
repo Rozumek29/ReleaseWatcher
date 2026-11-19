@@ -615,7 +615,7 @@ describe('containers API', () => {
     assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
     const run = await app.containers.wait(node.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
-    assert.match(shell.commands[0]!, /^export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y .* dist-upgrade$/);
+    assert.match(shell.commands[0]!, /^export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y .* dist-upgrade && apt-get -y autoremove$/);
     assert.equal(shell.commands.some((c) => c.includes('vzdump') || c.startsWith('pct')), false);
     dto = (await request('GET', `/api/containers/${node.id}`)).json();
     assert.deepEqual(dto.aptUpgradable, []);

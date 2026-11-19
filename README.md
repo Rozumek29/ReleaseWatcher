@@ -140,9 +140,9 @@ dedicated to it.
 - **Add containers** found on the node (`pct list`) one by one or with **Add all**. Commands run inside a container
   with `pct exec <vmid> -- sh -lc '…'`.
 - **Add host** adds the Proxmox node itself (apt only): it is checked like a container and upgraded with
-  `apt-get dist-upgrade`, as Proxmox VE requires. There is no backup before host upgrades and the host is never
+  `apt-get dist-upgrade` (followed by `apt-get autoremove`), as Proxmox VE requires. There is no backup before host upgrades and the host is never
   rebooted – reboot it yourself after a kernel update.
-- **apt check:** `apt-get update` + `apt list --upgradable`; upgrade = `apt-get -y upgrade`, keeping existing
+- **apt check:** `apt-get update` + `apt list --upgradable`; upgrade = `apt-get -y upgrade` + `apt-get -y autoremove`, keeping existing
   config files.
 - **Applications** per container:
   - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,

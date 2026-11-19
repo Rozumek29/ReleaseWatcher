@@ -481,6 +481,7 @@ export const NODE_APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
   'apt-get update',
   'apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade',
+  'apt-get -y autoremove',
 ].join(' && ');
 
 /** Human-readable name of a check/update target in logs and notifications. */
@@ -491,6 +492,7 @@ export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
   'apt-get update',
   'apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold upgrade',
+  'apt-get -y autoremove',
 ].join(' && ');
 
 const APT_LINE = /^([^\s/]+)\/\S+\s+(\S+)\s+\S+(?:\s+\[upgradable from:\s*([^\]\s]+)\])?/;
