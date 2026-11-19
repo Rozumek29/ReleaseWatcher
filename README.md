@@ -7,7 +7,7 @@
 **Self-hosted release tracker for your homelab.**<br>
 Get notified about new GitHub releases and keep your Proxmox LXC containers up to date – from one small app.
 
-[![Version](https://img.shields.io/badge/version-1.2.0-5865f2)](#releases)
+[![Version](https://img.shields.io/badge/version-1.2.1-5865f2)](#releases)
 [![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Docker](https://img.shields.io/badge/ghcr.io-releasewatcher-2496ed?logo=docker&logoColor=white)](#docker)
@@ -206,7 +206,7 @@ Images are published to `ghcr.io/rozumek29/releasewatcher` for every release:
 | --- | --- | --- |
 | `latest` | – | every stable release |
 | `<major>.<minor>` | `1.2` | every patch release of that line |
-| `<version>` | `1.2.0` | never (pinned) |
+| `<version>` | `1.2.1` | never (pinned) |
 | `beta-<version>` | `beta-1.3.0` | pre-releases only |
 
 `docker-compose.yml` with the published image:
@@ -271,8 +271,8 @@ install -d -m 755 /opt/releasewatcher                                           
 install -d -o root -g releasewatcher -m 750 /etc/releasewatcher                 # configuration
 
 # 3. Executable from the GitHub release
-gh release download v1.2.0 -R rozumek29/releasewatcher -p 'releasewatcher-*-linux-x64'
-install -m 755 releasewatcher-1.2.0-linux-x64 /opt/releasewatcher/releasewatcher
+gh release download v1.2.1 -R rozumek29/releasewatcher -p 'releasewatcher-*-linux-x64'
+install -m 755 releasewatcher-1.2.1-linux-x64 /opt/releasewatcher/releasewatcher
 
 # 4. Configuration (optional – everything can be set in the UI; behind a reverse proxy set PUBLIC_URL)
 install -m 640 -g releasewatcher .env.example /etc/releasewatcher/releasewatcher.env
@@ -455,7 +455,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PUT` | `/api/settings` | Partial update; omitted = keep, `null` = reset to the environment value |
 | `GET` | `/api/status` | App version, poller state, repository and container counts |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
-| `GET` | `/api/version` | Running version, e.g. `{ "version": "1.2.0" }` (public) |
+| `GET` | `/api/version` | Running version, e.g. `{ "version": "1.2.1" }` (public) |
 | `GET` | `/health` | Liveness (public) |
 
 </details>

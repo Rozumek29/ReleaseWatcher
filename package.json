@@ -1,6 +1,6 @@
 {
   "name": "releasewatcher",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "description": "Watches GitHub repositories for new releases and notifies Discord (and other channels).",
   "type": "module",
