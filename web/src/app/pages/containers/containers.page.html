@@ -54,34 +54,41 @@
 @if (addOpen()) {
   <section class="card add-card" aria-labelledby="add-title">
     <div class="add-head">
-      <h2 id="add-title">Add a container</h2>
+      <h2 id="add-title">Add a container or virtual machine</h2>
       <button type="button" class="icon-btn" (click)="addOpen.set(false)" aria-label="Close">
         <app-icon name="close" [size]="16" />
       </button>
     </div>
     @if (discovering()) {
-      <p class="muted">Reading <code>pct list</code> from the node…</p>
+      <p class="muted">Reading <code>pct list</code> and <code>qm list</code> from the node…</p>
     } @else if (discoverError(); as e) {
       <p class="error-line"><app-icon name="alert" [size]="14" /> <span>{{ e }}</span></p>
     } @else if (available().length === 0) {
-      <p class="muted">All containers of the node have been added already.</p>
+      <p class="muted">All containers and virtual machines of the node have been added already.</p>
     } @else {
       <form class="add-form" (ngSubmit)="add()">
-        <label for="vmid" class="visually-hidden">Container</label>
+        <label for="vmid" class="visually-hidden">Container or virtual machine</label>
         <select id="vmid" class="input" name="vmid" [(ngModel)]="selectedVmid">
           @for (c of available(); track c.vmid) {
-            <option [ngValue]="c.vmid">{{ c.vmid }} · {{ c.name }} ({{ c.status }})</option>
+            <option [ngValue]="c.vmid">{{ c.kind === 'vm' ? 'VM' : 'CT' }} {{ c.vmid }} · {{ c.name }} ({{ c.status }})</option>
           }
         </select>
         <button type="submit" class="btn" [disabled]="adding() || selectedVmid === null">
           {{ adding() ? 'Adding…' : 'Add' }}
         </button>
-        @if (available().length > 1) {
-          <button type="button" class="btn btn-secondary" (click)="addAll()" [disabled]="adding()">
-            Add all ({{ available().length }})
+        @if (availableContainers().length > 1) {
+          <button type="button" class="btn btn-secondary" (click)="addAll()" [disabled]="adding()" title="Containers only – virtual machines are added one by one">
+            Add all containers ({{ availableContainers().length }})
           </button>
         }
       </form>
+      @if (selectedKind() === 'vm') {
+        <p class="muted small vm-hint">
+          Virtual machines are reached through the QEMU guest agent: install <code>qemu-guest-agent</code> in the VM and
+          enable “QEMU Guest Agent” in its Proxmox options. Appliances without apt (e.g. Home Assistant OS) only get
+          restarts and your own application commands.
+        </p>
+      }
     }
     @if (!hasNode() && !discovering()) {
       <div class="node-row">
@@ -187,6 +194,8 @@
                   <span class="ct-title">
                     @if (c.kind === 'node') {
                       <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Host</span>
+                    } @else if (c.kind === 'vm') {
+                      <span class="ct-id mono" title="Virtual machine">VM {{ c.vmid }}</span>
                     } @else {
                       <span class="ct-id mono">{{ c.vmid }}</span>
                     }
@@ -249,6 +258,9 @@
                   <span class="vmid mono">{{ c.vmid }}</span>
                 }
                 <span class="name">{{ c.name }}</span>
+                @if (c.kind === 'vm') {
+                  <span class="badge" title="Virtual machine – commands run through the QEMU guest agent">VM</span>
+                }
                 @if (c.status) {
                   <span [class]="'badge ' + statusClass(c)">{{ c.status }}</span>
                 }
@@ -387,7 +399,7 @@
                     class="btn btn-sm btn-secondary"
                     (click)="confirming.set('restart-' + c.id)"
                     [disabled]="isBusy(c) || !configured()"
-                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : 'pct reboot – clean shutdown and start'"
+                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : (c.kind === 'vm' ? 'qm' : 'pct') + ' reboot – clean shutdown and start'"
                   >
                     <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : 'Restart' }}
                   </button>

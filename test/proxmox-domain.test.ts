@@ -26,7 +26,15 @@ import {
   NODE_RESTART_COMMAND,
   parseRestartCheck,
   RESTART_CHECK_SCRIPT,
-  restartContainerCommand,
+  restartGuestCommand,
+  restartCheckScript,
+  VM_RESTART_CHECK_SCRIPT,
+  startGuestCommand,
+  shutdownGuestCommand,
+  parseDiscoverOutput,
+  DISCOVER_COMMAND,
+  guestExec,
+  parseGuestExecResult,
   type Container,
   type ContainerApp,
 } from '../src/proxmox/domain.ts';
@@ -69,8 +77,8 @@ describe('proxmox domain', () => {
       '',
     ].join('\n');
     assert.deepEqual(parsePctList(output), [
-      { vmid: 101, status: 'running', name: 'vaultwarden' },
-      { vmid: 102, status: 'stopped', name: 'jellyfin' },
+      { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden' },
+      { kind: 'lxc', vmid: 102, status: 'stopped', name: 'jellyfin' },
     ]);
   });
 
@@ -307,12 +315,64 @@ describe('proxmox domain', () => {
     // The host check looks at the kernel instead of processes.
     assert.match(NODE_RESTART_CHECK_SCRIPT, /uname -r/);
     assert.doesNotMatch(NODE_RESTART_CHECK_SCRIPT, /\/proc\//);
+    // A virtual machine has its own kernel and processes: both are checked.
+    assert.equal(restartCheckScript('vm'), VM_RESTART_CHECK_SCRIPT);
+    assert.match(VM_RESTART_CHECK_SCRIPT, /uname -r/);
+    assert.match(VM_RESTART_CHECK_SCRIPT, /\(deleted\\\)/);
+    assert.equal(restartCheckScript('lxc'), RESTART_CHECK_SCRIPT);
+    assert.equal(restartCheckScript('node'), NODE_RESTART_CHECK_SCRIPT);
   });
 
-  it('restarts a container cleanly and schedules a host restart', () => {
-    const command = restartContainerCommand(105);
-    assert.match(command, /^pct reboot 105 --timeout 120 \|\| exit \$\?\n/);
-    assert.match(command, /pct exec 105 -- sh -c .*\/proc\/net\/route/);
+  it('restarts a guest cleanly and schedules a host restart', () => {
+    const container = restartGuestCommand({ kind: 'lxc', vmid: 105 });
+    assert.match(container, /^pct reboot 105 --timeout 120 \|\| exit \$\?\n/);
+    assert.match(container, /pct exec 105 -- sh -c .*\/proc\/net\/route/);
+    const vm = restartGuestCommand({ kind: 'vm', vmid: 137 });
+    assert.match(vm, /^qm reboot 137 --timeout 120 \|\| exit \$\?\n/);
+    assert.match(vm, /qm agent 137 ping/);
+    assert.match(vm, /seq 1 180/);
+    assert.match(startGuestCommand({ kind: 'vm', vmid: 137 }), /^qm start 137 \|\| exit/);
+    assert.equal(shutdownGuestCommand({ kind: 'vm', vmid: 137 }), 'qm shutdown 137 --timeout 120 --forceStop 1');
+    assert.equal(shutdownGuestCommand({ kind: 'lxc', vmid: 105 }), 'pct shutdown 105 --timeout 120 --forceStop 1');
     assert.match(NODE_RESTART_COMMAND, /^systemd-run .*--on-active=15 .*systemctl reboot$/);
+  });
+
+  it('lists containers and virtual machines of the node', () => {
+    const output = [
+      'VMID       Status     Lock         Name',
+      '250        running                 uptimekuma',
+      '---releasewatcher-qm---',
+      '      VMID NAME                 STATUS     MEM(MiB)   BOOTDISK(GiB) PID',
+      '       111 ha                   running    4096              32.00 2208',
+      '       137 chrome               stopped    4096              32.00 0',
+      '',
+    ].join('\n');
+    assert.deepEqual(parseDiscoverOutput(output), [
+      { kind: 'vm', vmid: 111, status: 'running', name: 'ha' },
+      { kind: 'vm', vmid: 137, status: 'stopped', name: 'chrome' },
+      { kind: 'lxc', vmid: 250, status: 'running', name: 'uptimekuma' },
+    ]);
+    assert.match(DISCOVER_COMMAND, /^pct list \|\| exit \$\?\n.*\nqm list$/);
+  });
+
+  it('runs commands in a virtual machine through the guest agent and reads its JSON', () => {
+    const command = guestExec({ kind: 'vm', vmid: 137 }, 'apt-get update', 600);
+    assert.match(command, /^qm guest exec 137 --timeout 600 -- sh -c '/);
+    assert.match(command, /exec 2>&1\n/);
+    assert.match(guestExec({ kind: 'lxc', vmid: 105 }, 'apt-get update', 600), /^pct exec 105 -- sh -c '/);
+
+    const json = '{\n   "err-data" : "err\\n",\n   "exitcode" : 3,\n   "exited" : 1,\n   "out-data" : "hello\\n"\n}\n';
+    assert.deepEqual(parseGuestExecResult(json), { exitCode: 3, output: 'hello\nerr\n', timedOut: false });
+    assert.deepEqual(parseGuestExecResult('timeout reached, returning pid\n{\n   "pid" : 8243\n}\n'), {
+      exitCode: -1,
+      output: '',
+      timedOut: true,
+    });
+    assert.match(
+      parseGuestExecResult('{"exitcode":0,"exited":1,"out-data":"x","out-truncated":1}')?.output ?? '',
+      /^x\n\[output truncated/,
+    );
+    assert.equal(parseGuestExecResult('QEMU guest agent is not running'), null);
+    assert.equal(parseGuestExecResult('{ broken'), null);
   });
 });

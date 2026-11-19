@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
 import { buildDigestPayload, buildUpdateResultPayload } from '../src/notifiers/discord.ts';
 import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationDispatcher, type NotificationPreferences } from '../src/notifiers/dispatcher.ts';
-import type { ContainerUpdatesNotification, NotificationEvent, UpdateResultNotification } from '../src/notifiers/notifier.ts';
+import { targetName, type ContainerUpdatesNotification, type NotificationEvent, type UpdateResultNotification } from '../src/notifiers/notifier.ts';
 import { RecordingNotifier, release, silentLog } from './helpers.ts';
 
 const releaseOf = (tag: string) => ({ owner: 'acme', repository: 'widget', release: release(tag, 1) });
@@ -156,5 +156,13 @@ describe('Discord digest and update results', () => {
     const ok = buildUpdateResultPayload({ ...failedUpdate, kind: 'app-update', appName: 'Nextcloud', succeeded: true, detail: null }, options).embeds[0];
     assert.equal(ok?.title, 'CT 105 (cloud): update of Nextcloud finished');
     assert.equal(ok?.color, 0x2ecc71);
+  });
+});
+
+describe('targetName', () => {
+  it('names containers, virtual machines and the host', () => {
+    assert.equal(targetName({ vmid: 105, containerName: 'nextcloud' }), 'CT 105 (nextcloud)');
+    assert.equal(targetName({ vmid: 137, isVm: true, containerName: 'debian' }), 'VM 137 (debian)');
+    assert.equal(targetName({ vmid: 0, isNode: true, containerName: 'pve' }), 'Proxmox host (pve)');
   });
 });

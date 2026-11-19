@@ -265,8 +265,11 @@ export interface DetectedApp {
 
 export interface Container {
   id: number;
-  /** `node` = the Proxmox host itself (apt only, vmid 0). */
-  kind: 'lxc' | 'node';
+  /**
+   * `lxc` = a container, `vm` = a virtual machine (commands through the QEMU guest agent),
+   * `node` = the Proxmox host itself (apt only, vmid 0).
+   */
+  kind: 'lxc' | 'vm' | 'node';
   vmid: number;
   name: string;
   isEnabled: boolean;
@@ -324,8 +327,9 @@ export interface ContainerAppRequest {
   timeoutSeconds: number | null;
 }
 
-/** A container found on the node by `pct list`. */
+/** A container (`pct list`) or virtual machine (`qm list`) found on the node. */
 export interface DiscoveredContainer {
+  kind: 'lxc' | 'vm';
   vmid: number;
   status: string;
   name: string;

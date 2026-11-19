@@ -7,9 +7,13 @@ import { silentLogger } from '../src/log.ts';
 import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeShell, FakeSource, RecordingNotifier, release } from './helpers.ts';
+import { FakeShell, FakeSource, guestJson, RecordingNotifier, release } from './helpers.ts';
 
 const PCT_LIST = 'VMID       Status     Lock         Name\n101        running                 vaultwarden\n102        stopped                 old\n';
+const QM_LIST =
+  '      VMID NAME                 STATUS     MEM(MiB)   BOOTDISK(GiB) PID\n       137 debian               running    4096              32.00 1667\n';
+/** Output of DISCOVER_COMMAND: `pct list`, a marker, `qm list`. */
+const discovered = (pct = PCT_LIST) => `${pct}---releasewatcher-qm---\n${QM_LIST}`;
 const APT_OUTPUT = `${APT_LIST_MARKER}\nListing...\ncurl/stable 8.1 amd64 [upgradable from: 8.0]\n`;
 
 describe('containers API', () => {
@@ -32,7 +36,7 @@ describe('containers API', () => {
 
   beforeEach(async () => {
     shell = new FakeShell()
-      .on(/^pct list$/, { output: PCT_LIST })
+      .on(/^pct list /, { output: discovered() })
       .on(/^pct status 101$/, { output: 'status: running\n' })
       .on(/^pct status 102$/, { output: 'status: stopped\n' })
       .on(/apt list --upgradable/, { output: APT_OUTPUT })
@@ -80,9 +84,73 @@ describe('containers API', () => {
     await addContainer();
     const response = await request('GET', '/api/proxmox/containers');
     assert.deepEqual(response.json(), [
-      { vmid: 101, status: 'running', name: 'vaultwarden', added: true },
-      { vmid: 102, status: 'stopped', name: 'old', added: false },
+      { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: true },
+      { kind: 'lxc', vmid: 102, status: 'stopped', name: 'old', added: false },
+      { kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false },
     ]);
+  });
+
+  it('checks, updates and restarts a virtual machine through the QEMU guest agent', async () => {
+    shell.on(/^qm status 137$/, { output: 'status: running\n' });
+    shell.on(/^qm guest exec 137 -- sh -lc .*reboot-required/, { output: 'kernel 6.12.48-amd64 6.12.57-amd64\nstale sshd\n' });
+    const response = await request('POST', '/api/containers', { vmid: 137 });
+    assert.equal(response.status, 201);
+    const vm = response.json();
+    assert.equal(vm.kind, 'vm');
+    assert.equal(vm.name, 'debian');
+    await app.containers.wait(vm.id);
+
+    // One batched `qm guest exec`, decoded from its JSON – no pct at all.
+    let dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    assert.equal(dto.lastError, null);
+    assert.deepEqual(dto.aptUpgradable, [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }]);
+    assert.deepEqual(dto.restartReasons, [
+      'Kernel 6.12.57-amd64 is installed, 6.12.48-amd64 is running',
+      'Processes use upgraded files: sshd',
+    ]);
+    assert.equal(shell.commands.some((c) => c.startsWith('pct') && !c.startsWith('pct list')), false);
+    assert.equal(notifier.containerSent.at(-1)?.isVm, true);
+
+    // apt upgrade runs detached on the node through the agent; the log shows the command's output, not the JSON.
+    shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('Setting up curl (8.1) ...\n', 0) });
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    assert.equal((await request('POST', `/api/containers/${vm.id}/apt-upgrade`, { backup: false })).status, 202);
+    let run = await app.containers.wait(vm.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /QEMU guest agent – the output appears when the command has finished/);
+    assert.match(run?.output ?? '', /Setting up curl \(8\.1\) \.\.\./);
+    assert.doesNotMatch(run?.output ?? '', /out-data/);
+    assert.match(shell.detached.at(-1)?.command ?? '', /^qm guest exec 137 --timeout 3600 -- sh -c '.*apt-get -y/s);
+
+    // The exit code comes from the JSON, not from `qm` (which succeeds even when the command fails).
+    shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('E: Unable to lock\n', 100) });
+    await request('POST', `/api/containers/${vm.id}/apt-upgrade`, { backup: false });
+    run = await app.containers.wait(vm.id);
+    assert.equal(run?.status, 'failed');
+    assert.equal(run?.exitCode, 100);
+    assert.match(run?.output ?? '', /E: Unable to lock/);
+
+    // Restart with `qm reboot`, waiting for the agent again.
+    shell.on(/^qm reboot 137 /, { output: '' });
+    assert.equal((await request('POST', `/api/containers/${vm.id}/restart`)).status, 202);
+    run = await app.containers.wait(vm.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /VM 137 restarted/);
+    assert.match(shell.detached.at(-1)?.command ?? '', /^qm reboot 137 --timeout 120[^]*qm agent 137 ping/);
+
+    // Without a running agent the check reports it once and keeps the previous results.
+    shell.guestAgentDown = true;
+    await request('POST', `/api/containers/${vm.id}/check`);
+    await app.containers.wait(vm.id);
+    dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    assert.match(dto.lastError, /^The QEMU guest agent did not run the commands \(QEMU guest agent is not running\)/);
+
+    // Virtual machines are not resized and not added by "Add all".
+    const saved = await request('PUT', `/api/containers/${vm.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
+    assert.deepEqual([saved.json().updateCores, saved.json().updateMemoryMb], [null, null]);
+    await request('DELETE', `/api/containers/${vm.id}`);
+    const added = (await request('POST', '/api/containers/add-all')).json();
+    assert.deepEqual(added.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['lxc:101', 'lxc:102']);
   });
 
   it('rejects containers that do not exist and duplicates', async () => {
@@ -181,7 +249,7 @@ describe('containers API', () => {
     assert.equal(notifier.resultsSent.length, 1);
     assert.deepEqual(
       { ...notifier.resultsSent[0], detail: undefined },
-      { vmid: 101, isNode: false, containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
+      { vmid: 101, isNode: false, isVm: false, containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
     );
     assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
 
@@ -647,7 +715,7 @@ describe('containers API', () => {
   });
 
   it('checks containers in parallel up to the configured limit, one batch command each', async () => {
-    shell.on(/^pct list$/, {
+    shell.on(/^pct list /, {
       output: `${PCT_LIST}103        running                 a\n104        running                 b\n`,
     });
     for (const vmid of [101, 103, 104]) {
@@ -946,7 +1014,7 @@ describe('application detection API', () => {
     scripts.clear();
     fetchedSlugs.length = 0;
     shell = new FakeShell()
-      .on(/^pct list$/, { output: PCT_LIST })
+      .on(/^pct list /, { output: discovered() })
       .on(/^pct status 101$/, { output: 'status: running\n' })
       .on(/^pct status 102$/, { output: 'status: stopped\n' })
       .on(/apt list --upgradable/, { output: APT_OUTPUT });

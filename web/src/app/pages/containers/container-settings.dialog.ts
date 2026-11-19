@@ -160,9 +160,9 @@ export class ContainerSettingsDialog {
           startWhenStopped: this.startWhenStopped,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
-          ...(container.kind === 'node'
-            ? {}
-            : { updateCores: this.updateCores || null, updateMemoryMb: this.updateMemoryMb || null }),
+          ...(container.kind === 'lxc'
+            ? { updateCores: this.updateCores || null, updateMemoryMb: this.updateMemoryMb || null }
+            : {}),
         }),
       );
       this.saved.emit(updated);

@@ -1,8 +1,8 @@
 import { Container, RunKind } from '../../core/models';
 
-/** "CT 101" for a container, "Proxmox host" for the node entry. */
+/** "CT 101" for a container, "VM 137" for a virtual machine, "Proxmox host" for the node entry. */
 export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
-  c.kind === 'node' ? 'Proxmox host' : `CT ${c.vmid}`;
+  c.kind === 'node' ? 'Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : `CT ${c.vmid}`;
 
 /** "Check", "apt upgrade", "Application update" or "Restart". */
 export function kindLabel(kind: RunKind): string {

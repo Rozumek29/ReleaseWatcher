@@ -318,13 +318,14 @@ describe('ContainersPage', () => {
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
     http.expectOne('/api/proxmox/containers').flush([
-      { vmid: 101, status: 'running', name: 'vaultwarden', added: true },
-      { vmid: 102, status: 'running', name: 'jellyfin', added: false },
+      { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: true },
+      { kind: 'lxc', vmid: 102, status: 'running', name: 'jellyfin', added: false },
     ]);
     await settle(fixture);
 
     const options = [...el.querySelectorAll('#vmid option')].map((o) => o.textContent);
-    expect(options).toEqual(['102 · jellyfin (running)']);
+    expect(options).toEqual(['CT 102 · jellyfin (running)']);
+    expect(el.querySelector('.vm-hint')).toBeNull();
 
     el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
     const request = http.expectOne('/api/containers');
@@ -338,20 +339,43 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.add-card')).toBeNull();
   });
 
+  it('adds a virtual machine with a hint about the guest agent and labels it as a VM', async () => {
+    const { fixture, el } = await create([]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    http.expectOne('/api/proxmox/containers').flush([{ kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false }]);
+    await settle(fixture);
+
+    expect([...el.querySelectorAll('#vmid option')].map((o) => o.textContent)).toEqual(['VM 137 · debian (running)']);
+    expect(el.querySelector('.vm-hint')?.textContent).toContain('qemu-guest-agent');
+
+    el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
+    http.expectOne('/api/containers').flush(
+      container({ id: 5, kind: 'vm', vmid: 137, name: 'debian', isBusy: true, restartReasons: [] }),
+    );
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+
+    expect(el.querySelector('.ct-id')?.textContent).toContain('VM 137');
+    expect(el.querySelector('.title-line')?.textContent).toContain('VM');
+  });
+
   it('adds all containers of the node at once', async () => {
     const { fixture, el } = await create([]);
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
     http.expectOne('/api/proxmox/containers').flush([
-      { vmid: 101, status: 'running', name: 'vaultwarden', added: false },
-      { vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
+      { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: false },
+      { kind: 'lxc', vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
+      { kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false },
     ]);
     await settle(fixture);
 
     const addAll = [...el.querySelectorAll<HTMLButtonElement>('.add-form button')].find((b) =>
       b.textContent?.includes('Add all'),
     )!;
-    expect(addAll.textContent?.trim()).toBe('Add all (2)');
+    // Virtual machines are added one by one.
+    expect(addAll.textContent?.trim()).toBe('Add all containers (2)');
     addAll.click();
     const request = http.expectOne('/api/containers/add-all');
     expect(request.request.method).toBe('POST');

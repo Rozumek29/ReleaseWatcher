@@ -70,6 +70,8 @@ export class ContainersPage {
   protected readonly now = signal(Date.now());
 
   protected readonly available = computed(() => this.discovered().filter((c) => !c.added));
+  /** "Add all" adds containers only: virtual machines need the guest agent and may have no apt. */
+  protected readonly availableContainers = computed(() => this.available().filter((c) => c.kind === 'lxc'));
   protected readonly globalCron = computed(() => this.settings()?.proxmox.checkCron ?? '');
   protected readonly backupStorage = computed(() => this.settings()?.proxmox.backupStorage ?? null);
   /** "Backup first" checkbox of the open update confirmation. */
@@ -184,6 +186,12 @@ export class ContainersPage {
     }
   }
 
+  /** Kind of the guest picked in the add form. */
+  protected selectedKind(): 'lxc' | 'vm' | null {
+    const vmid = this.selectedVmid === null ? null : Number(this.selectedVmid);
+    return this.discovered().find((c) => c.vmid === vmid)?.kind ?? null;
+  }
+
   protected async add(): Promise<void> {
     const vmid = this.selectedVmid === null ? null : Number(this.selectedVmid);
     if (vmid === null || this.adding()) {
@@ -199,7 +207,7 @@ export class ContainersPage {
         list.map((c) => (c.vmid === vmid ? { ...c, added: true } : c)),
       );
       this.addOpen.set(false);
-      this.toast.success(`Added CT ${created.vmid} (${created.name}) – checking it now.`);
+      this.toast.success(`Added ${targetLabel(created)} (${created.name}) – checking it now.`);
       void this.statusService.refresh();
     } catch (error) {
       this.handleNotConfigured(error);
@@ -654,7 +662,7 @@ function compareContainers(a: Container, b: Container, sort: ContainerSort): num
 function searchText(c: Container): string {
   return [
     c.name,
-    c.kind === 'node' ? 'host proxmox' : String(c.vmid),
+    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : String(c.vmid),
     ...c.apps.flatMap((a) => [a.name, a.repositoryFullName ?? '']),
   ]
     .join(' ')

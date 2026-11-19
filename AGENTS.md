@@ -81,8 +81,10 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   so a crash cannot cause duplicate notifications. Preserve this when changing it.
 - Proxmox containers live in `src/proxmox/`: all node access goes through the `NodeShell` interface
   (`SshShell` spawns the system `ssh` client – key-only, `BatchMode`; tests use `FakeShell` from
-  `test/helpers.ts`, never a real node). Commands inside containers are built with `pctExec()`/`shQuote()` –
-  never interpolate user input into shell strings without them. `ContainerService` allows one task per container
+  `test/helpers.ts`, never a real node). Commands inside guests are built with `guestExec()` (`pctExec()` for
+  containers, `qmGuestExec()` for virtual machines – the QEMU guest agent returns JSON, decoded by
+  `parseGuestExecResult()`) and `shQuote()` – never interpolate user input into shell strings without them. Node
+  commands that differ per guest kind take a `GuestTarget` (`{ kind, vmid }`) and use `guestCli()` (`pct`/`qm`). `ContainerService` allows one task per container
   and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
 - Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),

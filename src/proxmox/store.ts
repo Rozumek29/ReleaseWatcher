@@ -3,6 +3,7 @@ import {
   type AptPackage,
   type Container,
   type ContainerApp,
+  type GuestKind,
   type LatestSource,
   NODE_VMID,
   type ResourceChange,
@@ -179,7 +180,7 @@ export class ContainerStore {
   }
 
   existsVmid(vmid: number): boolean {
-    return this.db.query("SELECT 1 FROM containers WHERE vmid = ? AND kind = 'lxc'").get(vmid) !== null;
+    return this.db.query("SELECT 1 FROM containers WHERE vmid = ? AND kind IN ('lxc', 'vm')").get(vmid) !== null;
   }
 
   /** The Proxmox host entry, when it has been added. */
@@ -196,10 +197,11 @@ export class ContainerStore {
     return this.get(Number(result.lastInsertRowid))!;
   }
 
-  add(vmid: number, name: string): Container {
+  /** Adds a container or virtual machine. */
+  add(vmid: number, name: string, kind: GuestKind = 'lxc'): Container {
     const result = this.db
-      .query('INSERT INTO containers (vmid, name, created_at) VALUES (?, ?, ?)')
-      .run(vmid, name, new Date().toISOString());
+      .query('INSERT INTO containers (kind, vmid, name, created_at) VALUES (?, ?, ?, ?)')
+      .run(kind, vmid, name, new Date().toISOString());
     return this.get(Number(result.lastInsertRowid))!;
   }
 

@@ -1,8 +1,16 @@
 import { compareVersions } from '../version.ts';
 
-export const TARGET_KINDS = ['lxc', 'node'] as const;
-/** `lxc` = a container managed through `pct exec`; `node` = the Proxmox host itself (apt only). */
+export const TARGET_KINDS = ['lxc', 'vm', 'node'] as const;
+/**
+ * `lxc` = a container managed through `pct exec`; `vm` = a virtual machine reached through the QEMU guest agent
+ * (`qm guest exec`); `node` = the Proxmox host itself (apt only).
+ */
 export type TargetKind = (typeof TARGET_KINDS)[number];
+/** A guest on the node: a container or a virtual machine. */
+export type GuestKind = Exclude<TargetKind, 'node'>;
+
+/** Proxmox CLI managing a guest: `pct` for containers, `qm` for virtual machines. */
+export const guestCli = (kind: GuestKind): 'pct' | 'qm' => (kind === 'vm' ? 'qm' : 'pct');
 
 /** vmid stored for the Proxmox host entry (real container IDs start at 100). */
 export const NODE_VMID = 0;
@@ -161,6 +169,56 @@ export const shQuote = (value: string): string => `'${value.replaceAll("'", `'\\
 /** Command run on the node that executes `script` inside a container. */
 export const pctExec = (vmid: number, script: string): string =>
   `pct exec ${vmid} -- sh -c ${shQuote(`${QUIET_PROFILE}\n${script}`)}`;
+
+/**
+ * Command run on the node that executes `script` inside a virtual machine through the QEMU guest agent. `qm guest
+ * exec` waits up to `timeoutSeconds` and then prints the result as JSON ({@link parseGuestExecResult}); stderr is
+ * merged into stdout so the output keeps its order.
+ */
+export const qmGuestExec = (vmid: number, script: string, timeoutSeconds: number): string =>
+  `qm guest exec ${vmid} --timeout ${Math.max(1, Math.round(timeoutSeconds))} -- sh -c ${shQuote(`exec 2>&1\n${QUIET_PROFILE}\n${script}`)}`;
+
+/** Command run on the node that executes `script` inside a container or virtual machine. */
+export const guestExec = (target: { kind: GuestKind; vmid: number }, script: string, timeoutSeconds: number): string =>
+  target.kind === 'vm' ? qmGuestExec(target.vmid, script, timeoutSeconds) : pctExec(target.vmid, script);
+
+/** Result of `qm guest exec`. */
+export interface GuestExecResult {
+  exitCode: number;
+  output: string;
+  /** The command was still running when `qm guest exec` stopped waiting (it keeps running in the guest). */
+  timedOut: boolean;
+}
+
+/**
+ * Parses the JSON printed by `qm guest exec` (`exitcode`, `exited`, `out-data`, `err-data`, `*-truncated`).
+ * Returns null when the output holds no such JSON, e.g. "QEMU guest agent is not running".
+ */
+export function parseGuestExecResult(output: string): GuestExecResult | null {
+  const start = output.indexOf('{');
+  const end = output.lastIndexOf('}');
+  if (start === -1 || end < start) {
+    return null;
+  }
+  let json: Record<string, unknown>;
+  try {
+    json = JSON.parse(output.slice(start, end + 1)) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  if (typeof json !== 'object' || json === null || !('exited' in json || 'pid' in json)) {
+    return null;
+  }
+  const text = (key: string) => (typeof json[key] === 'string' ? (json[key] as string) : '');
+  let combined = text('out-data') + text('err-data');
+  if (json['out-truncated'] === 1 || json['err-truncated'] === 1 || json['out-truncated'] === true) {
+    combined += '\n[output truncated by the QEMU guest agent]\n';
+  }
+  if (json['exited'] !== 1 && json['exited'] !== true) {
+    return { exitCode: -1, output: combined, timedOut: true };
+  }
+  return { exitCode: typeof json['exitcode'] === 'number' ? json['exitcode'] : -1, output: combined, timedOut: false };
+}
 
 /**
  * Sets the user's login variables: `pct exec` clears the environment (and the detached systemd unit has no `HOME`
@@ -403,41 +461,55 @@ export function parsePvesmStatus(output: string): BackupStorage[] {
   return storages;
 }
 
-/**
- * Node command backing up a container with vzdump (snapshot mode – vzdump falls back to suspend mode when the
- * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
- * Retention follows the prune settings of the storage.
- */
 /** Seconds to wait for a default route after `pct start` (services need the network, e.g. apt). */
 export const START_NETWORK_WAIT_SECONDS = 60;
-/** Seconds `pct shutdown` waits for a clean shutdown before the container is stopped forcibly. */
+/** Seconds to wait for the QEMU guest agent after `qm start` (a virtual machine boots longer than a container). */
+export const START_AGENT_WAIT_SECONDS = 180;
+/** Seconds `pct shutdown` / `qm shutdown` waits for a clean shutdown before the guest is stopped forcibly. */
 export const SHUTDOWN_TIMEOUT_SECONDS = 120;
 
+/** A guest addressed by node commands. */
+export type GuestTarget = { kind: GuestKind; vmid: number };
+
+/** Seconds {@link waitUntilReadyLines} may wait for a guest. */
+export const readyWaitSeconds = (target: GuestTarget): number =>
+  target.kind === 'vm' ? START_AGENT_WAIT_SECONDS : START_NETWORK_WAIT_SECONDS;
+
 /**
- * Waits until a running container has a default route (read from /proc, so no tools are needed inside). Without a
- * network after the wait it continues anyway – the following commands report their errors.
+ * Waits until a running guest can run commands: a container until it has a default route (read from /proc, so no
+ * tools are needed inside), a virtual machine until its guest agent answers. Without it after the wait it continues
+ * anyway – the following commands report their errors.
  */
-function waitForNetworkLines(vmid: number): string[] {
-  const networkReady = shQuote(`awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route`);
+function waitUntilReadyLines(target: GuestTarget): string[] {
+  const seconds = readyWaitSeconds(target);
+  const probe =
+    target.kind === 'vm'
+      ? `qm agent ${target.vmid} ping >/dev/null 2>&1`
+      : `pct exec ${target.vmid} -- sh -c ${shQuote(`awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route`)} >/dev/null 2>&1`;
+  const what = target.kind === 'vm' ? 'No answer from the QEMU guest agent' : 'No network';
   return [
-    `for i in $(seq 1 ${START_NETWORK_WAIT_SECONDS}); do`,
-    `  pct exec ${vmid} -- sh -c ${networkReady} >/dev/null 2>&1 && exit 0`,
+    `for i in $(seq 1 ${seconds}); do`,
+    `  ${probe} && exit 0`,
     `  sleep 1`,
     `done`,
-    `echo 'No network after ${START_NETWORK_WAIT_SECONDS} s – continuing anyway.'`,
+    `echo '${what} after ${seconds} s – continuing anyway.'`,
   ];
 }
 
-/** Starts a stopped container and waits until it has a network. */
-export const startContainerCommand = (vmid: number): string =>
-  [`pct start ${vmid} || exit $?`, ...waitForNetworkLines(vmid)].join('\n');
+/** Starts a stopped guest and waits until it is ready. */
+export const startGuestCommand = (target: GuestTarget): string =>
+  [`${guestCli(target.kind)} start ${target.vmid} || exit $?`, ...waitUntilReadyLines(target)].join('\n');
+
+/** Shuts a guest down cleanly, stopping it forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}. */
+export const shutdownGuestCommand = (target: GuestTarget): string =>
+  `${guestCli(target.kind)} shutdown ${target.vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} --forceStop 1`;
 
 /**
- * Restarts a running container (clean shutdown, stopped forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}) and waits
- * until it has a network again.
+ * Restarts a running guest (clean shutdown, stopped forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}) and waits
+ * until it is ready again.
  */
-export const restartContainerCommand = (vmid: number): string =>
-  [`pct reboot ${vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} || exit $?`, ...waitForNetworkLines(vmid)].join('\n');
+export const restartGuestCommand = (target: GuestTarget): string =>
+  [`${guestCli(target.kind)} reboot ${target.vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} || exit $?`, ...waitUntilReadyLines(target)].join('\n');
 
 /** Seconds between scheduling a restart of the Proxmox host and the restart itself. */
 export const NODE_RESTART_DELAY_SECONDS = 15;
@@ -450,10 +522,11 @@ export const NODE_RESTART_COMMAND =
   `systemd-run --quiet --unit=releasewatcher-host-restart --on-active=${NODE_RESTART_DELAY_SECONDS} ` +
   '--timer-property=AccuracySec=1s systemctl reboot';
 
-/** Shuts a container down cleanly, stopping it forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}. */
-export const shutdownContainerCommand = (vmid: number): string =>
-  `pct shutdown ${vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} --forceStop 1`;
-
+/**
+ * Node command backing up a guest with vzdump (snapshot mode – vzdump falls back to suspend mode when the
+ * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
+ * Retention follows the prune settings of the storage.
+ */
 export function vzdumpCommand(vmid: number, storage: string, note: string): string {
   const id = shQuote(storage);
   return [
@@ -462,7 +535,9 @@ export function vzdumpCommand(vmid: number, storage: string, note: string): stri
   ].join('\n');
 }
 
+/** A container or virtual machine found on the node. */
 export interface DiscoveredContainer {
+  kind: GuestKind;
   vmid: number;
   status: string;
   name: string;
@@ -477,9 +552,37 @@ export function parsePctList(output: string): DiscoveredContainer[] {
     if (!/^\d+$/.test(tokens[0] ?? '') || !Number.isSafeInteger(vmid) || tokens.length < 2) {
       continue; // header or noise
     }
-    result.push({ vmid, status: tokens[1]!, name: tokens.length >= 3 ? tokens.at(-1)! : `CT ${vmid}` });
+    result.push({ kind: 'lxc', vmid, status: tokens[1]!, name: tokens.length >= 3 ? tokens.at(-1)! : `CT ${vmid}` });
   }
   return result;
+}
+
+/** Parses the table printed by `qm list` (VMID, Name, Status, Mem, Bootdisk, PID). */
+export function parseQmList(output: string): DiscoveredContainer[] {
+  const result: DiscoveredContainer[] = [];
+  for (const line of output.split('\n')) {
+    const [id, name, status] = line.trim().split(/\s+/);
+    const vmid = Number(id);
+    if (!/^\d+$/.test(id ?? '') || !Number.isSafeInteger(vmid) || !name || !status) {
+      continue; // header or noise
+    }
+    result.push({ kind: 'vm', vmid, status, name });
+  }
+  return result;
+}
+
+/** Marker between the `pct list` and `qm list` output of {@link DISCOVER_COMMAND}. */
+const QM_LIST_MARKER = '---releasewatcher-qm---';
+
+/** Lists containers and virtual machines with one SSH connection. */
+export const DISCOVER_COMMAND = `pct list || exit $?\necho '${QM_LIST_MARKER}'\nqm list`;
+
+/** Parses the output of {@link DISCOVER_COMMAND}: containers first, then virtual machines, by VMID. */
+export function parseDiscoverOutput(output: string): DiscoveredContainer[] {
+  const at = output.indexOf(QM_LIST_MARKER);
+  const pct = at === -1 ? output : output.slice(0, at);
+  const qm = at === -1 ? '' : output.slice(at + QM_LIST_MARKER.length);
+  return [...parsePctList(pct), ...parseQmList(qm)].toSorted((a, b) => a.vmid - b.vmid);
 }
 
 /** Parses `pct status <vmid>` ("status: running"). */
@@ -489,7 +592,7 @@ export const parsePctStatus = (output: string): string | null => output.match(/s
 export const APT_LIST_MARKER = '---releasewatcher-apt---';
 
 export const APT_CHECK_SCRIPT = [
-  'command -v apt-get >/dev/null 2>&1 || { echo "apt-get is not available in this container" >&2; exit 127; }',
+  'command -v apt-get >/dev/null 2>&1 || { echo "apt-get is not available here (no Debian or Ubuntu)" >&2; exit 127; }',
   'export DEBIAN_FRONTEND=noninteractive',
   'apt-get -qq update',
   `echo '${APT_LIST_MARKER}'`,
@@ -516,24 +619,32 @@ fi`;
  * Restart check inside a container: the reboot-required file and processes that still use executables or libraries
  * an upgrade replaced (`(deleted)` mappings, like `needrestart`), printed as `stale <process name>`. Always exits 0.
  */
-export const RESTART_CHECK_SCRIPT = String.raw`${REBOOT_REQUIRED_FILE_CHECK}
-for d in /proc/[0-9]*; do
+const STALE_PROCESSES_CHECK = String.raw`for d in /proc/[0-9]*; do
   if grep -qE ' /(usr/)?(s?bin|lib(exec|32|64|x32)?)/[^ ]* \(deleted\)$' "$d/maps" 2>/dev/null; then
     echo "stale $(cat "$d/comm" 2>/dev/null)"
   fi
-done | sort -u
-true`;
+done | sort -u`;
+
+/** Prints `kernel <running> <newest>` when a newer kernel than the running one is installed in /boot. */
+const KERNEL_CHECK = String.raw`running=$(uname -r)
+newest=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V | tail -n 1)
+if [ -n "$newest" ] && [ "$newest" != "$running" ]; then echo "kernel $running $newest"; fi`;
+
+export const RESTART_CHECK_SCRIPT = `${REBOOT_REQUIRED_FILE_CHECK}\n${STALE_PROCESSES_CHECK}\ntrue`;
+
+/** Restart check inside a virtual machine: like a container, plus a newer installed kernel. Always exits 0. */
+export const VM_RESTART_CHECK_SCRIPT = `${REBOOT_REQUIRED_FILE_CHECK}\n${KERNEL_CHECK}\n${STALE_PROCESSES_CHECK}\ntrue`;
 
 /**
- * Restart check of the Proxmox host: the reboot-required file and an installed kernel newer than the running one
- * (`kernel <running> <newest>`). Processes using replaced files are not reported – on the host the running guests
- * keep such files open until they restart themselves. Always exits 0.
+ * Restart check of the Proxmox host: the reboot-required file and an installed kernel newer than the running one.
+ * Processes using replaced files are not reported – on the host the running guests keep such files open until they
+ * restart themselves. Always exits 0.
  */
-export const NODE_RESTART_CHECK_SCRIPT = String.raw`${REBOOT_REQUIRED_FILE_CHECK}
-running=$(uname -r)
-newest=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V | tail -n 1)
-if [ -n "$newest" ] && [ "$newest" != "$running" ]; then echo "kernel $running $newest"; fi
-true`;
+export const NODE_RESTART_CHECK_SCRIPT = `${REBOOT_REQUIRED_FILE_CHECK}\n${KERNEL_CHECK}\ntrue`;
+
+/** The restart check script for a target. */
+export const restartCheckScript = (kind: TargetKind): string =>
+  kind === 'node' ? NODE_RESTART_CHECK_SCRIPT : kind === 'vm' ? VM_RESTART_CHECK_SCRIPT : RESTART_CHECK_SCRIPT;
 
 /** Process names listed in a restart reason before the rest is summarised as "and N more". */
 const MAX_STALE_NAMES = 8;
@@ -567,7 +678,7 @@ export function parseRestartCheck(output: string): string[] {
 
 /** Human-readable name of a check/update target in logs and notifications. */
 export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
-  c.kind === 'node' ? 'the Proxmox host' : `CT ${c.vmid}`;
+  c.kind === 'node' ? 'the Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : `CT ${c.vmid}`;
 
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
@@ -674,25 +785,32 @@ export interface StepResult {
 }
 
 export interface CheckBatchResult {
-  /** `pct status` result; null when the node was not reached. */
+  /** `pct status` / `qm status` result; null when the node was not reached. */
   status: StepResult | null;
   steps: Map<string, StepResult>;
+  /** Why the steps did not run in a virtual machine (e.g. "QEMU guest agent is not running"); null otherwise. */
+  guestError: string | null;
 }
 
 /** Random section marker – command output cannot fake it. */
 export const newCheckToken = (): string => `@@RW-${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}@@`;
 
+/** Extra seconds `qm guest exec` waits for a batched check beyond the sum of its step timeouts. */
+const GUEST_CHECK_GRACE_SECONDS = 30;
+
 /**
- * Builds a single node command that runs `pct status` and – only for a running container – all `steps` inside it
- * with one `pct exec` (one SSH connection, two `pct` starts instead of one per command). Every step gets its own
- * timeout (`timeout` from coreutils/busybox when available) and exit code; output sections are delimited by
- * `<token> begin <id>` / `<token> end <id> <exit code>` lines. The container script travels base64-encoded, so
- * user commands are quoted only once.
+ * Builds a single node command that runs `pct status` / `qm status` and – only for a running guest – all `steps`
+ * inside it with one `pct exec` / `qm guest exec` (one SSH connection). `target` null = the steps run on the node
+ * itself. Every step gets its own timeout (`timeout` from coreutils/busybox when available) and exit code; output
+ * sections are delimited by `<token> begin <id>` / `<token> end <id> <exit code>` lines. The guest script travels
+ * base64-encoded, so user commands are quoted only once.
  */
-export function buildCheckScript(vmid: number | null, steps: readonly CheckStep[], token: string): string {
+export function buildCheckScript(target: GuestTarget | null, steps: readonly CheckStep[], token: string): string {
   const node = [
     // null = the steps run on the node itself, which is running when this script runs at all.
-    vmid === null ? `s='status: running'; rc=0` : `s=$(pct status ${vmid} 2>&1); rc=$?`,
+    target === null
+      ? `s='status: running'; rc=0`
+      : `s=$(${guestCli(target.kind)} status ${target.vmid} 2>&1); rc=$?`,
     `printf '%s begin status\n%s\n%s end status %s\n' '${token}' "$s" '${token}' "$rc"`,
   ];
   if (steps.length > 0) {
@@ -707,17 +825,41 @@ export function buildCheckScript(vmid: number | null, steps: readonly CheckStep[
     ].join('\n');
     const encoded = Buffer.from(inner, 'utf8').toString('base64');
     const decoded = `"$(printf %s '${encoded}' | base64 -d)"`;
-    node.push(
-      vmid === null
-        ? `sh -lc ${decoded}`
-        : `case "$s" in *'status: running'*) pct exec ${vmid} -- sh -lc ${decoded} ;; esac`,
-    );
+    if (target === null) {
+      node.push(`sh -lc ${decoded}`);
+    } else {
+      const total = steps.reduce((sum, s) => sum + Math.max(1, Math.round(s.timeoutSeconds)), 0) + GUEST_CHECK_GRACE_SECONDS;
+      const exec =
+        target.kind === 'vm'
+          ? `qm guest exec ${target.vmid} --timeout ${total} -- sh -lc ${decoded} 2>&1`
+          : `pct exec ${target.vmid} -- sh -lc ${decoded}`;
+      node.push(`case "$s" in *'status: running'*) ${exec} ;; esac`);
+    }
   }
   return node.join('\n');
 }
 
-/** Splits the output of {@link buildCheckScript} into its sections. */
-export function parseCheckOutput(output: string, token: string): CheckBatchResult {
+/**
+ * Splits the output of {@link buildCheckScript} into its sections. With `guest` (a virtual machine) the steps come
+ * from the JSON of `qm guest exec` printed after the status section.
+ */
+export function parseCheckOutput(output: string, token: string, guest = false): CheckBatchResult {
+  if (guest) {
+    const marker = output.match(new RegExp(`^${token} end status .*$`, 'm'));
+    const statusEnd = marker?.index === undefined ? output.length : marker.index + marker[0].length;
+    const { status } = parseSections(output.slice(0, statusEnd), token);
+    const rest = output.slice(statusEnd).trim();
+    const result = rest ? parseGuestExecResult(rest) : null;
+    if (result) {
+      const steps = parseSections(result.output, token).steps;
+      return { status, steps, guestError: result.timedOut ? 'the check did not finish in time' : null };
+    }
+    return { status, steps: new Map(), guestError: rest ? rest.slice(0, 500) : null };
+  }
+  return { ...parseSections(output, token), guestError: null };
+}
+
+function parseSections(output: string, token: string): { status: StepResult | null; steps: Map<string, StepResult> } {
   const steps = new Map<string, StepResult>();
   let current: { id: string; lines: string[] } | null = null;
   for (const line of output.split('\n')) {

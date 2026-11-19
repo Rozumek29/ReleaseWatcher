@@ -40,8 +40,10 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 
 **Proxmox LXC containers**
 
-- Pending **apt** packages and **application** versions of every container (and of the Proxmox host) on a cron
-  schedule, over a single SSH connection – containers need no SSH server.
+- Pending **apt** packages and **application** versions of every container, virtual machine (through the QEMU guest
+  agent) and of the Proxmox host on a cron schedule, over a single SSH connection – guests need no SSH server.
+- **Restart needed** hints (new kernel, `reboot-required`, processes using upgraded libraries) with a one-click
+  restart.
 - One-click updates: apt upgrades, community-scripts `update`, or your own scripts, with live console output and
   run history. **Updates never run automatically.**
 - Optional **`vzdump` backup** before every update, **temporary CPU/RAM boost** for heavy updates, temporary start
@@ -139,6 +141,12 @@ dedicated to it.
 
 - **Add containers** found on the node (`pct list`) one by one or with **Add all**. Commands run inside a container
   with `pct exec <vmid> -- sh -lc '…'`.
+- **Virtual machines** (`qm list`) are added one by one (not by *Add all*). Commands run through the QEMU guest agent
+  with `qm guest exec <vmid> -- sh -c '…'`, so the VM needs `qemu-guest-agent` installed and **QEMU Guest Agent**
+  enabled in its Proxmox options – no SSH server. Checks, apt upgrades, applications, backups, temporary starts
+  (`qm start`, waiting up to 3 minutes for the agent) and restarts work like for containers; the output of an
+  update appears when it has finished (the agent returns it at the end), and VMs are not resized for updates.
+  Appliances without apt (e.g. Home Assistant OS) can be added with apt switched off.
 - **Add host** adds the Proxmox node itself (apt only): it is checked like a container and upgraded with
   `apt-get dist-upgrade` (followed by `apt-get autoremove`), as Proxmox VE requires. There is no backup before host upgrades and the host is never
   rebooted automatically – see *Restart needed* below.
@@ -159,9 +167,9 @@ dedicated to it.
   version commands); up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. Each pending item is
   notified once.
 - **Restart needed:** every check also looks for `/var/run/reboot-required` (with the packages that asked for it)
-  and – in containers – for processes still using executables or libraries that an upgrade replaced (like
-  `needrestart`); on the host it compares the running kernel with the newest one in `/boot`. The reasons are shown
-  with a **Restart** button (after a confirmation): a container is restarted with `pct reboot` (detached, so it
+  and – in containers and VMs – for processes still using executables or libraries that an upgrade replaced (like
+  `needrestart`); on the host and in VMs it compares the running kernel with the newest one in `/boot`. The reasons are shown
+  with a **Restart** button (after a confirmation): a container or VM is restarted with `pct reboot` / `qm reboot` (detached, so it
   also works for the container ReleaseWatcher runs in) and checked again; for the host a reboot is scheduled 15 s
   later with `systemd-run` and refused while other checks or updates run. Restarts never happen automatically.
 - **Stopped containers** are not started by default: a check only reads their status and keeps the last results;
@@ -472,12 +480,12 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | Method | Route | Description |
 | --- | --- | --- |
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
-| `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
+| `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups |
 | `GET` | `/api/containers` | Added containers with applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
-| `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container and start a check |
+| `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
-| `POST` | `/api/containers/add-all` | Add every container of the node not added yet |
+| `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |
 | `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"? }` – `null` = global default, omitted = keep |
 | `DELETE` | `/api/containers/:id` | Remove a container (`409` while a task runs) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (`202`) |

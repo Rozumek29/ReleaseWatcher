@@ -313,22 +313,21 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         guard(async () => {
           const body = await readBody<{ vmid: number; name?: string | null }>(req, addContainerSchema);
           if (containers.existsVmid(body.vmid)) {
-            return problem(409, `Container ${body.vmid} has already been added.`);
+            return problem(409, `Guest ${body.vmid} has already been added.`);
           }
-          let name = blankToNull(body.name);
           if (!service.shell.isConfigured) {
             throw new ShellNotConfiguredError();
           }
+          let found: DiscoveredContainer | undefined;
           try {
-            const found = (await service.discover()).find((c) => c.vmid === body.vmid);
-            if (!found) {
-              return validationProblem('vmid', `Container ${body.vmid} does not exist on the node.`);
-            }
-            name ??= found.name;
+            found = (await service.discover()).find((c) => c.vmid === body.vmid);
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
-          const container = containers.add(body.vmid, name);
+          if (!found) {
+            return validationProblem('vmid', `No container or virtual machine ${body.vmid} exists on the node.`);
+          }
+          const container = containers.add(body.vmid, blankToNull(body.name) ?? found.name, found.kind);
           service.startCheck(container, 'manual');
           return Response.json(containerDto(container), {
             status: 201,
@@ -360,7 +359,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           });
         }),
     },
-    // Adds every container of the node that has not been added yet and queues a check of each.
+    // Adds every container of the node that has not been added yet and queues a check of each. Virtual machines
+    // are added one by one: they need the QEMU guest agent, and appliances like Home Assistant OS have no apt.
     '/api/containers/add-all': {
       POST: () =>
         guard(async () => {
@@ -373,7 +373,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
-          const added = found.filter((c) => !containers.existsVmid(c.vmid)).map((c) => containers.add(c.vmid, c.name));
+          const added = found
+            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(c.vmid))
+            .map((c) => containers.add(c.vmid, c.name, c.kind));
           // Checks run through the scheduler queue, so the concurrency limit applies.
           void scheduler.checkMany(added.map((c) => c.id));
           return Response.json(
@@ -457,9 +459,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           backupBeforeUpdate: isNode ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
           startWhenStopped: !isNode && (body.startWhenStopped ?? container.startWhenStopped),
           checkCron,
-          // The host is never resized.
-          updateCores: isNode ? null : updateCores,
-          updateMemoryMb: isNode ? null : updateMemoryMb,
+          // Only containers are resized for updates.
+          updateCores: container.kind === 'lxc' ? updateCores : null,
+          updateMemoryMb: container.kind === 'lxc' ? updateMemoryMb : null,
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];
@@ -605,7 +607,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return problem(404, 'Container not found.');
         }
         if (container.kind === 'node') {
-          return problem(409, 'Applications can be added to containers only, not to the Proxmox host.');
+          return problem(409, 'Applications can be added to guests only, not to the Proxmox host.');
         }
         const input = toAppInput(body, null);
         if (input instanceof Response) {

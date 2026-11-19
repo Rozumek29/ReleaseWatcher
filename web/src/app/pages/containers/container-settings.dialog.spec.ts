@@ -84,6 +84,24 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
   });
 
+  it('explains the guest agent for a virtual machine and leaves out resources', async () => {
+    const { fixture, el } = await open(container({ kind: 'vm', vmid: 137, name: 'debian' }));
+
+    expect(el.querySelector('#ct-settings-title')?.textContent).toContain('Virtual machine settings');
+    expect(el.querySelector('.head-text p')?.textContent).toContain('VM 137');
+    expect(el.textContent).toContain('qemu-guest-agent');
+    expect(el.textContent).toContain('qm start');
+    expect(el.querySelector('#ct-update-cores')).toBeNull();
+    expect(el.querySelector('#ct-backup')).not.toBeNull();
+    expect(el.textContent).toContain('Add application');
+
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/containers/1');
+    expect(request.request.body).not.toHaveProperty('updateCores');
+    request.flush(container({ kind: 'vm', vmid: 137, name: 'debian' }));
+    await settle(fixture);
+  });
+
   it('shows only the settings that apply to the Proxmox host', async () => {
     const { el } = await open(container({ kind: 'node', vmid: 0, name: 'pve', apps: [] }));
 

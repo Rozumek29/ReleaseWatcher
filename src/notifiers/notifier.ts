@@ -14,6 +14,8 @@ export interface ContainerUpdatesNotification {
   vmid: number;
   /** The Proxmox host itself rather than a container. */
   isNode?: boolean;
+  /** A virtual machine rather than a container. */
+  isVm?: boolean;
   containerName: string;
   /** Upgradable apt packages (all of them, not only new ones). */
   aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];
@@ -25,6 +27,7 @@ export interface ContainerUpdatesNotification {
 export interface UpdateResultNotification {
   vmid: number;
   isNode?: boolean;
+  isVm?: boolean;
   containerName: string;
   kind: 'apt-upgrade' | 'app-update';
   /** Application name for `app-update`. */
@@ -44,9 +47,9 @@ export const notificationFullName = (n: ReleaseNotification): string => `${n.own
 export const notificationRepoUrl = (n: ReleaseNotification): string =>
   `https://github.com/${n.owner}/${n.repository}`;
 
-/** "CT 105 (nextcloud)" or "Proxmox host (pve)". */
-export const targetName = (n: { vmid: number; isNode?: boolean; containerName: string }): string =>
-  `${n.isNode ? 'Proxmox host' : `CT ${n.vmid}`} (${n.containerName})`;
+/** "CT 105 (nextcloud)", "VM 137 (debian)" or "Proxmox host (pve)". */
+export const targetName = (n: { vmid: number; isNode?: boolean; isVm?: boolean; containerName: string }): string =>
+  `${n.isNode ? 'Proxmox host' : n.isVm ? `VM ${n.vmid}` : `CT ${n.vmid}`} (${n.containerName})`;
 
 /** "apt upgrade" or "update of Nextcloud". */
 export const updateLabel = (n: UpdateResultNotification): string =>

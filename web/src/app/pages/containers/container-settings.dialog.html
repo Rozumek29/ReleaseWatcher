@@ -4,7 +4,9 @@
       <header class="dialog-head">
         <span class="head-icon"><app-icon name="box" /></span>
         <div class="head-text">
-          <h2 id="ct-settings-title">{{ c.kind === 'node' ? 'Host settings' : 'Container settings' }}</h2>
+          <h2 id="ct-settings-title">
+            {{ c.kind === 'node' ? 'Host settings' : c.kind === 'vm' ? 'Virtual machine settings' : 'Container settings' }}
+          </h2>
           <p class="mono">{{ label(c) }}</p>
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close">
@@ -30,9 +32,16 @@
             <p class="group-hint">
               The host is checked with <code>apt list --upgradable</code> and upgraded with
               <code>apt-get dist-upgrade</code> (required for Proxmox VE). There is no backup before host upgrades,
-              and the host is never rebooted – reboot it yourself after a kernel update.
+              and the host is never rebooted automatically – the Containers page offers a restart when one is needed.
             </p>
           } @else {
+            @if (c.kind === 'vm') {
+              <p class="group-hint">
+                Commands run through the QEMU guest agent (<code>qm guest exec</code>): install
+                <code>qemu-guest-agent</code> in the virtual machine and enable “QEMU Guest Agent” in its Proxmox
+                options. The output of an update appears when it has finished.
+              </p>
+            }
             <div class="field">
               <app-switch
                 label="Start temporarily when stopped"
@@ -40,9 +49,14 @@
                 (toggled)="startWhenStopped = !startWhenStopped"
               />
               <span class="hint">
-                Checks (scheduled ones too) and updates start a stopped container with <code>pct start</code>, wait
-                up to a minute for its network and shut it down again afterwards. When off, a stopped container is
-                only reported and cannot be updated.
+                @if (c.kind === 'vm') {
+                  Checks (scheduled ones too) and updates start a stopped virtual machine with <code>qm start</code>,
+                  wait up to three minutes for its guest agent and shut it down again afterwards.
+                } @else {
+                  Checks (scheduled ones too) and updates start a stopped container with <code>pct start</code>, wait
+                  up to a minute for its network and shut it down again afterwards.
+                }
+                When off, a stopped guest is only reported and cannot be updated.
               </span>
             </div>
 
@@ -64,6 +78,7 @@
               </span>
             </div>
 
+            @if (c.kind === 'lxc') {
             <div class="field">
               <div class="form-row resources">
                 <div class="field resource-field">
@@ -106,6 +121,7 @@
                 </span>
               }
             </div>
+            }
           }
 
           <div class="field">

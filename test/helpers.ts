@@ -96,6 +96,10 @@ export class RecordingNotifier implements Notifier {
 }
 
 /** Fake Proxmox node: answers commands matching registered patterns (first match wins). */
+/** Output of `qm guest exec` for a command that printed `output` and exited with `exitCode`. */
+export const guestJson = (output: string, exitCode: number): string =>
+  JSON.stringify({ exitcode: exitCode, exited: 1, 'out-data': output, 'out-truncated': 0 }, null, 3);
+
 export class FakeShell implements NodeShell {
   isConfigured = true;
   readonly commands: string[] = [];
@@ -115,6 +119,8 @@ export class FakeShell implements NodeShell {
    * stopped with `detachedStopCommand`; following them then ends without an exit code.
    */
   hangUntilStopped = false;
+  /** `qm guest exec` fails like a virtual machine without a running QEMU guest agent. */
+  guestAgentDown = false;
   /** Units stopped with `detachedStopCommand`. */
   readonly stoppedUnits: string[] = [];
   private readonly stopWaiters = new Map<string, () => void>();
@@ -205,12 +211,13 @@ export class FakeShell implements NodeShell {
    * A script for the node itself (no `pct status`) answers every step as the plain command.
    */
   private async runCheckBatch(command: string, token: string): Promise<CommandResult> {
-    const vmidText = command.match(/pct status (\d+)/)?.[1];
-    const vmid = vmidText === undefined ? null : Number(vmidText);
+    const target = command.match(/(pct|qm) status (\d+)/);
+    const cli = target?.[1] ?? 'pct';
+    const vmid = target ? Number(target[2]) : null;
     const status =
       vmid === null
         ? { exitCode: 0, output: 'status: running', timedOut: false }
-        : await this.answer(`pct status ${vmid}`);
+        : await this.answer(`${cli} status ${vmid}`);
     if (status.exitCode === 255) {
       return status; // connection failure: no sections at all
     }
@@ -219,13 +226,20 @@ export class FakeShell implements NodeShell {
     let output = section('status', status.output.replace(/\n+$/, ''), status.exitCode);
     const encoded = command.match(/printf %s '([A-Za-z0-9+/=]+)' \| base64 -d/)?.[1];
     if (encoded && status.output.includes('status: running')) {
+      if (cli === 'qm' && this.guestAgentDown) {
+        return { exitCode: 0, output: `${output}QEMU guest agent is not running\n`, timedOut: false };
+      }
       const inner = Buffer.from(encoded, 'base64').toString('utf8');
+      let steps = '';
       // Steps are single-quoted with shQuote (a quote inside is written as '\'').
       for (const match of inner.matchAll(/^rw_step (\S+) \d+ ('(?:[^']|'\\'')*')/gm)) {
         const script = match[2]!.slice(1, -1).replaceAll("'\\''", "'");
-        const result = await this.answer(vmid === null ? script : `pct exec ${vmid} -- sh -lc ${shQuote(script)}`);
-        output += section(match[1]!, result.output, result.exitCode);
+        const exec = cli === 'qm' ? `qm guest exec ${vmid} -- sh -lc` : `pct exec ${vmid} -- sh -lc`;
+        const result = await this.answer(vmid === null ? script : `${exec} ${shQuote(script)}`);
+        steps += section(match[1]!, result.output, result.exitCode);
       }
+      // A virtual machine answers through the guest agent: the steps arrive as JSON.
+      output += cli === 'qm' ? `${guestJson(steps, 0)}\n` : steps;
     }
     return { exitCode: 0, output, timedOut: false };
   }
