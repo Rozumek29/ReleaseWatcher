@@ -15,7 +15,7 @@ import {
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import { Container, Run, RunKind, RunSummary } from '../../core/models';
-import { targetLabel } from './target';
+import { kindLabel, targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { BackdropClose } from '../../shared/backdrop-close';
@@ -135,7 +135,7 @@ export class RunLogDialog {
   }
 
   protected kindLabel(kind: RunKind): string {
-    return kind === 'check' ? 'Check' : kind === 'apt-upgrade' ? 'apt upgrade' : 'Application update';
+    return kindLabel(kind);
   }
 
   protected appName(run: RunSummary): string | null {

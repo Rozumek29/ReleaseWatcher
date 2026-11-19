@@ -22,6 +22,11 @@ import {
   pctExec,
   parsePvesmStatus,
   pendingUpdates,
+  NODE_RESTART_CHECK_SCRIPT,
+  NODE_RESTART_COMMAND,
+  parseRestartCheck,
+  RESTART_CHECK_SCRIPT,
+  restartContainerCommand,
   type Container,
   type ContainerApp,
 } from '../src/proxmox/domain.ts';
@@ -272,5 +277,42 @@ describe('proxmox domain', () => {
     assert.deepEqual(pendingUpdates({ ...container, isEnabled: false }, apps), []);
     assert.deepEqual(pendingUpdates({ ...container, status: 'stopped' }, apps), []);
     assert.equal(pendingUpdates({ ...container, status: 'stopped', startWhenStopped: true }, apps).length, 2);
+  });
+
+  it('turns the restart check output into readable reasons', () => {
+    assert.deepEqual(parseRestartCheck(''), []);
+    assert.deepEqual(parseRestartCheck('file\n'), ['Requested by an upgraded package']);
+    assert.deepEqual(parseRestartCheck('file libc6 libssl3 libc6 \n'), ['Requested by packages libc6, libssl3']);
+    assert.deepEqual(parseRestartCheck('kernel 6.8.12-4-pve 6.8.12-5-pve\n'), [
+      'Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running',
+    ]);
+    const stale = Array.from({ length: 10 }, (_, i) => `stale proc${i}`).join('\n');
+    assert.deepEqual(parseRestartCheck(`stale sshd\nstale nginx\nstale nginx\nnoise\n`), [
+      'Processes use upgraded files: nginx, sshd',
+    ]);
+    assert.match(parseRestartCheck(stale)[0]!, /^Processes use upgraded files: proc0, .*, proc7 and 2 more$/);
+  });
+
+  it('finds processes that map replaced executables or libraries', () => {
+    const pattern = RESTART_CHECK_SCRIPT.match(/grep -qE '([^']+)'/)?.[1];
+    assert.ok(pattern);
+    const deleted = new RegExp(pattern);
+    const line = (path: string) => `7f2c1a000000-7f2c1a028000 r--p 00000000 00:2f 1234          ${path}`;
+    assert.ok(deleted.test(line('/usr/lib/x86_64-linux-gnu/libssl.so.3 (deleted)')));
+    assert.ok(deleted.test(line('/lib/x86_64-linux-gnu/libc.so.6 (deleted)')));
+    assert.ok(deleted.test(line('/usr/sbin/nginx (deleted)')));
+    assert.ok(!deleted.test(line('/usr/lib/x86_64-linux-gnu/libssl.so.3')));
+    assert.ok(!deleted.test(line('/memfd:pulseaudio (deleted)')));
+    assert.ok(!deleted.test(line('/tmp/scratch.db (deleted)')));
+    // The host check looks at the kernel instead of processes.
+    assert.match(NODE_RESTART_CHECK_SCRIPT, /uname -r/);
+    assert.doesNotMatch(NODE_RESTART_CHECK_SCRIPT, /\/proc\//);
+  });
+
+  it('restarts a container cleanly and schedules a host restart', () => {
+    const command = restartContainerCommand(105);
+    assert.match(command, /^pct reboot 105 --timeout 120 \|\| exit \$\?\n/);
+    assert.match(command, /pct exec 105 -- sh -c .*\/proc\/net\/route/);
+    assert.match(NODE_RESTART_COMMAND, /^systemd-run .*--on-active=15 .*systemctl reboot$/);
   });
 });

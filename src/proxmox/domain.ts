@@ -33,6 +33,8 @@ export interface Container {
   /** Last status reported by `pct status` (running, stopped, …). */
   status: string | null;
   aptUpgradable: AptPackage[];
+  /** Why the container (or host) should be restarted, from the last check; empty = no restart needed. */
+  restartReasons: string[];
   lastCheckedAt: string | null;
   lastError: string | null;
   /** Fingerprint of the pending updates already notified about (prevents repeated notifications). */
@@ -74,7 +76,7 @@ export interface ContainerApp {
   createdAt: string;
 }
 
-export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update'] as const;
+export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 export type RunTrigger = 'manual' | 'schedule';
@@ -184,7 +186,7 @@ const QUIET_PROFILE = `${LOGIN_ENV}\n{ if [ -r /etc/profile ]; then . /etc/profi
 export const DETACHED_DIR = '/var/tmp/releasewatcher';
 
 /** Steps of an update that run detached on the node. */
-export type DetachedStep = 'backup' | 'update';
+export type DetachedStep = 'backup' | 'update' | 'restart';
 
 /** Name of the transient systemd unit (and its directory) of one detached step. */
 export const detachedUnit = (runId: number, step: DetachedStep): string => `releasewatcher-run-${runId}-${step}`;
@@ -412,20 +414,41 @@ export const START_NETWORK_WAIT_SECONDS = 60;
 export const SHUTDOWN_TIMEOUT_SECONDS = 120;
 
 /**
- * Starts a stopped container and waits until it has a default route (read from /proc, so no tools are needed
- * inside). Without a network after the wait it continues anyway – the following commands report their errors.
+ * Waits until a running container has a default route (read from /proc, so no tools are needed inside). Without a
+ * network after the wait it continues anyway – the following commands report their errors.
  */
-export function startContainerCommand(vmid: number): string {
+function waitForNetworkLines(vmid: number): string[] {
   const networkReady = shQuote(`awk '$2 == "00000000" { found = 1 } END { exit !found }' /proc/net/route`);
   return [
-    `pct start ${vmid} || exit $?`,
     `for i in $(seq 1 ${START_NETWORK_WAIT_SECONDS}); do`,
     `  pct exec ${vmid} -- sh -c ${networkReady} >/dev/null 2>&1 && exit 0`,
     `  sleep 1`,
     `done`,
     `echo 'No network after ${START_NETWORK_WAIT_SECONDS} s – continuing anyway.'`,
-  ].join('\n');
+  ];
 }
+
+/** Starts a stopped container and waits until it has a network. */
+export const startContainerCommand = (vmid: number): string =>
+  [`pct start ${vmid} || exit $?`, ...waitForNetworkLines(vmid)].join('\n');
+
+/**
+ * Restarts a running container (clean shutdown, stopped forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}) and waits
+ * until it has a network again.
+ */
+export const restartContainerCommand = (vmid: number): string =>
+  [`pct reboot ${vmid} --timeout ${SHUTDOWN_TIMEOUT_SECONDS} || exit $?`, ...waitForNetworkLines(vmid)].join('\n');
+
+/** Seconds between scheduling a restart of the Proxmox host and the restart itself. */
+export const NODE_RESTART_DELAY_SECONDS = 15;
+
+/**
+ * Schedules a restart of the Proxmox host as a transient systemd timer, so the SSH command returns before the
+ * connection drops (ReleaseWatcher may itself run in a container on this node). Fails when one is already scheduled.
+ */
+export const NODE_RESTART_COMMAND =
+  `systemd-run --quiet --unit=releasewatcher-host-restart --on-active=${NODE_RESTART_DELAY_SECONDS} ` +
+  '--timer-property=AccuracySec=1s systemctl reboot';
 
 /** Shuts a container down cleanly, stopping it forcibly after {@link SHUTDOWN_TIMEOUT_SECONDS}. */
 export const shutdownContainerCommand = (vmid: number): string =>
@@ -483,6 +506,64 @@ export const NODE_APT_UPGRADE_SCRIPT = [
   'apt-get -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold dist-upgrade',
   'apt-get -y autoremove',
 ].join(' && ');
+
+/** Prints `file [packages…]` when a package asked for a restart (`/var/run/reboot-required`, Debian/Ubuntu). */
+const REBOOT_REQUIRED_FILE_CHECK = String.raw`if [ -f /var/run/reboot-required ]; then
+  if [ -s /var/run/reboot-required.pkgs ]; then echo "file $(sort -u /var/run/reboot-required.pkgs | tr '\n' ' ')"; else echo file; fi
+fi`;
+
+/**
+ * Restart check inside a container: the reboot-required file and processes that still use executables or libraries
+ * an upgrade replaced (`(deleted)` mappings, like `needrestart`), printed as `stale <process name>`. Always exits 0.
+ */
+export const RESTART_CHECK_SCRIPT = String.raw`${REBOOT_REQUIRED_FILE_CHECK}
+for d in /proc/[0-9]*; do
+  if grep -qE ' /(usr/)?(s?bin|lib(exec|32|64|x32)?)/[^ ]* \(deleted\)$' "$d/maps" 2>/dev/null; then
+    echo "stale $(cat "$d/comm" 2>/dev/null)"
+  fi
+done | sort -u
+true`;
+
+/**
+ * Restart check of the Proxmox host: the reboot-required file and an installed kernel newer than the running one
+ * (`kernel <running> <newest>`). Processes using replaced files are not reported – on the host the running guests
+ * keep such files open until they restart themselves. Always exits 0.
+ */
+export const NODE_RESTART_CHECK_SCRIPT = String.raw`${REBOOT_REQUIRED_FILE_CHECK}
+running=$(uname -r)
+newest=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V | tail -n 1)
+if [ -n "$newest" ] && [ "$newest" != "$running" ]; then echo "kernel $running $newest"; fi
+true`;
+
+/** Process names listed in a restart reason before the rest is summarised as "and N more". */
+const MAX_STALE_NAMES = 8;
+
+/** Turns the output of {@link RESTART_CHECK_SCRIPT} / {@link NODE_RESTART_CHECK_SCRIPT} into readable reasons. */
+export function parseRestartCheck(output: string): string[] {
+  const reasons: string[] = [];
+  const stale = new Set<string>();
+  for (const line of output.split('\n')) {
+    const [type, ...rest] = line.trim().split(/\s+/);
+    if (type === 'file') {
+      const packages = [...new Set(rest)];
+      reasons.push(
+        packages.length > 0
+          ? `Requested by ${packages.length === 1 ? 'package' : 'packages'} ${packages.join(', ')}`
+          : 'Requested by an upgraded package',
+      );
+    } else if (type === 'kernel' && rest.length >= 2) {
+      reasons.push(`Kernel ${rest[1]} is installed, ${rest[0]} is running`);
+    } else if (type === 'stale' && rest.length > 0) {
+      stale.add(rest.join(' '));
+    }
+  }
+  if (stale.size > 0) {
+    const names = [...stale].toSorted();
+    const more = names.length > MAX_STALE_NAMES ? ` and ${names.length - MAX_STALE_NAMES} more` : '';
+    reasons.push(`Processes use upgraded files: ${names.slice(0, MAX_STALE_NAMES).join(', ')}${more}`);
+  }
+  return reasons;
+}
 
 /** Human-readable name of a check/update target in logs and notifications. */
 export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>

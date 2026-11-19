@@ -29,6 +29,7 @@ interface ContainerRow {
   resources_to_restore: string | null;
   status: string | null;
   apt_upgradable: string | null;
+  restart_reasons: string | null;
   last_checked_at: string | null;
   last_error: string | null;
   notified_signature: string | null;
@@ -89,6 +90,11 @@ function parsePackages(json: string | null): AptPackage[] {
   }
 }
 
+function parseStrings(json: string | null): string[] {
+  const parsed = parseJson<unknown>(json);
+  return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+}
+
 const toContainer = (r: ContainerRow): Container => ({
   id: r.id,
   kind: r.kind as TargetKind,
@@ -104,6 +110,7 @@ const toContainer = (r: ContainerRow): Container => ({
   resourcesToRestore: parseJson<ResourceChange>(r.resources_to_restore),
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
+  restartReasons: parseStrings(r.restart_reasons),
   lastCheckedAt: r.last_checked_at,
   lastError: r.last_error,
   notifiedSignature: r.notified_signature,
@@ -202,7 +209,7 @@ export class ContainerStore {
         `UPDATE containers SET
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
-           apt_upgradable = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
+           apt_upgradable = ?, restart_reasons = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
       .run(
@@ -216,6 +223,7 @@ export class ContainerStore {
         c.updateMemoryMb,
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
+        c.restartReasons.length > 0 ? JSON.stringify(c.restartReasons) : null,
         c.lastCheckedAt,
         c.lastError,
         c.notifiedSignature,

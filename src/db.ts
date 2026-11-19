@@ -199,6 +199,8 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE containers ADD COLUMN update_memory_mb INTEGER;
    ALTER TABLE containers ADD COLUMN resources_to_restore TEXT;
    ALTER TABLE container_runs ADD COLUMN resume TEXT;`,
+  // Reasons why a container or the host should be restarted (JSON array of strings, from the last check).
+  `ALTER TABLE containers ADD COLUMN restart_reasons TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

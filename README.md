@@ -141,7 +141,7 @@ dedicated to it.
   with `pct exec <vmid> -- sh -lc '…'`.
 - **Add host** adds the Proxmox node itself (apt only): it is checked like a container and upgraded with
   `apt-get dist-upgrade` (followed by `apt-get autoremove`), as Proxmox VE requires. There is no backup before host upgrades and the host is never
-  rebooted – reboot it yourself after a kernel update.
+  rebooted automatically – see *Restart needed* below.
 - **apt check:** `apt-get update` + `apt list --upgradable`; upgrade = `apt-get -y upgrade` + `apt-get -y autoremove`, keeping existing
   config files.
 - **Applications** per container:
@@ -158,6 +158,12 @@ dedicated to it.
   container can override it. A check is one SSH connection (`pct status` + one `pct exec` with the apt check and all
   version commands); up to `CONTAINER_CHECK_CONCURRENCY` containers are checked in parallel. Each pending item is
   notified once.
+- **Restart needed:** every check also looks for `/var/run/reboot-required` (with the packages that asked for it)
+  and – in containers – for processes still using executables or libraries that an upgrade replaced (like
+  `needrestart`); on the host it compares the running kernel with the newest one in `/boot`. The reasons are shown
+  with a **Restart** button (after a confirmation): a container is restarted with `pct reboot` (detached, so it
+  also works for the container ReleaseWatcher runs in) and checked again; for the host a reboot is scheduled 15 s
+  later with `systemd-run` and refused while other checks or updates run. Restarts never happen automatically.
 - **Stopped containers** are not started by default: a check only reads their status and keeps the last results;
   updates are refused. Enable **Start temporarily when stopped** to have checks and updates start the container
   (`pct start`), wait for its network and shut it down afterwards.
@@ -468,7 +474,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers on the node (`pct list`) with an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups |
-| `GET` | `/api/containers` | Added containers with applications, pending updates, `isBusy` and `activeRunId` |
+| `GET` | `/api/containers` | Added containers with applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet |
@@ -478,6 +484,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers/update-all` | Update every enabled container with pending updates, one after another; `{ "backup"? }` → `202` with `{ containers, updates }` |
 | `POST` | `/api/containers/:id/update-all` | Run all pending updates of one container; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
+| `POST` | `/api/containers/:id/restart` | Restart a running container (`pct reboot`) or schedule a reboot of the host → `202` (`409` while updates run, for a stopped container, or – for the host – while any task runs) |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` (host: `dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |

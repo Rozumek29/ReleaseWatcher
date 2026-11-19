@@ -848,6 +848,75 @@ describe('containers API', () => {
     assert.equal(shell.commands.length, 0);
   });
 
+  it('flags a container that needs a restart and restarts it', async () => {
+    shell.on(/reboot-required/, { output: 'file libc6\nstale nginx\nstale sshd\n' });
+    const container = await addContainer();
+    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.deepEqual(dto.restartReasons, ['Requested by package libc6', 'Processes use upgraded files: nginx, sshd']);
+    // Not an error and not an update.
+    assert.equal(dto.lastError, null);
+    assert.equal(dto.updatesAvailable, 1);
+
+    shell.on(/^pct reboot 101 /, { output: '' });
+    shell.on(/reboot-required/, { output: '' });
+    const response = await request('POST', `/api/containers/${container.id}/restart`);
+    assert.equal(response.status, 202);
+    assert.equal(response.json().kind, 'restart');
+    const run = await app.containers.wait(container.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /CT 101 restarted/);
+    // Detached, so it completes even when ReleaseWatcher runs in this container.
+    assert.equal(shell.detached.at(-1)?.unit, `releasewatcher-run-${run?.id}-restart`);
+    assert.match(shell.detached.at(-1)?.command ?? '', /^pct reboot 101 --timeout 120/);
+    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.deepEqual(dto.restartReasons, []);
+    assert.equal(notifier.resultsSent.length, 0);
+
+    // A stopped container has nothing to restart; its reasons are cleared by the next check.
+    shell.on(/reboot-required/, { output: 'file\n' });
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.deepEqual(dto.restartReasons, []);
+    assert.equal((await request('POST', `/api/containers/${container.id}/restart`)).status, 409);
+    assert.equal((await request('POST', '/api/containers/999/restart')).status, 404);
+  });
+
+  it('schedules a restart of the Proxmox host only while nothing else runs', async () => {
+    shell.on(/^hostname$/, { output: 'pve\n' });
+    shell.on(/uname -r/, { output: 'kernel 6.8.12-4-pve 6.8.12-5-pve\n' });
+    const node = (await request('POST', '/api/containers/node')).json();
+    await app.containers.wait(node.id);
+    const dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    assert.deepEqual(dto.restartReasons, ['Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running']);
+
+    // A check of another container is running → 409.
+    const container = await addContainer();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    shell.on(/^pct status 101$/, async () => {
+      await gate;
+      return { output: 'status: running\n' };
+    });
+    await request('POST', `/api/containers/${container.id}/check`);
+    assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 409);
+    release();
+    await app.containers.wait(container.id);
+
+    shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
+    shell.commands.length = 0;
+    assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 202);
+    const run = await app.containers.wait(node.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /Restart scheduled/);
+    assert.deepEqual(shell.commands, [
+      'systemd-run --quiet --unit=releasewatcher-host-restart --on-active=15 --timer-property=AccuracySec=1s systemctl reboot',
+    ]);
+  });
+
   it('refuses container actions until the node is configured', async () => {
     shell.isConfigured = false;
     assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);

@@ -288,6 +288,8 @@ export interface Container {
   nextCheckAt: string | null;
   status: string | null;
   aptUpgradable: AptPackage[];
+  /** Why a restart is needed (last check); empty = none. */
+  restartReasons: string[];
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
@@ -330,7 +332,7 @@ export interface DiscoveredContainer {
   added: boolean;
 }
 
-export type RunKind = 'check' | 'apt-upgrade' | 'app-update';
+export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {

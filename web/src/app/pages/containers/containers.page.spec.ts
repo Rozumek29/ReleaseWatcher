@@ -109,6 +109,64 @@ describe('ContainersPage', () => {
     expect(el.textContent).toContain('no pending packages');
   });
 
+  it('shows why a restart is needed and restarts the container after a confirmation', async () => {
+    const reasons = ['Requested by package libc6', 'Processes use upgraded files: nginx'];
+    const { fixture, el } = await create([
+      container({ aptUpgradable: [], apps: [], updatesAvailable: 0, restartReasons: reasons }),
+    ]);
+
+    expect(el.querySelector('.ct-state.warning')).not.toBeNull();
+    expect(el.textContent).toContain('Restart needed');
+    expect(el.textContent).not.toContain('Up to date');
+    expect(el.querySelector('.restart-line')?.textContent).toContain('libc6');
+    expect(el.querySelector('.restart-line')?.textContent).toContain('nginx');
+
+    const restartButton = () =>
+      [...el.querySelectorAll<HTMLButtonElement>('.restart-line button')].find((b) =>
+        b.textContent?.includes('Restart'),
+      )!;
+    restartButton().click();
+    await settle(fixture);
+    http.expectNone('/api/containers/1/restart');
+    expect(el.querySelector('.restart-line')?.textContent).toContain('Restart CT 101?');
+
+    [...el.querySelectorAll<HTMLButtonElement>('.restart-line button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const request = http.expectOne('/api/containers/1/restart');
+    expect(request.request.method).toBe('POST');
+    request.flush(run({ kind: 'restart', status: 'running', finishedAt: null, exitCode: null }), {
+      status: 202,
+      statusText: 'Accepted',
+    });
+    await settle(fixture);
+    http.expectOne('/api/runs/9').flush(run({ kind: 'restart', output: '» CT 101 restarted\n' }));
+    await settle(fixture);
+    expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
+
+    http.expectOne('/api/containers').flush([container({ aptUpgradable: [], apps: [], updatesAvailable: 0 })]);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    http.expectOne('/api/status').flush({});
+    await settle(fixture);
+    expect(el.querySelector('.restart-line')).toBeNull();
+    expect(el.textContent).toContain('Up to date');
+  });
+
+  it('warns that restarting the Proxmox host stops its guests and hides restarts of stopped containers', async () => {
+    const { fixture, el } = await create([
+      container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [], aptUpgradable: [], updatesAvailable: 0, restartReasons: ['Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running'] }),
+      container({ id: 3, vmid: 103, name: 'idle', status: 'stopped', restartReasons: ['Requested by an upgraded package'] }),
+    ]);
+    await select(fixture, el, 'pve');
+    const button = [...el.querySelectorAll<HTMLButtonElement>('.restart-line button')].find((b) =>
+      b.textContent?.includes('Restart host'),
+    )!;
+    button.click();
+    await settle(fixture);
+    expect(el.querySelector('.restart-line')?.textContent).toContain('All its guests stop');
+
+    await select(fixture, el, 'idle');
+    expect(el.querySelector('.restart-line')).toBeNull();
+  });
+
   it('updates all containers with pending updates after a confirmation, leaving out the host', async () => {
     const node = container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [] });
     const disabled = container({ id: 3, vmid: 103, name: 'off', isEnabled: false });

@@ -33,6 +33,12 @@ import {
   parsePctStatus,
   parsePvesmStatus,
   NODE_APT_UPGRADE_SCRIPT,
+  NODE_RESTART_CHECK_SCRIPT,
+  NODE_RESTART_COMMAND,
+  NODE_RESTART_DELAY_SECONDS,
+  parseRestartCheck,
+  RESTART_CHECK_SCRIPT,
+  restartContainerCommand,
   targetLabel,
   SHUTDOWN_TIMEOUT_SECONDS,
   shutdownContainerCommand,
@@ -94,6 +100,9 @@ export async function fetchCommunityScript(slug: string): Promise<string | null>
 const NODE_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
+const RESTART_CHECK_TIMEOUT_SECONDS = 60;
+/** Restart of a container: clean shutdown, start and the wait for its network. */
+const RESTART_TIMEOUT_MS = (SHUTDOWN_TIMEOUT_SECONDS + START_NETWORK_WAIT_SECONDS + 120) * 1000;
 const APT_UPGRADE_TIMEOUT_MS = 60 * 60_000;
 const BACKUP_TIMEOUT_MS = 4 * 60 * 60_000;
 /**
@@ -445,6 +454,51 @@ export class ContainerService {
   }
 
   /**
+   * Restarts a container with `pct reboot` – detached, so it completes even when ReleaseWatcher runs in this very
+   * container ({@link recover} re-attaches afterwards) – and checks it again. For the Proxmox host the restart is only
+   * scheduled ({@link NODE_RESTART_DELAY_SECONDS} s later), so the run can finish before the node goes down.
+   */
+  startRestart(container: Container): Run {
+    if (container.kind === 'node') {
+      return this.start(container, null, 'restart', 'manual', async (log) => {
+        log.note(`Scheduling a restart of the Proxmox host in ${NODE_RESTART_DELAY_SECONDS} s`);
+        const result = await this.deps.shell.run(NODE_RESTART_COMMAND, {
+          timeoutMs: NODE_TIMEOUT_MS,
+          onOutput: (chunk) => log.write(chunk),
+        });
+        if (result.exitCode !== 0) {
+          log.note(`Restart failed – ${describeSshFailure(result)}`);
+          return { ok: false, exitCode: result.exitCode };
+        }
+        log.note('Restart scheduled – the host and its guests are unavailable for a few minutes; the next check confirms it');
+        return { ok: true, exitCode: 0 };
+      });
+    }
+    return this.start(container, null, 'restart', 'manual', async (log) => {
+      log.note(`Restarting CT ${container.vmid} (pct reboot)`);
+      const result = await this.execDetached(log, 'restart', restartContainerCommand(container.vmid), {
+        timeoutMs: RESTART_TIMEOUT_MS,
+        startedContainer: false,
+      });
+      return this.finishRestart(container, log, result);
+    });
+  }
+
+  /** True while any check or update runs (the host must not be restarted under it). */
+  hasActiveTasks(): boolean {
+    return this.active.size > 0;
+  }
+
+  /** Logs the result of a container restart and checks it again (clears the restart reasons). */
+  private async finishRestart(container: Container, log: RunLog, result: CommandResult): Promise<TaskResult> {
+    const ok = result.exitCode === 0;
+    log.note(ok ? `CT ${container.vmid} restarted` : `Restart failed – ${describeSshFailure(result)}`);
+    log.note('Checking the container again');
+    await this.check(container, log, false);
+    return { ok, exitCode: result.exitCode };
+  }
+
+  /**
    * Re-attaches to updates that were still running on the node (detached) when the previous process stopped, and
    * restores resources left raised. Runs without a detached step are marked as failed by the store on startup.
    */
@@ -474,6 +528,9 @@ export class ContainerService {
                 : `Backup failed – update not started. ${describeSshFailure(result)}`,
             );
             return { ok: false, exitCode: result.exitCode };
+          }
+          if (resume.step === 'restart') {
+            return await this.finishRestart(container, log, result);
           }
           return await this.finishUpdate(container, log, result);
         } finally {
@@ -539,9 +596,9 @@ export class ContainerService {
     this.latest.set(container.id, promise);
   }
 
-  /** Reports a finished update (checks are reported by {@link notifyNewUpdates}). */
+  /** Reports a finished update (checks are reported by {@link notifyNewUpdates}; restarts are not reported). */
   private async notifyUpdateResult(container: Container, run: Run): Promise<void> {
-    if (run.kind === 'check') {
+    if (run.kind === 'check' || run.kind === 'restart') {
       return;
     }
     const app = run.appId === null ? null : this.deps.containers.getApp(container.id, run.appId);
@@ -906,6 +963,8 @@ export class ContainerService {
     if (container.aptEnabled) {
       steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
+    const restartScript = container.kind === 'node' ? NODE_RESTART_CHECK_SCRIPT : RESTART_CHECK_SCRIPT;
+    steps.push({ id: 'restart', script: restartScript, timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
     for (const app of apps) {
       if (app.versionCommand) {
         steps.push({ id: `v${app.id}`, script: app.versionCommand, timeoutSeconds: CHECK_TIMEOUT_SECONDS });
@@ -936,6 +995,7 @@ export class ContainerService {
     if (stopped) {
       // Not an error: a stopped container is skipped, never started. Results of the last check are kept.
       log.note('Container is stopped – apt and application checks skipped (it is not started automatically)');
+      container.restartReasons = []; // it starts fresh anyway
     } else if (container.status !== 'running') {
       errors.push(`Container is ${container.status ?? 'in an unknown state'} – start it to check for updates.`);
     } else {
@@ -953,6 +1013,18 @@ export class ContainerService {
         }
       } else {
         container.aptUpgradable = [];
+      }
+
+      // Not counted as an error: the badge only hints at a restart; a failed probe keeps the previous result.
+      const restart = batch.steps.get('restart');
+      if (restart?.exitCode === 0) {
+        container.restartReasons = parseRestartCheck(restart.output);
+        if (container.restartReasons.length > 0) {
+          log.note(`Restart needed: ${container.restartReasons.join('; ')}`);
+        }
+      } else {
+        // Worded without "failed": lastNote() must keep reporting the update's own failure.
+        log.note(`Could not tell whether a restart is needed: ${describeStep(restart)}`);
       }
 
       for (const app of apps) {

@@ -171,6 +171,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
       aptUpgradable: c.aptUpgradable,
+      /** Why a restart is needed (last check); empty = none. */
+      restartReasons: c.restartReasons,
       lastCheckedAt: c.lastCheckedAt,
       lastError: c.lastError,
       createdAt: c.createdAt,
@@ -503,6 +505,30 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
+        }),
+    },
+    // Restarts a running container (`pct reboot`) or schedules a restart of the Proxmox host.
+    '/api/containers/:id/restart': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/restart'>) =>
+        guard(() => {
+          const container = findContainer(req.params.id);
+          if (!container) {
+            return problem(404, 'Container not found.');
+          }
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          if (updater.isQueued(container.id)) {
+            return problem(409, `Updates of ${targetLabel(container)} are running – restart it when they have finished.`);
+          }
+          if (container.kind === 'node') {
+            if (service.hasActiveTasks() || containers.list().some((c) => updater.isQueued(c.id))) {
+              return problem(409, 'Checks or updates are running – restart the Proxmox host when they have finished.');
+            }
+          } else if (container.status === 'stopped') {
+            return problem(409, `${targetLabel(container)} is stopped – it does not need a restart.`);
+          }
+          return accepted(service.startRestart(container));
         }),
     },
     // Runs every pending update of one container (apt, then applications) one after another.

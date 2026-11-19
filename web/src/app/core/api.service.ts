@@ -171,6 +171,11 @@ export class ApiService {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/check`, {});
   }
 
+  /** Restarts a container, or schedules a restart of the Proxmox host. */
+  restartContainer(id: number): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/restart`, {});
+  }
+
   /** `backup` decides about a backup (vzdump) before this update. */
   upgradeApt(id: number, backup: boolean): Observable<Run> {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });

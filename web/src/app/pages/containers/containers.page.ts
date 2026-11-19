@@ -14,7 +14,7 @@ import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
 import { ContainerSettingsDialog } from './container-settings.dialog';
 import { RunLogDialog, RunLogTarget } from './run-log.dialog';
-import { targetLabel } from './target';
+import { kindLabel, targetLabel } from './target';
 
 /** How often the list is refreshed while a container reports a running task. */
 const BUSY_REFRESH_MS = 3000;
@@ -321,6 +321,16 @@ export class ContainersPage {
     return this.startRun(container, () => this.api.upgradeApt(container.id, backup));
   }
 
+  protected restart(container: Container): Promise<void> {
+    this.confirming.set(null);
+    return this.startRun(container, () => this.api.restartContainer(container.id));
+  }
+
+  /** A restart is suggested and possible right now (a stopped container starts fresh anyway). */
+  protected needsRestart(container: Container): boolean {
+    return restartPending(container);
+  }
+
   protected updateApp(container: Container, app: ContainerApp): Promise<void> {
     this.confirming.set(null);
     const backup = this.backupFirst();
@@ -509,6 +519,9 @@ export class ContainersPage {
     if (container.updatesAvailable > 0) {
       return 'updates';
     }
+    if (this.needsRestart(container)) {
+      return 'restart';
+    }
     if (container.status === 'stopped') {
       return 'stopped';
     }
@@ -562,13 +575,18 @@ export class ContainersPage {
   }
 }
 
-export function kindLabel(kind: Run['kind']): string {
-  return kind === 'check' ? 'Check' : kind === 'apt-upgrade' ? 'apt upgrade' : 'Application update';
-}
-
 export type ContainerFilter = 'all' | 'updates' | 'errors' | 'working' | 'inactive';
 /** State shown for a container in the list (one, by priority). */
-export type ContainerState = 'working' | 'queued' | 'error' | 'updates' | 'paused' | 'stopped' | 'ok' | 'unchecked';
+export type ContainerState =
+  | 'working'
+  | 'queued'
+  | 'error'
+  | 'updates'
+  | 'restart'
+  | 'paused'
+  | 'stopped'
+  | 'ok'
+  | 'unchecked';
 
 const FILTERS: readonly { value: ContainerFilter; label: string }[] = [
   { value: 'all', label: 'All' },
@@ -588,12 +606,17 @@ function hasError(c: Container): boolean {
   return !!c.lastError || c.apps.some((a) => !!a.error);
 }
 
+function restartPending(c: Container): boolean {
+  return c.restartReasons.length > 0 && c.status !== 'stopped';
+}
+
 function matchesFilter(c: Container, filter: ContainerFilter): boolean {
   switch (filter) {
     case 'all':
       return true;
     case 'updates':
-      return c.updatesAvailable > 0;
+      // A restart is the last step of applying updates.
+      return c.updatesAvailable > 0 || restartPending(c);
     case 'errors':
       return hasError(c);
     case 'working':
@@ -608,7 +631,7 @@ function attentionRank(c: Container): number {
   if (c.isBusy) return 0;
   if (!c.isEnabled) return 5; // paused: not checked or updated, so nothing to act on
   if (hasError(c)) return 1;
-  if (c.updatesAvailable > 0) return 2;
+  if (c.updatesAvailable > 0 || restartPending(c)) return 2;
   if (c.status === 'stopped') return 4;
   return 3;
 }

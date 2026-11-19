@@ -222,6 +222,9 @@
                       <app-icon name="arrowUp" [size]="12" />{{ c.updatesAvailable }}
                     </span>
                   }
+                  @case ('restart') {
+                    <span class="ct-state warning" title="Restart needed"><app-icon name="power" [size]="14" /></span>
+                  }
                   @case ('ok') {
                     <app-icon class="ct-state success" name="check" [size]="14" />
                   }
@@ -262,8 +265,11 @@
                   <span class="badge badge-accent"><app-icon name="refresh" [size]="12" class="spin" /> Working…</span>
                 } @else if (c.updatesAvailable > 0) {
                   <span class="badge badge-warning"><app-icon name="arrowUp" [size]="12" /> {{ c.updatesAvailable }} update(s)</span>
-                } @else if (c.lastCheckedAt && !c.lastError && !blockedWhileStopped(c)) {
+                } @else if (c.lastCheckedAt && !c.lastError && !blockedWhileStopped(c) && !needsRestart(c)) {
                   <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
+                }
+                @if (needsRestart(c) && !isBusy(c)) {
+                  <span class="badge badge-warning"><app-icon name="power" [size]="12" /> Restart needed</span>
                 }
               </div>
               <div class="meta">
@@ -355,7 +361,41 @@
               }
             </p>
           }
-  
+          @if (needsRestart(c)) {
+            <div class="restart-line">
+              <app-icon name="power" [size]="14" />
+              <div class="restart-text">
+                <strong>Restart needed</strong>
+                @for (reason of c.restartReasons; track $index) {
+                  <span class="muted">{{ reason }}</span>
+                }
+              </div>
+              <div class="restart-actions">
+                @if (confirming() === 'restart-' + c.id) {
+                  <span class="confirm-text warn">
+                    @if (c.kind === 'node') {
+                      Restart the Proxmox host? All its guests stop for a few minutes – ReleaseWatcher too, if it runs there.
+                    } @else {
+                      Restart {{ label(c) }}? Its services are unavailable for a moment.
+                    }
+                  </span>
+                  <button type="button" class="btn btn-sm" (click)="restart(c)">Yes</button>
+                  <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-secondary"
+                    (click)="confirming.set('restart-' + c.id)"
+                    [disabled]="isBusy(c) || !configured()"
+                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : 'pct reboot – clean shutdown and start'"
+                  >
+                    <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : 'Restart' }}
+                  </button>
+                }
+              </div>
+            </div>
+          }
+
           <div class="items">
             @if (c.aptEnabled) {
               <div class="item">

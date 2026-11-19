@@ -254,6 +254,40 @@
   }
 }
 
+.restart-line {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: flex-start;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--warning-soft);
+  font-size: 0.85rem;
+
+  > app-icon {
+    flex-shrink: 0;
+    margin-top: 3px;
+    color: var(--warning);
+  }
+}
+
+.restart-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: min(100%, 220px);
+  overflow-wrap: anywhere;
+}
+
+.restart-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 8px;
+  align-items: center;
+}
+
 .node-row {
   display: flex;
   flex-wrap: wrap;
@@ -463,6 +497,11 @@
 
   &.danger {
     color: var(--danger);
+  }
+
+  &.warning {
+    display: inline-flex;
+    color: var(--warning);
   }
 
   &.success {

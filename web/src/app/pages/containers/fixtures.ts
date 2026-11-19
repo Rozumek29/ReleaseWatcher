@@ -68,6 +68,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
     { name: 'curl', currentVersion: '8.0', newVersion: '8.1' },
     { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
   ],
+  restartReasons: [],
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',
