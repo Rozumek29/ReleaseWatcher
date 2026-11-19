@@ -8,7 +8,7 @@
 //   --node <host>      Proxmox node; default: the host saved in the local database (Settings → Proxmox node)
 //   --user <name>      SSH user on the node (default: root, or the one saved in the local database)
 //   --port <port>      SSH port (default: 22, or the saved one)
-//   --identity <file>  SSH private key; default: your normal ssh setup (~/.ssh, agent, ~/.ssh/config)
+//   --identity <file>  SSH private key; default: the key saved in the local database, else your normal ssh setup
 //   --db               copy the local database (repositories, containers, settings) – only when the container has
 //                      none yet; add --force-db to replace an existing one
 //   --skip-build       reuse dist/releasewatcher-linux-x64
@@ -19,6 +19,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { writePrivateKeyFile } from '../src/proxmox/ssh.ts';
 import { compile } from './compile.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -116,12 +117,14 @@ try {
     uploads.push('releasewatcher.db');
   }
 
-  // 3. SSH options: an explicit key or the user's normal ssh setup
-  // BatchMode: a rejected key would otherwise fall back to a password prompt that never shows under Bun.spawnSync
-  // on Windows, and the deploy would hang silently instead of failing.
-  const sshOptions = ['-p', port, '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10'];
+  // 3. SSH options: the key saved in the local database, an explicit one, or the user's normal ssh setup
+  const sshOptions = ['-p', port, '-o', 'StrictHostKeyChecking=accept-new'];
   if (values.identity) {
     sshOptions.push('-i', resolve(values.identity), '-o', 'IdentitiesOnly=yes');
+  } else if (saved['proxmoxSshKey']) {
+    const keyFile = join(staging, 'id');
+    writePrivateKeyFile(keyFile, saved['proxmoxSshKey']);
+    sshOptions.push('-i', keyFile, '-o', 'IdentitiesOnly=yes');
   }
   const target = `${user}@${node}`;
   const remoteDir = `/tmp/releasewatcher-deploy-${process.pid}`;
