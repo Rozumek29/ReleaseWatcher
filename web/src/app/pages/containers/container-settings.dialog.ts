@@ -358,7 +358,6 @@ export class ContainerSettingsDialog {
     }
   }
 
-  /** Closes on a backdrop click. Returns nothing on purpose (a `false` result would cancel the click). */
   protected close(): void {
     this.closed.emit();
   }

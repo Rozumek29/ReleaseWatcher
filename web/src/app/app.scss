@@ -12,6 +12,9 @@
   flex-direction: column;
   gap: 20px;
   padding: 20px 14px;
+  /* Short windows (phones in landscape) scroll the sidebar, not the page behind it. */
+  overflow-y: auto;
+  overscroll-behavior: contain;
   background: var(--sidebar-bg);
   border-right: 1px solid var(--border);
 }
@@ -144,9 +147,12 @@ nav {
   }
 }
 
+/* The vertical padding is a variable so pages that fill the viewport (containers) can subtract it. */
 .content {
+  --content-padding-top: 32px;
+  --content-padding-bottom: 64px;
   min-width: 0;
-  padding: 32px clamp(16px, 4vw, 48px) 64px;
+  padding: var(--content-padding-top) clamp(16px, 4vw, 48px) var(--content-padding-bottom);
 }
 
 .mobile-bar,
@@ -276,7 +282,7 @@ nav {
   }
 
   .content {
-    padding-top: 20px;
+    --content-padding-top: 20px;
   }
 }
 

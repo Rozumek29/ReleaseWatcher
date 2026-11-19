@@ -152,7 +152,6 @@ export class RunLogDialog {
     return seconds < 60 ? `${seconds}s` : `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
   }
 
-  /** Closes on a backdrop click. Returns nothing on purpose (a `false` result would cancel the click). */
   protected close(): void {
     this.stop();
     this.closed.emit();

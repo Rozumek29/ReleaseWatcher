@@ -174,7 +174,8 @@ Shared components in `web/src/app/shared/`:
 - `<app-switch [checked] label (toggled)>` – the only on/off control (no bare checkboxes for settings).
 - `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
-- `appBackdropClose` directive on a `<dialog>` – `(backdropClose)` fires only when press and release both happen on the backdrop.
+- `appBackdropClose` directive on a `<dialog>` – light dismiss: sets `closedby="any"` (the browser closes the dialog and
+  fires `close`); where that is unsupported (Safari), `(backdropClose)` fires when press and release both happen on the backdrop.
 
 ### 3.5 Interaction patterns
 
@@ -191,7 +192,8 @@ Shared components in `web/src/app/shared/`:
 - **Dialogs:** native `<dialog>` opened with `showModal()` from an `effect()` on an input signal
   (`input<T | null>` – `null` closes), `saved` / `closed` outputs, backdrop click closes
   (`appBackdropClose` – not a bare `(click)`, which also fires when a text selection ends outside the dialog), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
-  grouped fields in `fieldset.group` with a `legend`. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
+  grouped fields in `fieldset.group` with a `legend`. Dialogs and their `::backdrop` set
+  `overscroll-behavior: contain` (the backdrop also `overflow: hidden`) so scrolling never moves the page underneath. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”

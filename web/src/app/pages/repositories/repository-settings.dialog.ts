@@ -147,7 +147,6 @@ export class RepositorySettingsDialog {
       .map((h) => ({ name: h.name.trim(), value: h.saved && !h.value ? null : h.value }));
   }
 
-  /** Closes on a backdrop click. Returns nothing on purpose: a `false` result would make Angular cancel the click. */
   protected close(): void {
     this.closed.emit();
   }
