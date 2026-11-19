@@ -297,16 +297,40 @@
   gap: 16px;
 }
 
-/* The list stays in view while the detail pane scrolls with the page. */
+/* Wide screens: the page itself does not scroll – list and detail pane fill the rest of the viewport
+   and scroll on their own. 56px = the content's 32px top padding + a 24px gap at the bottom; the
+   negative margin takes back the rest of its 64px bottom padding. */
+@media (min-width: 1101px) {
+  :host {
+    display: flex;
+    flex-direction: column;
+    height: calc(100dvh - 56px);
+    margin-bottom: -40px;
+
+    > * {
+      flex-shrink: 0;
+    }
+  }
+
+  .browser {
+    flex: 1 1 0;
+    grid-template-rows: minmax(0, 1fr);
+    /* Very short windows fall back to page scrolling instead of squeezing the panes. */
+    min-height: 320px;
+  }
+
+  .ct-list-wrap,
+  .detail {
+    max-height: 100%;
+    overflow-y: auto;
+    scrollbar-width: thin;
+  }
+}
+
 .ct-list-wrap {
-  position: sticky;
-  top: 16px;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: calc(100dvh - 32px);
-  overflow-y: auto;
-  scrollbar-width: thin;
 }
 
 .ct-list {
@@ -485,12 +509,6 @@
 @media (max-width: 1100px) {
   .browser {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .ct-list-wrap {
-    position: static;
-    max-height: none;
-    overflow: visible;
   }
 
   .back {
