@@ -1,13 +1,13 @@
 .shell {
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .sidebar {
   position: sticky;
   top: 0;
-  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   gap: 20px;
@@ -339,7 +339,7 @@ nav {
 
 /* Sign-in and setup pages: the page centers itself. */
 .auth-layout {
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Each page fades in when navigated to (the routed component is the outlet's next sibling). */

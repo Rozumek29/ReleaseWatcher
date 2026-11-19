@@ -146,6 +146,8 @@ always used in pairs: text in `--x`, background in `--x-soft`.
   5. states: loading skeleton → empty state → “nothing matches” → data.
 - Other breakpoints used inside pages: 600px (repositories), 560px (settings), 480px (dialogs). Prefer these
   values over new ones; content must work at 360px wide without horizontal scroll.
+- Viewport heights use `dvh`, never `vh`: on phones `100vh` is the height without the browser bars, so
+  sticky/fixed elements and dialog footers sized with it end up hidden behind the address bar.
 
 ### 3.4 Components and global classes
 
