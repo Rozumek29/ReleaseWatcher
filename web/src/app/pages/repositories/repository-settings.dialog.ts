@@ -14,11 +14,12 @@ interface HeaderRow {
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
+import { BackdropClose } from '../../shared/backdrop-close';
 
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
 @Component({
   selector: 'app-repository-settings-dialog',
-  imports: [FormsModule, Avatar, Icon, Switch],
+  imports: [BackdropClose, FormsModule, Avatar, Icon, Switch],
   templateUrl: './repository-settings.dialog.html',
   styleUrl: './repository-settings.dialog.scss',
 })
@@ -147,12 +148,6 @@ export class RepositorySettingsDialog {
   }
 
   /** Closes on a backdrop click. Returns nothing on purpose: a `false` result would make Angular cancel the click. */
-  protected onDialogClick(event: MouseEvent, dialog: HTMLDialogElement): void {
-    if (event.target === dialog) {
-      this.close();
-    }
-  }
-
   protected close(): void {
     this.closed.emit();
   }

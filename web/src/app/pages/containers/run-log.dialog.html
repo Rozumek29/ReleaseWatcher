@@ -1,4 +1,4 @@
-<dialog #dialog class="dialog run-dialog" (close)="close()" (click)="onDialogClick($event, dialog)" aria-labelledby="run-title">
+<dialog #dialog class="dialog run-dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="run-title">
   @if (target(); as t) {
     <div class="dialog-card">
       <header class="dialog-head">

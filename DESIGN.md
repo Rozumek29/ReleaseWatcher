@@ -174,6 +174,7 @@ Shared components in `web/src/app/shared/`:
 - `<app-switch [checked] label (toggled)>` – the only on/off control (no bare checkboxes for settings).
 - `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
+- `appBackdropClose` directive on a `<dialog>` – `(backdropClose)` fires only when press and release both happen on the backdrop.
 
 ### 3.5 Interaction patterns
 
@@ -189,7 +190,7 @@ Shared components in `web/src/app/shared/`:
   *Backup first*). No `window.confirm()`.
 - **Dialogs:** native `<dialog>` opened with `showModal()` from an `effect()` on an input signal
   (`input<T | null>` – `null` closes), `saved` / `closed` outputs, backdrop click closes
-  (`onDialogClick`), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
+  (`appBackdropClose` – not a bare `(click)`, which also fires when a text selection ends outside the dialog), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
   grouped fields in `fieldset.group` with a `legend`. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;

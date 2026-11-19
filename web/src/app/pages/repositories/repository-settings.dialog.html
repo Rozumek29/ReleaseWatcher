@@ -1,4 +1,4 @@
-<dialog #dialog class="dialog" (close)="close()" (click)="onDialogClick($event, dialog)" aria-labelledby="repo-settings-title">
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="repo-settings-title">
   @if (repository(); as repo) {
     <form class="dialog-card" (ngSubmit)="save()">
       <header class="dialog-head">
