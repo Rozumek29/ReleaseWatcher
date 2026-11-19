@@ -65,11 +65,16 @@ describe('SettingsPage', () => {
 
     http.expectOne('/api/settings').flush(settings);
     await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+    // The meter is already there while loading, so the quota box does not change height.
+    expect(el.querySelector('.quota-meta')?.textContent).toContain('Loading');
+    expect(el.querySelector('.quota .meter')).not.toBeNull();
+
     http.expectOne('/api/github/rate-limit').flush({ limit: 60, remaining: 42, resetAt: '2026-01-01T00:00:00Z' });
     await settle(fixture);
 
-    const el = fixture.nativeElement as HTMLElement;
     expect(el.querySelector('.quota-meta')?.textContent).toContain('42');
+    expect(el.querySelector('.quota .meter')?.getAttribute('aria-valuenow')).toBe('42');
 
     el.querySelector<HTMLButtonElement>('#tab-notifications')!.click();
     await settle(fixture);

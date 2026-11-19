@@ -40,10 +40,18 @@
               <app-icon name="refresh" [size]="15" [class.spin]="loadingRateLimit()" />
             </button>
           </div>
+          <!-- The meter is always rendered so the box keeps its height while the quota loads. -->
+          <div
+            class="meter"
+            role="meter"
+            [attr.aria-valuenow]="rateLimit()?.remaining ?? 0"
+            aria-valuemin="0"
+            [attr.aria-valuemax]="rateLimit()?.limit ?? 0"
+            aria-label="Remaining GitHub API requests"
+          >
+            <span [style.width.%]="rateLimitPercent()" [class.low]="rateLimitPercent() < 20"></span>
+          </div>
           @if (rateLimit(); as rl) {
-            <div class="meter" role="meter" [attr.aria-valuenow]="rl.remaining" aria-valuemin="0" [attr.aria-valuemax]="rl.limit" aria-label="Remaining GitHub API requests">
-              <span [style.width.%]="rateLimitPercent()" [class.low]="rateLimitPercent() < 20"></span>
-            </div>
             <div class="quota-meta">
               <strong>{{ rl.remaining | number }}</strong> of {{ rl.limit | number }} requests left · resets {{ rl.resetAt | relativeTime }}
             </div>
