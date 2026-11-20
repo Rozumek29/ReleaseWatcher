@@ -136,6 +136,43 @@
           }
         </fieldset>
 
+        <fieldset class="group">
+          <legend>
+            <app-icon name="shield" [size]="16" />
+            Vulnerabilities from OSV.dev
+          </legend>
+          <p class="group-hint">
+            GitHub security advisories of this repository are read automatically. For more sources (Go, PyPI and npm
+            advisories, CVEs) name the package the app is published as – find it on
+            <a href="https://osv.dev/list" target="_blank" rel="noopener">osv.dev</a>, e.g. <code>npm</code> /
+            <code>n8n</code> or <code>Go</code> / <code>github.com/gitea/gitea</code>.
+          </p>
+          <div class="osv-row">
+            <div class="field">
+              <label for="osv-ecosystem">Ecosystem</label>
+              <select id="osv-ecosystem" class="input" name="osvEcosystem" [(ngModel)]="osvEcosystem">
+                <option value="">None</option>
+                @for (e of ecosystems; track e) {
+                  <option [value]="e">{{ e }}</option>
+                }
+              </select>
+            </div>
+            <div class="field">
+              <label for="osv-package">Package</label>
+              <input
+                id="osv-package"
+                class="input mono"
+                name="osvPackage"
+                [(ngModel)]="osvPackage"
+                [disabled]="!osvEcosystem"
+                placeholder="e.g. n8n"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </div>
+          </div>
+        </fieldset>
+
         @if (saveError(); as e) {
           <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
         }

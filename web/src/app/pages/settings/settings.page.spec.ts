@@ -46,11 +46,13 @@ const settings: AppSettings = {
     digest: false,
     digestSource: 'env',
     releases: true,
+    vulnerabilities: true,
     appUpdates: true,
     aptUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
   },
+  advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 };
 
 describe('SettingsPage', () => {
@@ -225,6 +227,7 @@ describe('SettingsPage', () => {
     const submit = kinds.querySelector<HTMLButtonElement>('button[type=submit]')!;
     expect(submit.disabled).toBe(true);
     kinds.querySelector<HTMLElement>('[role=switch][aria-label="Update failed"]')!.click();
+    kinds.querySelector<HTMLElement>('[role=switch][aria-label="New vulnerabilities"]')!.click();
     kinds.querySelector<HTMLElement>('.digest [role=switch]')!.click();
     await settle(fixture);
     expect(submit.disabled).toBe(false);
@@ -232,10 +235,34 @@ describe('SettingsPage', () => {
     expect(http.expectOne('/api/settings').request.body).toEqual({
       notificationDigest: true,
       notifyReleases: true,
+      notifyVulnerabilities: false,
       notifyAppUpdates: true,
       notifyAptUpdates: true,
       notifyUpdateSucceeded: false,
       notifyUpdateFailed: true,
     });
+  });
+
+  it('switches vulnerability sources on and off', async () => {
+    await TestBed.configureTestingModule({
+      imports: [SettingsPage],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(SettingsPage);
+    fixture.detectChanges();
+    http.expectOne('/api/settings').flush(settings);
+    await settle(fixture);
+    http.match('/api/github/rate-limit').forEach((r) => r.flush(null));
+    const el = fixture.nativeElement as HTMLElement;
+
+    const section = el.querySelector<HTMLElement>('section[aria-labelledby=advisories-title]')!;
+    const submit = section.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    expect(submit.disabled).toBe(true);
+    section.querySelector<HTMLElement>('[role=switch][aria-label="OSV.dev"]')!.click();
+    await settle(fixture);
+    expect(submit.disabled).toBe(false);
+    submit.click();
+    expect(http.expectOne('/api/settings').request.body).toEqual({ advisoriesGithub: true, advisoriesOsv: false });
   });
 });

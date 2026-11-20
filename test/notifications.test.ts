@@ -1,9 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { buildDigestPayload, buildUpdateResultPayload } from '../src/notifiers/discord.ts';
+import { buildDigestPayload, buildUpdateResultPayload, buildVulnerabilityPayload } from '../src/notifiers/discord.ts';
+import { buildEmail } from '../src/notifiers/email.ts';
 import { DEFAULT_NOTIFICATION_PREFERENCES, NotificationDispatcher, type NotificationPreferences } from '../src/notifiers/dispatcher.ts';
-import { targetName, type ContainerUpdatesNotification, type NotificationEvent, type UpdateResultNotification } from '../src/notifiers/notifier.ts';
-import { RecordingNotifier, release, silentLog } from './helpers.ts';
+import {
+  targetName,
+  type ContainerUpdatesNotification,
+  type NotificationEvent,
+  type UpdateResultNotification,
+  type VulnerabilityNotification,
+} from '../src/notifiers/notifier.ts';
+import { advisory, RecordingNotifier, release, silentLog } from './helpers.ts';
 
 const releaseOf = (tag: string) => ({ owner: 'acme', repository: 'widget', release: release(tag, 1) });
 const containerUpdates: ContainerUpdatesNotification = {
@@ -164,5 +171,54 @@ describe('targetName', () => {
     assert.equal(targetName({ vmid: 105, containerName: 'nextcloud' }), 'CT 105 (nextcloud)');
     assert.equal(targetName({ vmid: 137, isVm: true, containerName: 'debian' }), 'VM 137 (debian)');
     assert.equal(targetName({ vmid: 0, isNode: true, containerName: 'pve' }), 'Proxmox host (pve)');
+  });
+});
+
+describe('Vulnerability notifications', () => {
+  const vulnerability: VulnerabilityNotification = {
+    owner: 'acme',
+    repository: 'widget',
+    advisory: advisory('GHSA-aaaa-bbbb-cccc', 1, '< 2.0.0', { cveId: 'CVE-2026-1234', severity: 'critical', cvssScore: 9.8 }),
+    installedVersion: '1.5.0',
+    affectsInstalled: true,
+  };
+  const options = { username: null, avatarUrl: null, mention: null, publicUrl: 'https://rw.example.com' };
+
+  it('builds a Discord embed coloured by severity', () => {
+    const [embed] = buildVulnerabilityPayload(vulnerability, options).embeds;
+    assert.equal(embed?.title, 'acme/widget: Problem GHSA-aaaa-bbbb-cccc');
+    assert.equal(embed?.url, 'https://github.com/acme/widget/security/advisories/GHSA-aaaa-bbbb-cccc');
+    assert.equal(embed?.color, 0x8b0000);
+    assert.equal(embed?.description, 'Vulnerable: < 2.0.0 · Patched: 2.0.0');
+    assert.deepEqual(embed?.fields, [
+      { name: 'Advisory', value: 'GHSA-aaaa-bbbb-cccc / CVE-2026-1234', inline: true },
+      { name: 'Severity', value: 'Critical (9.8)', inline: true },
+      { name: 'Installed', value: 'Installed 1.5.0 is affected', inline: true },
+    ]);
+  });
+
+  it('appears in digests without the containers link', () => {
+    const events: NotificationEvent[] = [
+      { type: 'release', release: releaseOf('v2.0.0') },
+      { type: 'vulnerability', vulnerability },
+    ];
+    const [embed] = buildDigestPayload(events, options).embeds;
+    assert.equal(embed?.title, '1 new release, 1 new vulnerability');
+    assert.equal(embed?.url, undefined);
+    assert.match(embed!.description, /\*\*New vulnerabilities\*\*\n• \*\*acme\/widget\*\* \[GHSA-aaaa-bbbb-cccc\]\(.+\) · Critical – Problem GHSA-aaaa-bbbb-cccc \(installed 1\.5\.0 is affected\)/);
+  });
+
+  it('builds an e-mail', () => {
+    const mail = buildEmail([{ type: 'vulnerability', vulnerability }], { maxBodyLength: 1000, publicUrl: null });
+    assert.equal(mail.subject, 'acme/widget: critical vulnerability – Problem GHSA-aaaa-bbbb-cccc');
+    assert.match(mail.text, /Critical \(CVSS 9\.8\) · GHSA-aaaa-bbbb-cccc \/ CVE-2026-1234/);
+    assert.match(mail.text, /Installed 1\.5\.0 is affected/);
+    assert.match(mail.html, /Vulnerable: &lt; 2\.0\.0/);
+  });
+
+  it('is skipped when switched off', async () => {
+    const { notifier, dispatcher } = setup({ vulnerabilities: false });
+    assert.equal((await dispatcher.dispatchVulnerability(vulnerability)).skipped, true);
+    assert.equal(notifier.vulnerabilitiesSent.length, 0);
   });
 });

@@ -6,6 +6,7 @@ import {
   type Notifier,
   type ReleaseNotification,
   type UpdateResultNotification,
+  type VulnerabilityNotification,
 } from './notifier.ts';
 
 /** Which kinds of notifications are sent (Settings → Notifications). */
@@ -13,6 +14,8 @@ export interface NotificationPreferences {
   /** Collect the notifications of one check run and send them as one summary. */
   digest: boolean;
   releases: boolean;
+  /** New security advisories of watched repositories. */
+  vulnerabilities: boolean;
   appUpdates: boolean;
   aptUpdates: boolean;
   updateSucceeded: boolean;
@@ -22,6 +25,7 @@ export interface NotificationPreferences {
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   digest: false,
   releases: true,
+  vulnerabilities: true,
   appUpdates: true,
   aptUpdates: true,
   updateSucceeded: false,
@@ -67,6 +71,14 @@ export class NotificationDispatcher {
       return Promise.resolve(skipped());
     }
     return this.send({ type: 'release', release: notification });
+  }
+
+  /** New security advisory of a watched repository. */
+  dispatchVulnerability(notification: VulnerabilityNotification): Promise<DispatchResult> {
+    if (!this.preferences().vulnerabilities) {
+      return Promise.resolve(skipped());
+    }
+    return this.send({ type: 'vulnerability', vulnerability: notification });
   }
 
   /** Pending updates in a container; apt packages and applications are left out when switched off. */
@@ -158,6 +170,8 @@ function sendTo(notifier: Notifier, events: readonly NotificationEvent[]): Promi
   switch (event.type) {
     case 'release':
       return notifier.notify(event.release);
+    case 'vulnerability':
+      return notifier.notifyVulnerability(event.vulnerability);
     case 'container-updates':
       return notifier.notifyContainerUpdates(event.updates);
     case 'update-result':
@@ -174,6 +188,8 @@ function describe(events: readonly NotificationEvent[]): Record<string, unknown>
   switch (event.type) {
     case 'release':
       return { repo: notificationFullName(event.release), tag: event.release.release.tag };
+    case 'vulnerability':
+      return { repo: notificationFullName(event.vulnerability), advisory: event.vulnerability.advisory.id };
     case 'container-updates':
       return { vmid: event.updates.vmid };
     case 'update-result':

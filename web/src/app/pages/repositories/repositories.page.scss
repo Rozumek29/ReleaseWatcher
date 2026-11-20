@@ -102,6 +102,17 @@
   gap: 8px;
 }
 
+/* Advisories badge: opens the security advisories dialog. */
+.badge-btn {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+
+  &:hover {
+    text-decoration: underline;
+  }
+}
+
 .name {
   color: var(--text);
   font-weight: 620;

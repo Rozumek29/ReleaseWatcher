@@ -1,8 +1,17 @@
+import {
+  advisoriesDue,
+  advisoryAffects,
+  advisoryKeys,
+  sourceKey,
+  type AdvisorySource,
+  type SecurityAdvisory,
+} from './advisories.ts';
 import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
-import { fullName, selectNewReleases, type WatchedRepository } from './domain.ts';
+import { fullName, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import type { NotificationDispatcher } from './notifiers/dispatcher.ts';
+import type { OsvClient } from './osv.ts';
 import { compareVersions, fetchInstalledVersion, type HttpHeader, type InstalledVersionResult } from './version.ts';
 
 export type InstalledVersionFetcher = (
@@ -12,9 +21,19 @@ export type InstalledVersionFetcher = (
 ) => Promise<InstalledVersionResult>;
 
 export interface CheckResult {
+  /** Notifications about new releases. */
   notifiedCount: number;
+  /** Notifications about new security advisories. */
+  advisoryCount: number;
   error: string | null;
 }
+
+export interface AdvisorySourceSettings {
+  github: boolean;
+  osv: boolean;
+}
+
+const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Checks watched repositories for new releases, dispatches notifications and updates the baseline. */
 export class ReleaseChecker {
@@ -24,6 +43,8 @@ export class ReleaseChecker {
   private readonly log: Pick<Logger, 'info' | 'warn'>;
   private readonly now: () => Date;
   private readonly fetchInstalled: InstalledVersionFetcher;
+  private readonly osv: OsvClient | null;
+  private readonly advisorySources: () => AdvisorySourceSettings;
 
   constructor(deps: {
     store: RepositoryStore;
@@ -32,6 +53,10 @@ export class ReleaseChecker {
     log: Pick<Logger, 'info' | 'warn'>;
     now?: () => Date;
     fetchInstalledVersion?: InstalledVersionFetcher;
+    /** OSV.dev client; without it OSV.dev is never queried. */
+    osv?: OsvClient | null;
+    /** Enabled advisory sources (Settings); read on every check. Default: all. */
+    advisorySources?: () => AdvisorySourceSettings;
   }) {
     this.store = deps.store;
     this.source = deps.source;
@@ -39,6 +64,8 @@ export class ReleaseChecker {
     this.log = deps.log;
     this.now = deps.now ?? (() => new Date());
     this.fetchInstalled = deps.fetchInstalledVersion ?? ((url, field, headers) => fetchInstalledVersion(url, field, headers));
+    this.osv = deps.osv ?? null;
+    this.advisorySources = deps.advisorySources ?? (() => ({ github: true, osv: true }));
   }
 
   /**
@@ -79,8 +106,121 @@ export class ReleaseChecker {
     });
   }
 
-  /** Checks a single repository. Mutates and persists the passed entity. */
-  async check(repo: WatchedRepository): Promise<CheckResult> {
+  /**
+   * Reads the security advisories of a repository from the enabled sources (when due or forced), stores them and
+   * notifies about new ones that may affect the installed version. The first read of each source (GitHub, an OSV.dev
+   * package) only establishes a baseline. A disabled source drops its advisories. Failures are stored in
+   * `advisoriesError` and never fail the release check. Returns the number of notifications.
+   */
+  async refreshAdvisories(repo: WatchedRepository, force = false): Promise<number> {
+    if (!force && !advisoriesDue(repo.advisoriesCheckedAt, this.now())) {
+      return 0;
+    }
+    const enabled = this.advisorySources();
+    const errors: string[] = [];
+    const baselines = new Set<string>();
+    let notified = 0;
+
+    const githubKey = sourceKey('github');
+    if (enabled.github && this.source.getSecurityAdvisories) {
+      try {
+        const fetched = await this.source.getSecurityAdvisories(repo.owner, repo.name, repo.advisoriesEtag, repo.githubToken);
+        if (!fetched.notModified) {
+          notified += await this.storeAdvisories(repo, 'github', githubKey, fetched.advisories, notified);
+          repo.advisoriesEtag = fetched.etag;
+        }
+        baselines.add(githubKey);
+      } catch (error) {
+        errors.push(`GitHub: ${errorText(error)}`);
+        if (repo.advisoryBaselines.includes(githubKey)) {
+          baselines.add(githubKey);
+        }
+      }
+    } else {
+      this.store.removeAdvisoriesExcept(repo.id, 'github');
+      repo.advisoriesEtag = null;
+    }
+
+    const osvPackage = repo.osvEcosystem && repo.osvPackage ? { ecosystem: repo.osvEcosystem, name: repo.osvPackage } : null;
+    if (enabled.osv && this.osv && osvPackage) {
+      const osvKey = sourceKey('osv', osvPackage);
+      try {
+        // Vulnerabilities GitHub already reported (same GHSA/CVE) are not listed twice.
+        const github = new Set(
+          this.store
+            .listAdvisories(repo.id)
+            .filter((a) => a.source === 'github')
+            .flatMap(advisoryKeys),
+        );
+        const advisories = (await this.osv.queryPackage(osvPackage.ecosystem, osvPackage.name)).filter(
+          (a) => !advisoryKeys(a).some((key) => github.has(key)),
+        );
+        notified += await this.storeAdvisories(repo, 'osv', osvKey, advisories, notified);
+        baselines.add(osvKey);
+      } catch (error) {
+        errors.push(`OSV.dev: ${errorText(error)}`);
+        if (repo.advisoryBaselines.includes(osvKey)) {
+          baselines.add(osvKey);
+        }
+      }
+    } else {
+      this.store.removeAdvisoriesExcept(repo.id, 'osv');
+    }
+
+    repo.advisoryBaselines = [...baselines];
+    repo.advisoriesCheckedAt = this.now().toISOString();
+    repo.advisoriesError = errors.length > 0 ? errors.join(' ').slice(0, 1000) : null;
+    if (errors.length > 0) {
+      this.log.warn({ repo: fullName(repo), errors }, 'Reading security advisories failed');
+    }
+    if (notified > 0) {
+      this.log.info({ repo: fullName(repo), count: notified }, 'New security advisories found');
+    }
+    return notified;
+  }
+
+  /** Stores the advisories read from one source and notifies about new ones; returns the number of notifications. */
+  private async storeAdvisories(
+    repo: WatchedRepository,
+    source: AdvisorySource,
+    key: string,
+    advisories: readonly SecurityAdvisory[],
+    alreadyNotified: number,
+  ): Promise<number> {
+    const isBaseline = !repo.advisoryBaselines.includes(key);
+    const known = new Set(this.store.listAdvisories(repo.id).map((a) => a.id));
+    let notified = 0;
+    // Oldest first, so notifications arrive in publication order.
+    for (const advisory of advisories.toSorted((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt))) {
+      const affectsInstalled = advisoryAffects(advisory, repo.installedVersion);
+      // Not news when the running version is known to be outside the vulnerable ranges.
+      if (
+        !known.has(advisory.id) &&
+        !isBaseline &&
+        affectsInstalled !== false &&
+        alreadyNotified + notified < MAX_NOTIFICATIONS_PER_CHECK
+      ) {
+        await this.dispatcher.dispatchVulnerability({
+          owner: repo.owner,
+          repository: repo.name,
+          advisory,
+          installedVersion: repo.installedVersion,
+          affectsInstalled,
+        });
+        notified++;
+      }
+      // Saved per advisory, so a crash mid-way does not cause duplicate notifications.
+      this.store.saveAdvisory(repo.id, advisory, this.now());
+    }
+    this.store.removeAdvisoriesExcept(repo.id, source, advisories.map((a) => a.id));
+    return notified;
+  }
+
+  /**
+   * Checks a single repository. Mutates and persists the passed entity. Security advisories are fetched when due,
+   * or always with `forceAdvisories` (manual check).
+   */
+  async check(repo: WatchedRepository, options: { forceAdvisories?: boolean } = {}): Promise<CheckResult> {
     let notifiedCount = 0;
     await this.refreshInstalledVersion(repo);
     try {
@@ -125,8 +265,9 @@ export class ReleaseChecker {
       this.log.warn({ err: error, repo: fullName(repo) }, 'Checking repository failed');
       repo.lastError = message.slice(0, 1000);
     }
+    const advisoryCount = await this.refreshAdvisories(repo, options.forceAdvisories ?? false);
 
     this.store.save(repo);
-    return { notifiedCount, error: repo.lastError };
+    return { notifiedCount, advisoryCount, error: repo.lastError };
   }
 }

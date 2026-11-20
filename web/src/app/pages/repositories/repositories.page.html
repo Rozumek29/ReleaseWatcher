@@ -73,7 +73,7 @@
         (click)="filter.set(f.value)"
       >
         {{ f.label }}
-        <span class="tab-count" [class.danger]="f.value === 'errors' && counts().errors > 0">{{ counts()[f.value] }}</span>
+        <span class="tab-count" [class.danger]="(f.value === 'errors' || f.value === 'vulnerable') && counts()[f.value] > 0">{{ counts()[f.value] }}</span>
       </button>
     }
   </div>
@@ -138,6 +138,22 @@
             } @else if (repo.updateAvailable === false) {
               <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
             }
+            @if (repo.advisories.total > 0) {
+              <button
+                type="button"
+                class="badge badge-btn"
+                [class.badge-danger]="repo.advisories.affecting > 0"
+                [title]="advisoryTitle(repo)"
+                (click)="viewingAdvisories.set(repo)"
+              >
+                <app-icon name="shield" [size]="12" />
+                @if (repo.advisories.affecting > 0) {
+                  {{ repo.advisories.affecting }} {{ repo.advisories.affecting === 1 ? 'vulnerability affects' : 'vulnerabilities affect' }} installed
+                } @else {
+                  {{ repo.advisories.total }} {{ repo.advisories.total === 1 ? 'advisory' : 'advisories' }}
+                }
+              </button>
+            }
           </div>
           <div class="meta">
             <span class="meta-item" title="Latest release">
@@ -171,6 +187,12 @@
             <div class="error-line">
               <app-icon name="alert" [size]="14" />
               <span>{{ repo.lastError }}</span>
+            </div>
+          }
+          @if (repo.advisories.error) {
+            <div class="error-line warn">
+              <app-icon name="shield" [size]="14" />
+              <span>Security advisories: {{ repo.advisories.error }}</span>
             </div>
           }
           @if (repo.installedVersionError) {
@@ -208,4 +230,5 @@
   </ul>
 }
 
+<app-advisories-dialog [repository]="viewingAdvisories()" (closed)="viewingAdvisories.set(null)" />
 <app-repository-settings-dialog [repository]="editing()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />

@@ -1,0 +1,98 @@
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="advisories-title">
+  @if (repository(); as repo) {
+    <div class="dialog-card">
+      <header class="dialog-head">
+        <app-avatar [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <div class="head-text">
+          <h2 id="advisories-title">Security advisories</h2>
+          <p class="mono">{{ repo.fullName }}</p>
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <p class="intro">
+          @if (repo.installedVersion) {
+            Compared with the installed version <span class="mono">{{ repo.installedVersion }}</span>.
+          } @else {
+            Set an installed-version URL in the repository settings to see which advisories affect your installation.
+          }
+          @if (repo.advisories.checkedAt) {
+            <span class="muted">Fetched {{ repo.advisories.checkedAt | relativeTime }}.</span>
+          }
+        </p>
+
+        @if (repo.advisories.error) {
+          <div class="error-line">
+            <app-icon name="alert" [size]="14" />
+            <span>{{ repo.advisories.error }}</span>
+          </div>
+        }
+
+        @if (loading()) {
+          @for (i of [1, 2]; track i) {
+            <div class="card advisory skeleton"></div>
+          }
+        } @else if (error()) {
+          <div class="error-line">
+            <app-icon name="alert" [size]="14" />
+            <span>{{ error() }}</span>
+          </div>
+        } @else if (sorted().length === 0) {
+          <div class="empty-note">
+            <app-icon name="shield" [size]="20" />
+            <span>No security advisories published for this repository.</span>
+          </div>
+        } @else {
+          <ul class="advisories">
+            @for (a of sorted(); track a.id; let i = $index) {
+              <li class="card advisory enter" [style.--i]="i" [class.affects]="a.affectsInstalled === true">
+                <div class="advisory-head">
+                  <span class="badge" [attr.data-severity]="a.severity">
+                    {{ severityLabels[a.severity] }}@if (a.cvssScore !== null) { · {{ a.cvssScore.toFixed(1) }} }
+                  </span>
+                  @if (a.affectsInstalled === true) {
+                    <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Affects installed version</span>
+                  } @else if (a.affectsInstalled === false) {
+                    <span class="badge badge-success"><app-icon name="check" [size]="12" /> Not affected</span>
+                  }
+                </div>
+                <a class="summary" [href]="a.htmlUrl" target="_blank" rel="noopener">{{ a.summary }}</a>
+                <div class="meta">
+                  <span class="mono">{{ a.id }}</span>
+                  @if (a.cveId) {
+                    <span class="mono">{{ a.cveId }}</span>
+                  }
+                  <span [title]="a.publishedAt | date: 'medium'">published {{ a.publishedAt | relativeTime }}</span>
+                  <span>via {{ sourceLabels[a.source] }}</span>
+                </div>
+                @for (v of a.vulnerabilities; track $index) {
+                  <dl class="versions">
+                    @if (a.vulnerabilities.length > 1 && v.packageName) {
+                      <dt>Package</dt>
+                      <dd class="mono">{{ v.packageName }}</dd>
+                    }
+                    <dt>Vulnerable</dt>
+                    <dd class="mono">{{ v.vulnerableRange ?? 'not specified' }}</dd>
+                    <dt>Patched</dt>
+                    <dd [class.mono]="!!v.patchedVersions" [class.no-fix]="!v.patchedVersions">{{ v.patchedVersions ?? 'No fix yet' }}</dd>
+                  </dl>
+                }
+              </li>
+            }
+          </ul>
+        }
+      </div>
+
+      <footer class="dialog-foot">
+        <a class="btn btn-ghost" [href]="repo.url + '/security/advisories'" target="_blank" rel="noopener">
+          <app-icon name="external" [size]="16" />
+          Open on GitHub
+        </a>
+        <button type="button" class="btn" (click)="close()">Close</button>
+      </footer>
+    </div>
+  }
+</dialog>

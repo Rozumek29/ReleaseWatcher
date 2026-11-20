@@ -1,99 +1,7 @@
-.dialog {
-  width: min(560px, calc(100vw - 32px));
-  max-height: calc(100dvh - 48px);
-  overflow-y: auto;
-  /* Scrolling inside the dialog or over its backdrop must not scroll the page underneath. */
-  overscroll-behavior: contain;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--surface);
-  color: var(--text);
-  box-shadow: var(--shadow-lg);
-
-  &::backdrop {
-    overflow: hidden;
-    overscroll-behavior: contain;
-    background: rgb(0 0 0 / 0.45);
-  }
-
-  &[open] {
-    animation: pop 0.16s ease-out;
-  }
-}
-
-.dialog-card {
-  display: flex;
-  flex-direction: column;
-}
-
-.dialog-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 18px 20px 14px;
-  border-bottom: 1px solid var(--border);
-
-  .head-text {
-    flex: 1;
-    min-width: 0;
-  }
-
-  h2 {
-    margin: 0;
-    font-size: 1.05rem;
-  }
-
-  p {
-    margin: 2px 0 0;
-    color: var(--text-muted);
-  }
-}
-
-.dialog-body {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-  padding: 18px 20px;
-}
-
 .switches {
   display: flex;
   flex-wrap: wrap;
   gap: 12px 24px;
-}
-
-.group {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  margin: 0;
-  padding: 14px 16px 16px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-
-  legend {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 0 6px;
-    font-weight: 620;
-    font-size: 0.9rem;
-  }
-}
-
-.group-hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.84rem;
-}
-
-.optional {
-  margin-left: 4px;
-  color: var(--text-muted);
-  font-weight: 400;
-  font-size: 0.78rem;
 }
 
 .headers-head {
@@ -152,8 +60,7 @@
 }
 
 .test-ok,
-.test-error,
-.save-error {
+.test-error {
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -167,8 +74,7 @@
   }
 }
 
-.test-error,
-.save-error {
+.test-error {
   color: var(--danger);
   overflow-wrap: anywhere;
   font-size: 0.85rem;
@@ -187,31 +93,6 @@
   word-break: break-all;
 }
 
-.dialog-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 14px 20px;
-  border-top: 1px solid var(--border);
-}
-
-.spin {
-  animation: spin 0.9s linear infinite;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pop {
-  from {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-  }
-}
-
 .link-btn {
   padding: 0;
   border: none;
@@ -220,4 +101,16 @@
   font: inherit;
   cursor: pointer;
   text-decoration: underline;
+}
+
+.osv-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 10px;
+}
+
+@media (max-width: 480px) {
+  .osv-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

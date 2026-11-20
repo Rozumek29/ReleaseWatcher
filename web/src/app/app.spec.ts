@@ -12,6 +12,7 @@ const status = {
   poller: { intervalMinutes: 15, isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   repositories: { total: 3, enabled: 2, withErrors: 1, updatesAvailable: 2 },
   containers: { total: 4, enabled: 4, withErrors: 1, aptPending: 2, appUpdatesAvailable: 1 },
+  advisories: { total: 5, affecting: 2 },
 };
 
 describe('App shell', () => {
@@ -40,9 +41,11 @@ describe('App shell', () => {
     const links = [...el.querySelectorAll('nav a')].map((a) => a.textContent?.trim());
     expect(links[0]).toContain('Repositories');
     expect(links[1]).toContain('Containers');
-    expect(links[2]).toContain('Settings');
+    expect(links[2]).toContain('Vulnerabilities');
+    expect(links[3]).toContain('Settings');
     const counts = [...el.querySelectorAll('nav .count')].map((c) => c.textContent?.trim());
-    expect(counts).toEqual(['3', '4']);
+    expect(counts).toEqual(['3', '4', '2']);
+    expect(el.querySelector('nav .count.danger')?.textContent?.trim()).toBe('2');
     expect(el.querySelector('.poller')?.textContent).toContain('1 repo(s) with errors');
     expect(el.querySelector('.update-link')?.textContent).toContain('2 update(s) available');
     expect(el.querySelector('.containers-link')?.textContent).toContain('3 container update(s) waiting');

@@ -31,6 +31,9 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     updateAvailable: null,
     hasOwnToken: false,
     githubTokenMasked: null,
+    osvEcosystem: null,
+    osvPackage: null,
+    advisories: { total: 0, affecting: 0, highestSeverity: null, checkedAt: null, error: null },
     ...extra,
   };
 };
@@ -115,5 +118,68 @@ describe('RepositoriesPage', () => {
     el.querySelector<HTMLButtonElement>('button[aria-label="Grid view"]')!.click();
     await settle(fixture);
     expect(el.querySelector('.list.grid')).not.toBeNull();
+  });
+
+  it('shows security advisories, filters vulnerable repositories and opens the advisories dialog', async () => {
+    const { el, fixture } = await render([
+      repo(1, 'angular/angular', { advisories: { total: 2, affecting: 0, highestSeverity: 'low', checkedAt: null, error: null } }),
+      repo(2, 'dani-garcia/vaultwarden', {
+        installedVersion: '1.30.0',
+        advisories: { total: 3, affecting: 1, highestSeverity: 'critical', checkedAt: '2026-01-02T00:00:00Z', error: null },
+      }),
+      repo(3, 'nodejs/node'),
+    ]);
+    const badges = [...el.querySelectorAll<HTMLButtonElement>('.badge-btn')];
+    expect(badges.map((b) => b.textContent?.trim())).toEqual(['2 advisories', '1 vulnerability affects installed']);
+    expect(badges[1]?.classList).toContain('badge-danger');
+
+    const tab = [...el.querySelectorAll<HTMLButtonElement>('.tab')].find((t) => t.textContent?.includes('Vulnerable'))!;
+    expect(tab.querySelector('.tab-count')?.textContent).toBe('1');
+    tab.click();
+    await settle(fixture);
+    expect(el.querySelectorAll('.row').length).toBe(1);
+
+    el.querySelector<HTMLButtonElement>('.badge-btn')!.click();
+    await settle(fixture);
+    http.expectOne('/api/repositories/2/advisories').flush([
+      {
+        id: 'GHSA-old',
+        source: 'github',
+        aliases: [],
+        cveId: null,
+        summary: 'Old problem',
+        severity: 'low',
+        cvssScore: null,
+        htmlUrl: 'https://github.com/advisories/GHSA-old',
+        publishedAt: '2026-01-03T00:00:00Z',
+        updatedAt: null,
+        vulnerabilities: [{ packageName: 'vaultwarden', vulnerableRange: '< 1.0.0', patchedVersions: '1.0.0' }],
+        affectsInstalled: false,
+      },
+      {
+        id: 'GHSA-xss',
+        source: 'github',
+        aliases: [],
+        cveId: 'CVE-2026-1',
+        summary: 'Stored XSS',
+        severity: 'critical',
+        cvssScore: 9.1,
+        htmlUrl: 'https://github.com/advisories/GHSA-xss',
+        publishedAt: '2026-01-01T00:00:00Z',
+        updatedAt: null,
+        vulnerabilities: [{ packageName: 'vaultwarden', vulnerableRange: '< 1.31.0', patchedVersions: null }],
+        affectsInstalled: true,
+      },
+    ]);
+    await settle(fixture);
+
+    const items = [...el.querySelectorAll<HTMLElement>('app-advisories-dialog .advisory')];
+    // Advisories affecting the installed version come first.
+    expect(items.map((i) => i.querySelector('.summary')?.textContent)).toEqual(['Stored XSS', 'Old problem']);
+    expect(items[0]?.textContent).toContain('Critical · 9.1');
+    expect(items[0]?.textContent).toContain('Affects installed version');
+    expect(items[0]?.textContent).toContain('No fix yet');
+    expect(items[1]?.textContent).toContain('Not affected');
+    expect(el.querySelector('app-advisories-dialog .intro')?.textContent).toContain('1.30.0');
   });
 });

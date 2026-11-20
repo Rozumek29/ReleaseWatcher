@@ -1,0 +1,140 @@
+<header class="page-header">
+  <div>
+    <h1>Vulnerabilities</h1>
+    <p>Security advisories of your watched repositories, compared with the installed versions.</p>
+  </div>
+</header>
+
+@if (!loading() && advisories().length > 0) {
+  <section class="stats" aria-label="Summary">
+    <div class="card stat" [class.alert]="stats().affecting > 0">
+      <span class="stat-value">{{ stats().affecting }}</span>
+      <span class="stat-label">affect installed versions</span>
+    </div>
+    <div class="card stat" [class.alert]="stats().critical > 0">
+      <span class="stat-value">{{ stats().critical }}</span>
+      <span class="stat-label">of them critical</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-value">{{ stats().repositories }}</span>
+      <span class="stat-label">{{ stats().repositories === 1 ? 'repository' : 'repositories' }} affected</span>
+    </div>
+    <div class="card stat">
+      <span class="stat-value">{{ stats().noFix }}</span>
+      <span class="stat-label">without a fix yet</span>
+    </div>
+  </section>
+}
+
+<div class="toolbar">
+  <div class="tabs" role="tablist" aria-label="Filter by impact on the installed version">
+    @for (f of impacts; track f.value) {
+      <button
+        type="button"
+        role="tab"
+        class="tab"
+        [class.active]="impact() === f.value"
+        [attr.aria-selected]="impact() === f.value"
+        (click)="impact.set(f.value)"
+      >
+        {{ f.label }}
+        <span class="tab-count" [class.danger]="f.value === 'affecting' && counts().affecting > 0">{{ counts()[f.value] }}</span>
+      </button>
+    }
+  </div>
+  <div class="toolbar-right">
+    @if (sources().length > 1) {
+      <label for="source" class="visually-hidden">Source</label>
+      <select id="source" class="input filter-select" [value]="source()" (change)="onSource($any($event.target).value)">
+        <option value="all">All sources</option>
+        @for (s of sources(); track s) {
+          <option [value]="s">{{ sourceLabels[s] }}</option>
+        }
+      </select>
+    }
+    <label for="severity" class="visually-hidden">Severity</label>
+    <select id="severity" class="input filter-select" [value]="severity()" (change)="onSeverity($any($event.target).value)">
+      <option value="all">All severities</option>
+      @for (s of severities; track s) {
+        <option [value]="s">{{ severityLabels[s] }}</option>
+      }
+    </select>
+    <div class="search">
+      <app-icon name="search" [size]="16" />
+      <label for="search" class="visually-hidden">Search</label>
+      <input id="search" class="input" type="search" placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+    </div>
+  </div>
+</div>
+
+@if (loading()) {
+  <div class="list">
+    @for (i of [1, 2, 3]; track i) {
+      <div class="card advisory skeleton"></div>
+    }
+  </div>
+} @else if (advisories().length === 0) {
+  <div class="card empty">
+    <span class="empty-icon"><app-icon name="shield" [size]="22" /></span>
+    <h2>No known vulnerabilities</h2>
+    <p>
+      None of your <a routerLink="/repositories">watched repositories</a> has published a security advisory. They are read with every
+      check, at most every 6 hours.
+    </p>
+  </div>
+} @else if (visible().length === 0) {
+  <div class="card empty">
+    <h2>Nothing matches</h2>
+    <p>Try a different search or filter.</p>
+  </div>
+} @else {
+  <ul class="list">
+    @for (a of visible(); track a.repository.id + a.id; let i = $index) {
+      <li class="card advisory enter" [style.--i]="i < 12 ? i : 12" [attr.data-severity]="a.severity" [class.affects]="a.affectsInstalled === true">
+        <div class="advisory-main">
+          <div class="badges">
+            <span class="badge" [attr.data-severity]="a.severity">
+              {{ severityLabels[a.severity] }}@if (a.cvssScore !== null) { · {{ a.cvssScore.toFixed(1) }} }
+            </span>
+            @if (a.affectsInstalled === true) {
+              <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Affects {{ a.repository.installedVersion }}</span>
+            } @else if (a.affectsInstalled === false) {
+              <span class="badge badge-success"><app-icon name="check" [size]="12" /> {{ a.repository.installedVersion }} not affected</span>
+            } @else {
+              <span class="badge" [title]="a.repository.installedVersion ? 'The version ranges could not be compared' : 'No installed-version URL is set for this repository'">
+                {{ a.repository.installedVersion ? 'Impact unknown' : 'Installed version unknown' }}
+              </span>
+            }
+          </div>
+          <a class="summary" [href]="a.htmlUrl" target="_blank" rel="noopener">{{ a.summary }}</a>
+          <div class="repo-line">
+            <app-avatar [src]="a.repository.avatarUrl" [name]="a.repository.owner" [size]="20" />
+            <a [href]="a.repository.url" target="_blank" rel="noopener" class="repo-name">{{ a.repository.fullName }}</a>
+            <span class="muted">·</span>
+            <span class="mono muted">{{ a.id }}</span>
+            @if (a.cveId) {
+              <span class="mono muted">{{ a.cveId }}</span>
+            }
+            <span class="muted" [title]="a.publishedAt | date: 'medium'">· published {{ a.publishedAt | relativeTime }}</span>
+            <span class="muted">· via {{ sourceLabels[a.source] }}</span>
+          </div>
+        </div>
+        <dl class="versions">
+          @for (v of a.vulnerabilities; track $index) {
+            @if (a.vulnerabilities.length > 1 && v.packageName) {
+              <div class="package mono">{{ v.packageName }}</div>
+            }
+            <div class="version-pair">
+              <dt>Vulnerable</dt>
+              <dd class="mono">{{ v.vulnerableRange ?? 'not specified' }}</dd>
+            </div>
+            <div class="version-pair">
+              <dt>Patched</dt>
+              <dd [class.mono]="!!v.patchedVersions" [class.no-fix]="!v.patchedVersions">{{ v.patchedVersions ?? 'No fix yet' }}</dd>
+            </div>
+          }
+        </dl>
+      </li>
+    }
+  </ul>
+}

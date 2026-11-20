@@ -1,3 +1,4 @@
+import type { SecurityAdvisory } from '../advisories.ts';
 import type { ReleaseInfo } from '../domain.ts';
 
 /** Payload passed to every notifier when a new release is detected. */
@@ -7,6 +8,17 @@ export interface ReleaseNotification {
   release: ReleaseInfo;
   /** Version currently running in the user's environment, when an installed-version URL is configured. */
   installedVersion?: string | null;
+}
+
+/** A new security advisory was published for a watched repository. */
+export interface VulnerabilityNotification {
+  owner: string;
+  repository: string;
+  advisory: SecurityAdvisory;
+  /** Version currently running, when an installed-version URL is configured. */
+  installedVersion: string | null;
+  /** True/false when the installed version could be compared with the vulnerable ranges, otherwise null. */
+  affectsInstalled: boolean | null;
 }
 
 /** Pending updates found in a Proxmox LXC container. */
@@ -40,11 +52,12 @@ export interface UpdateResultNotification {
 /** One notification of any kind, as collected for a digest. */
 export type NotificationEvent =
   | { type: 'release'; release: ReleaseNotification }
+  | { type: 'vulnerability'; vulnerability: VulnerabilityNotification }
   | { type: 'container-updates'; updates: ContainerUpdatesNotification }
   | { type: 'update-result'; result: UpdateResultNotification };
 
-export const notificationFullName = (n: ReleaseNotification): string => `${n.owner}/${n.repository}`;
-export const notificationRepoUrl = (n: ReleaseNotification): string =>
+export const notificationFullName = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string => `${n.owner}/${n.repository}`;
+export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string =>
   `https://github.com/${n.owner}/${n.repository}`;
 
 /** "CT 105 (nextcloud)", "VM 137 (debian)" or "Proxmox host (pve)". */
@@ -61,9 +74,11 @@ export function digestSummary(events: readonly NotificationEvent[]): string {
   const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
   const parts: string[] = [];
   const releases = count('release');
+  const vulnerabilities = count('vulnerability');
   const containers = count('container-updates');
   const results = events.filter((e): e is Extract<NotificationEvent, { type: 'update-result' }> => e.type === 'update-result');
   if (releases > 0) parts.push(plural(releases, 'new release', 'new releases'));
+  if (vulnerabilities > 0) parts.push(plural(vulnerabilities, 'new vulnerability', 'new vulnerabilities'));
   if (containers > 0) parts.push(plural(containers, 'container with updates', 'containers with updates'));
   const ok = results.filter((e) => e.result.succeeded).length;
   const failed = results.length - ok;
@@ -82,10 +97,41 @@ export interface Notifier {
   /** False when the channel is not configured; it will be skipped. */
   readonly isEnabled: boolean;
   notify(notification: ReleaseNotification): Promise<void>;
+  /** Reports a new security advisory of a watched repository. */
+  notifyVulnerability(notification: VulnerabilityNotification): Promise<void>;
   /** Reports updates waiting in an LXC container. */
   notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void>;
   /** Reports the result of an update started from the UI. */
   notifyUpdateResult(notification: UpdateResultNotification): Promise<void>;
   /** Sends several notifications as one summary message (digest mode, always at least two events). */
   notifyDigest(events: readonly NotificationEvent[]): Promise<void>;
+}
+
+/** "High", "Critical" … */
+export const severityLabel = (n: VulnerabilityNotification): string =>
+  n.advisory.severity === 'unknown' ? 'Unknown severity' : n.advisory.severity[0]!.toUpperCase() + n.advisory.severity.slice(1);
+
+/** "GHSA-… / CVE-…" */
+export const advisoryIds = (n: VulnerabilityNotification): string =>
+  n.advisory.cveId ? `${n.advisory.id} / ${n.advisory.cveId}` : n.advisory.id;
+
+/** Line about the installed version, e.g. "Installed 1.2.0 is affected", or null when no version is known. */
+export function installedImpact(n: VulnerabilityNotification): string | null {
+  if (!n.installedVersion) {
+    return null;
+  }
+  return n.affectsInstalled === true
+    ? `Installed ${n.installedVersion} is affected`
+    : n.affectsInstalled === false
+      ? `Installed ${n.installedVersion} is not affected`
+      : `Installed ${n.installedVersion} – could not be compared`;
+}
+
+/** Vulnerable and patched versions, e.g. "Vulnerable: < 1.2.3 · Patched: 1.2.3". */
+export function affectedVersions(n: VulnerabilityNotification): string | null {
+  const parts = n.advisory.vulnerabilities.flatMap((v) => [
+    ...(v.vulnerableRange ? [`Vulnerable: ${v.vulnerableRange}`] : []),
+    `Patched: ${v.patchedVersions ?? 'no fix yet'}`,
+  ]);
+  return parts.length > 0 ? parts.join(' · ') : null;
 }

@@ -26,6 +26,19 @@ export interface WatchedRepository {
   installedVersionError: string | null;
   /** Token used for this repository instead of the global one (private repository of another account). Secret. */
   githubToken: string | null;
+  /** GitHub ETag of the security advisories request. */
+  advisoriesEtag: string | null;
+  /** ISO date of the last successful advisories fetch. Null = none yet (the first fetch only sets the baseline). */
+  advisoriesCheckedAt: string | null;
+  advisoriesError: string | null;
+  /** OSV.dev package of the app, e.g. ecosystem "npm" + name "n8n"; null = OSV.dev is not queried. */
+  osvEcosystem: string | null;
+  osvPackage: string | null;
+  /**
+   * Advisory sources already read once for this repository (`sourceKey()`, e.g. "github", "osv:npm/n8n"). The first
+   * read of a source only stores a baseline, so enabling a source or changing the package does not flood notifications.
+   */
+  advisoryBaselines: string[];
 }
 
 /** Source-agnostic description of a single release. */

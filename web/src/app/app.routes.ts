@@ -22,6 +22,12 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/repositories/repositories.page').then((m) => m.RepositoriesPage),
   },
   {
+    path: 'vulnerabilities',
+    title: 'Vulnerabilities · ReleaseWatcher',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/vulnerabilities/vulnerabilities.page').then((m) => m.VulnerabilitiesPage),
+  },
+  {
     path: 'containers',
     title: 'Containers · ReleaseWatcher',
     canActivate: [authGuard],

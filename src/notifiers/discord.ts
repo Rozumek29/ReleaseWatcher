@@ -1,5 +1,7 @@
 import { ownerAvatarUrl } from '../domain.ts';
 import {
+  advisoryIds,
+  affectedVersions,
   type ContainerUpdatesNotification,
   digestSummary,
   type NotificationEvent,
@@ -9,7 +11,10 @@ import {
   type ReleaseNotification,
   targetName,
   updateLabel,
+  installedImpact,
+  severityLabel,
   type UpdateResultNotification,
+  type VulnerabilityNotification,
 } from './notifier.ts';
 
 export interface DiscordOptions {
@@ -46,6 +51,11 @@ export class DiscordNotifier implements Notifier {
   async notify(notification: ReleaseNotification): Promise<void> {
     const options = this.getOptions();
     await this.post(options, buildDiscordPayload(notification, options));
+  }
+
+  async notifyVulnerability(notification: VulnerabilityNotification): Promise<void> {
+    const options = this.getOptions();
+    await this.post(options, buildVulnerabilityPayload(notification, options));
   }
 
   async notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void> {
@@ -129,6 +139,46 @@ export function buildDiscordPayload(notification: ReleaseNotification, options: 
   };
 }
 
+const SEVERITY_COLORS: Record<string, number> = {
+  critical: 0x8b0000, // dark red
+  high: 0xe74c3c, // red
+  medium: 0xf39c12, // orange
+  low: 0xf1c40f, // yellow
+  unknown: 0x95a5a6, // grey
+};
+
+export function buildVulnerabilityPayload(
+  notification: VulnerabilityNotification,
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention'>,
+) {
+  const { advisory } = notification;
+  const repo = notificationFullName(notification);
+  const impact = installedImpact(notification);
+  const versions = affectedVersions(notification);
+  return {
+    ...messageHeader(options),
+    embeds: [
+      {
+        title: truncate(`${repo}: ${advisory.summary}`, 256),
+        url: advisory.htmlUrl,
+        ...(versions ? { description: truncate(versions, 1000) } : {}),
+        color: SEVERITY_COLORS[advisory.severity] ?? SEVERITY_COLORS['unknown'],
+        timestamp: advisory.publishedAt,
+        author: { name: repo, url: notificationRepoUrl(notification), icon_url: ownerAvatarUrl(notification.owner, 128) },
+        fields: [
+          { name: 'Advisory', value: advisoryIds(notification), inline: true },
+          {
+            name: 'Severity',
+            value: advisory.cvssScore !== null ? `${severityLabel(notification)} (${advisory.cvssScore.toFixed(1)})` : severityLabel(notification),
+            inline: true,
+          },
+          ...(impact ? [{ name: 'Installed', value: impact, inline: true }] : []),
+        ],
+      },
+    ],
+  };
+}
+
 const CONTAINER_COLOR = 0x3498db; // blue
 const MAX_LISTED = 25;
 
@@ -206,6 +256,7 @@ export function buildDigestPayload(
 ) {
   const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
   const releases: string[] = [];
+  const vulnerabilities: string[] = [];
   const containers: string[] = [];
   const results: string[] = [];
   for (const event of events) {
@@ -215,6 +266,14 @@ export function buildDigestPayload(
         const installed = event.release.installedVersion ? ` (installed ${event.release.installedVersion})` : '';
         releases.push(
           `• **${notificationFullName(event.release)}** [${release.tag}](${release.htmlUrl})${release.isPrerelease ? ' · pre-release' : ''}${installed}`,
+        );
+        break;
+      }
+      case 'vulnerability': {
+        const v = event.vulnerability;
+        const impact = installedImpact(v);
+        vulnerabilities.push(
+          `• **${notificationFullName(v)}** [${v.advisory.id}](${v.advisory.htmlUrl}) · ${severityLabel(v)} – ${v.advisory.summary}${impact ? ` (${impact.toLowerCase()})` : ''}`,
         );
         break;
       }
@@ -236,6 +295,7 @@ export function buildDigestPayload(
   }
   const blocks = [
     ...(releases.length > 0 ? [`**New releases**\n${releases.join('\n')}`] : []),
+    ...(vulnerabilities.length > 0 ? [`**New vulnerabilities**\n${vulnerabilities.join('\n')}`] : []),
     ...(containers.length > 0 ? [`**Container updates**\n${containers.join('\n')}`] : []),
     ...(results.length > 0 ? [`**Finished updates**\n${results.join('\n')}`] : []),
   ];
@@ -244,7 +304,7 @@ export function buildDigestPayload(
     embeds: [
       {
         title: truncate(digestSummary(events), 256),
-        ...(containersUrl && events.some((e) => e.type !== 'release') ? { url: containersUrl } : {}),
+        ...(containersUrl && events.some(isContainerEvent) ? { url: containersUrl } : {}),
         description: truncate(blocks.join('\n\n'), MAX_DESCRIPTION),
         color: DIGEST_COLOR,
         timestamp: new Date().toISOString(),
@@ -252,6 +312,8 @@ export function buildDigestPayload(
     ],
   };
 }
+
+const isContainerEvent = (e: NotificationEvent): boolean => e.type === 'container-updates' || e.type === 'update-result';
 
 const messageHeader = (options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention'>) => ({
   ...(options.mention ? { content: options.mention } : {}),

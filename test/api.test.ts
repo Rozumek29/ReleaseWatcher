@@ -9,7 +9,7 @@ import { silentLogger } from '../src/log.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { loadConfig } from '../src/config.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeSource, RecordingNotifier, release } from './helpers.ts';
+import { advisory, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
 describe('HTTP API', () => {
   let app: App;
@@ -61,6 +61,73 @@ describe('HTTP API', () => {
 
   const add = (repository: string) =>
     inject({ method: 'POST', url: '/api/repositories', payload: { repository } });
+
+  it('lists security advisories with their impact on the installed version', async () => {
+    source.advisories = [advisory('GHSA-old1-0000-0000', 1, '< 0.5.0'), advisory('GHSA-new1-0000-0000', 2, '< 1.0.0', { severity: 'critical' })];
+    const created = (await add('acme/widget')).json();
+    // The first fetch only sets the baseline – no notifications.
+    assert.equal(notifier.vulnerabilitiesSent.length, 0);
+    assert.deepEqual(created.advisories, { total: 2, affecting: 0, highestSeverity: 'critical', checkedAt: created.advisories.checkedAt, error: null });
+
+    await inject({ method: 'PUT', url: `/api/repositories/${created.id}`, payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://widget.lan/version' } });
+    const repo = (await inject(`/api/repositories/${created.id}`)).json();
+    assert.equal(repo.installedVersion, '0.9.0');
+    assert.deepEqual([repo.advisories.total, repo.advisories.affecting, repo.advisories.highestSeverity], [2, 1, 'critical']);
+
+    const list = (await inject(`/api/repositories/${created.id}/advisories`)).json();
+    assert.deepEqual(
+      list.map((a: { id: string; affectsInstalled: boolean | null }) => [a.id, a.affectsInstalled]),
+      [['GHSA-new1-0000-0000', true], ['GHSA-old1-0000-0000', false]],
+    );
+    assert.equal(list[0].vulnerabilities[0].patchedVersions, '2.0.0');
+    assert.equal((await inject('/api/repositories/999/advisories')).statusCode, 404);
+
+    // A manual check fetches advisories right away and notifies about a new one affecting 0.9.0.
+    source.advisories = [...source.advisories, advisory('GHSA-fresh-0000-0000', 3, '>= 0.8.0, < 0.9.1')];
+    const checked = (await inject({ method: 'POST', url: `/api/repositories/${created.id}/check` })).json();
+    assert.equal(checked.notifiedCount, 1);
+    assert.equal(notifier.vulnerabilitiesSent[0]?.advisory.id, 'GHSA-fresh-0000-0000');
+    assert.equal(notifier.vulnerabilitiesSent[0]?.affectsInstalled, true);
+    assert.equal(checked.repository.advisories.affecting, 2);
+    assert.equal((await inject('/api/repositories')).json()[0].advisories.total, 3);
+
+    const all = (await inject('/api/advisories')).json();
+    assert.equal(all.length, 3);
+    assert.deepEqual(all[0].repository, {
+      id: created.id,
+      fullName: 'acme/widget',
+      owner: 'acme',
+      url: 'https://github.com/acme/widget',
+      avatarUrl: 'https://avatars.githubusercontent.com/acme?s=64',
+      installedVersion: '0.9.0',
+    });
+    assert.deepEqual((await inject('/api/status')).json().advisories, { total: 3, affecting: 2 });
+  });
+
+  it('configures advisory sources and the OSV.dev package of a repository', async () => {
+    const settings = (await inject('/api/settings')).json();
+    assert.deepEqual(settings.advisories.github, true);
+    assert.deepEqual(settings.advisories.osv, true);
+    assert.ok(settings.advisories.osvEcosystems.includes('npm'));
+    const updated = (await inject({ method: 'PUT', url: '/api/settings', payload: { advisoriesOsv: false } })).json();
+    assert.equal(updated.advisories.osv, false);
+
+    const created = (await add('acme/widget')).json();
+    assert.equal(created.osvEcosystem, null);
+    const put = (payload: object) =>
+      inject({ method: 'PUT', url: `/api/repositories/${created.id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+
+    const half = await put({ osvEcosystem: 'npm' });
+    assert.equal(half.statusCode, 400);
+    assert.match(half.body, /both the ecosystem and the package name/);
+    assert.equal((await put({ osvEcosystem: 'cobol', osvPackage: 'x' })).statusCode, 400);
+
+    const saved = (await put({ osvEcosystem: 'npm', osvPackage: ' widget ' })).json();
+    assert.deepEqual([saved.osvEcosystem, saved.osvPackage], ['npm', 'widget']);
+    // Omitted = keep, null = remove.
+    assert.equal((await put({})).json().osvPackage, 'widget');
+    assert.equal((await put({ osvEcosystem: null, osvPackage: null })).json().osvEcosystem, null);
+  });
 
   it('marks API responses as not cacheable', async () => {
     assert.equal((await inject('/api/repositories')).headers.get('cache-control'), 'no-store');
@@ -208,6 +275,7 @@ describe('HTTP API', () => {
       digest: false,
       digestSource: 'env',
       releases: true,
+      vulnerabilities: true,
       appUpdates: true,
       aptUpdates: true,
       updateSucceeded: false,

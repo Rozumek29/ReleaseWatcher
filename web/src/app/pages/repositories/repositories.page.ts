@@ -12,13 +12,14 @@ import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
+import { AdvisoriesDialog } from './advisories.dialog';
 import { RepositorySettingsDialog } from './repository-settings.dialog';
 
-type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'errors';
+type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors';
 
 @Component({
   selector: 'app-repositories-page',
-  imports: [FormsModule, DatePipe, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog],
+  imports: [FormsModule, DatePipe, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, AdvisoriesDialog],
   templateUrl: './repositories.page.html',
   styleUrl: './repositories.page.scss',
 })
@@ -36,6 +37,8 @@ export class RepositoriesPage {
   protected readonly confirmDeleteId = signal<number | null>(null);
   /** Repository whose settings dialog is open. */
   protected readonly editing = signal<WatchedRepository | null>(null);
+  /** Repository whose security advisories are shown. */
+  protected readonly viewingAdvisories = signal<WatchedRepository | null>(null);
 
   protected readonly query = signal('');
   protected readonly filter = signal<Filter>('all');
@@ -55,6 +58,7 @@ export class RepositoriesPage {
       enabled: list.filter((r) => r.isEnabled).length,
       paused: list.filter((r) => !r.isEnabled).length,
       updates: list.filter((r) => r.updateAvailable).length,
+      vulnerable: list.filter((r) => r.advisories.affecting > 0).length,
       errors: list.filter((r) => r.lastError || r.installedVersionError).length,
     };
   });
@@ -64,6 +68,7 @@ export class RepositoriesPage {
     { value: 'enabled', label: 'Active' },
     { value: 'paused', label: 'Paused' },
     { value: 'updates', label: 'Updates' },
+    { value: 'vulnerable', label: 'Vulnerable' },
     { value: 'errors', label: 'Errors' },
   ];
 
@@ -77,6 +82,7 @@ export class RepositoriesPage {
           (f === 'enabled' && r.isEnabled) ||
           (f === 'paused' && !r.isEnabled) ||
           (f === 'updates' && !!r.updateAvailable) ||
+          (f === 'vulnerable' && r.advisories.affecting > 0) ||
           (f === 'errors' && !!(r.lastError || r.installedVersionError))),
     );
   });
@@ -180,6 +186,15 @@ export class RepositoriesPage {
         : `Settings of ${updated.fullName} saved.`,
     );
     void this.statusService.refresh();
+  }
+
+  /** Tooltip of the advisories badge. */
+  protected advisoryTitle(repo: WatchedRepository): string {
+    const { total, affecting, highestSeverity } = repo.advisories;
+    const severity = highestSeverity && highestSeverity !== 'unknown' ? `, highest severity ${highestSeverity}` : '';
+    return affecting > 0
+      ? `${affecting} of ${total} security advisories affect installed ${repo.installedVersion}${severity}`
+      : `${total} security ${total === 1 ? 'advisory' : 'advisories'}${severity} – show details`;
   }
 
   protected isBusy(id: number): boolean {

@@ -25,6 +25,45 @@ export interface WatchedRepository {
   /** The repository uses its own token instead of the global one (the token itself is never returned). */
   hasOwnToken: boolean;
   githubTokenMasked: string | null;
+  /** OSV.dev package of the app (both set or both null). */
+  osvEcosystem: string | null;
+  osvPackage: string | null;
+  /** Security advisories (GitHub, OSV.dev) published for the repository. */
+  advisories: AdvisorySummary;
+}
+
+export type AdvisorySource = 'github' | 'osv';
+
+export type AdvisorySeverity = 'critical' | 'high' | 'medium' | 'low' | 'unknown';
+
+export interface AdvisorySummary {
+  total: number;
+  /** Advisories whose vulnerable range contains the installed version. */
+  affecting: number;
+  /** Highest severity among the affecting advisories (or among all when none affects the installed version). */
+  highestSeverity: AdvisorySeverity | null;
+  /** Last successful fetch; null = not fetched yet. */
+  checkedAt: string | null;
+  error: string | null;
+}
+
+export interface SecurityAdvisory {
+  /** e.g. "GHSA-…", "GO-2025-…", "PYSEC-…". */
+  id: string;
+  source: AdvisorySource;
+  /** Other ids of the same vulnerability. */
+  aliases: string[];
+  cveId: string | null;
+  summary: string;
+  severity: AdvisorySeverity;
+  /** CVSS base score (0–10). */
+  cvssScore: number | null;
+  htmlUrl: string;
+  publishedAt: string;
+  updatedAt: string | null;
+  vulnerabilities: { packageName: string | null; vulnerableRange: string | null; patchedVersions: string | null }[];
+  /** True/false when the installed version is known and comparable, otherwise null. */
+  affectsInstalled: boolean | null;
 }
 
 export interface AddRepositoryRequest {
@@ -43,6 +82,9 @@ export interface UpdateRepositoryRequest {
   installedVersionHeaders?: HeaderInput[] | null;
   /** Omit to keep, null to remove the repository's own token. */
   githubToken?: string | null;
+  /** OSV.dev package; omit to keep, null to remove. */
+  osvEcosystem?: string | null;
+  osvPackage?: string | null;
 }
 
 /** A header sent to the server. `value: null` keeps the value already saved under that name. */
@@ -134,6 +176,8 @@ export interface AppSettings {
     toSource: SettingSource;
   };
   notifications: NotificationPreferences & { digestSource: SettingSource };
+  /** Enabled sources of security advisories. */
+  advisories: { github: boolean; osv: boolean; osvEcosystems: string[] };
 }
 
 /** `starttls`: port 587, upgraded with STARTTLS; `tls`: TLS from the start (465); `none`: unencrypted. */
@@ -143,6 +187,7 @@ export type SmtpSecurity = 'starttls' | 'tls' | 'none';
 export interface NotificationPreferences {
   digest: boolean;
   releases: boolean;
+  vulnerabilities: boolean;
   appUpdates: boolean;
   aptUpdates: boolean;
   updateSucceeded: boolean;
@@ -177,14 +222,29 @@ export interface SettingsPatch {
   emailTo?: string | null;
   notificationDigest?: boolean | null;
   notifyReleases?: boolean | null;
+  notifyVulnerabilities?: boolean | null;
   notifyAppUpdates?: boolean | null;
   notifyAptUpdates?: boolean | null;
   notifyUpdateSucceeded?: boolean | null;
   notifyUpdateFailed?: boolean | null;
+  advisoriesGithub?: boolean | null;
+  advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
   backupStorage?: string | null;
   backupBeforeUpdate?: boolean | null;
+}
+
+/** A security advisory together with its repository (Vulnerabilities page). */
+export interface RepositoryAdvisory extends SecurityAdvisory {
+  repository: {
+    id: number;
+    fullName: string;
+    owner: string;
+    url: string;
+    avatarUrl: string;
+    installedVersion: string | null;
+  };
 }
 
 export interface AppStatus {
@@ -209,6 +269,11 @@ export interface AppStatus {
     withErrors: number;
     aptPending: number;
     appUpdatesAvailable: number;
+  };
+  /** Security advisories of all repositories; `affecting` = those affecting an installed version. */
+  advisories?: {
+    total: number;
+    affecting: number;
   };
 }
 

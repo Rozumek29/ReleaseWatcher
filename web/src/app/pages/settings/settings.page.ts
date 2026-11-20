@@ -19,7 +19,7 @@ import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 
-type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'proxmox';
+type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
 type Tab = 'general' | 'notifications';
 
 /** Default port of each SMTP security mode (used when the port still has the previous mode's default). */
@@ -28,6 +28,11 @@ const SMTP_PORTS: Record<SmtpSecurity, number> = { starttls: 587, tls: 465, none
 /** The notification kinds shown as switches, in order. */
 const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'>; label: string; hint: string }[] = [
   { key: 'releases', label: 'New releases', hint: 'A watched repository published a new release.' },
+  {
+    key: 'vulnerabilities',
+    label: 'New vulnerabilities',
+    hint: 'A security advisory was published for a watched repository (skipped when the installed version is not affected).',
+  },
   { key: 'appUpdates', label: 'Application updates', hint: 'A newer version of an application in a container.' },
   { key: 'aptUpdates', label: 'apt package updates', hint: 'Upgradable packages in a container or on the Proxmox host.' },
   { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or apt upgrade started here completed.' },
@@ -75,6 +80,8 @@ export class SettingsPage implements OnInit {
   protected mention = '';
   protected username = '';
   protected token = '';
+  protected advisoriesGithub = true;
+  protected advisoriesOsv = true;
   protected intervalMinutes = 15;
   protected proxmoxHost = '';
   protected proxmoxPort: number | null = 22;
@@ -94,6 +101,7 @@ export class SettingsPage implements OnInit {
   protected preferences: NotificationPreferences = {
     digest: false,
     releases: true,
+    vulnerabilities: true,
     appUpdates: true,
     aptUpdates: true,
     updateSucceeded: false,
@@ -186,6 +194,7 @@ export class SettingsPage implements OnInit {
       {
         notificationDigest: p.digest,
         notifyReleases: p.releases,
+        notifyVulnerabilities: p.vulnerabilities,
         notifyAppUpdates: p.appUpdates,
         notifyAptUpdates: p.aptUpdates,
         notifyUpdateSucceeded: p.updateSucceeded,
@@ -214,6 +223,14 @@ export class SettingsPage implements OnInit {
     if (await this.save('github', { githubToken: null }, 'GitHub token removed.')) {
       void this.loadRateLimit();
     }
+  }
+
+  protected async saveAdvisories(): Promise<void> {
+    await this.save(
+      'advisories',
+      { advisoriesGithub: this.advisoriesGithub, advisoriesOsv: this.advisoriesOsv },
+      'Vulnerability sources saved.',
+    );
   }
 
   protected async savePolling(): Promise<void> {
@@ -369,6 +386,8 @@ export class SettingsPage implements OnInit {
     this.settings.set(settings);
     this.webhookUrl = '';
     this.token = '';
+    this.advisoriesGithub = settings.advisories.github;
+    this.advisoriesOsv = settings.advisories.osv;
     this.mention = settings.discord.mention ?? '';
     this.username = settings.discord.username ?? '';
     this.intervalMinutes = settings.polling.intervalMinutes;
@@ -391,6 +410,7 @@ export class SettingsPage implements OnInit {
     this.preferences = {
       digest: n.digest,
       releases: n.releases,
+      vulnerabilities: n.vulnerabilities,
       appUpdates: n.appUpdates,
       aptUpdates: n.aptUpdates,
       updateSucceeded: n.updateSucceeded,

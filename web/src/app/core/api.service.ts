@@ -16,9 +16,11 @@ import {
   InstalledVersionTestResult,
   Notifier,
   RateLimit,
+  RepositoryAdvisory,
   Run,
   RunPage,
   RunSummary,
+  SecurityAdvisory,
   SettingsPatch,
   TestNotificationResult,
   UpdateContainerRequest,
@@ -45,6 +47,14 @@ export class ApiService {
 
   deleteRepository(id: number): Observable<void> {
     return this.http.delete<void>(`${this.baseUrl}/repositories/${id}`);
+  }
+
+  getAllAdvisories(): Observable<RepositoryAdvisory[]> {
+    return this.http.get<RepositoryAdvisory[]>(`${this.baseUrl}/advisories`);
+  }
+
+  getAdvisories(id: number): Observable<SecurityAdvisory[]> {
+    return this.http.get<SecurityAdvisory[]>(`${this.baseUrl}/repositories/${id}/advisories`);
   }
 
   checkNow(id: number): Observable<CheckResult> {

@@ -9,6 +9,7 @@ import { embeddedUi } from './embedded-ui.ts';
 import { GitHubReleaseSource } from './github.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
+import { OsvApiClient } from './osv.ts';
 import { SshShell } from './proxmox/ssh.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
@@ -63,6 +64,7 @@ const app = await buildApp({
   store,
   settings,
   source: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
+  osv: new OsvApiClient(),
   notifiers,
   shell,
   auth: {

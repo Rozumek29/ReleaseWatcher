@@ -3,7 +3,8 @@ import { beforeEach, describe, it } from 'bun:test';
 import { ReleaseChecker } from '../src/checker.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { NotificationDispatcher } from '../src/notifiers/dispatcher.ts';
-import { FakeSource, RecordingNotifier, release, silentLog } from './helpers.ts';
+import type { SecurityAdvisory } from '../src/advisories.ts';
+import { advisory, FakeSource, RecordingNotifier, release, silentLog } from './helpers.ts';
 
 describe('ReleaseChecker', () => {
   let store: RepositoryStore;
@@ -125,5 +126,171 @@ describe('ReleaseChecker', () => {
     assert.equal(result.notifiedCount, 1);
     assert.equal(store.get(repo.id)?.installedVersionError, 'unreachable');
     assert.equal(store.get(repo.id)?.lastError, null);
+  });
+
+  describe('security advisories', () => {
+    it('stores a baseline first, then notifies about new advisories that may affect the installed version', async () => {
+      const repo = store.add('acme', 'widget', false);
+      source.advisories = [advisory('GHSA-a', 1)];
+      await checker.check(repo);
+      assert.equal(notifier.vulnerabilitiesSent.length, 0);
+      assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id), ['GHSA-a']);
+      assert.equal(store.get(repo.id)?.advisoriesEtag, '"advisories-etag"');
+
+      installed = '1.5.0';
+      repo.installedVersionUrl = 'https://widget.lan/version';
+      source.advisories = [
+        advisory('GHSA-a', 1),
+        advisory('GHSA-affects', 2, '< 2.0.0'),
+        advisory('GHSA-older', 3, '< 1.0.0'),
+        advisory('GHSA-unknown', 4, null),
+      ];
+      const result = await checker.check(repo, { forceAdvisories: true });
+
+      assert.equal(result.advisoryCount, 2);
+      assert.deepEqual(
+        notifier.vulnerabilitiesSent.map((n) => [n.advisory.id, n.affectsInstalled, n.installedVersion]),
+        [['GHSA-affects', true, '1.5.0'], ['GHSA-unknown', null, '1.5.0']],
+      );
+      assert.equal(store.listAdvisories(repo.id).length, 4);
+    });
+
+    it('fetches advisories only when due unless forced', async () => {
+      const repo = store.add('acme', 'widget', false);
+      await checker.check(repo);
+      await checker.check(repo);
+      assert.equal(source.advisoryCalls, 1);
+      await checker.check(repo, { forceAdvisories: true });
+      assert.equal(source.advisoryCalls, 2);
+    });
+
+    it('removes withdrawn advisories and keeps errors apart from release errors', async () => {
+      const repo = store.add('acme', 'widget', false);
+      source.advisories = [advisory('GHSA-a', 1), advisory('GHSA-b', 2)];
+      await checker.check(repo);
+      source.advisories = [advisory('GHSA-b', 2)];
+      await checker.check(repo, { forceAdvisories: true });
+      assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id), ['GHSA-b']);
+
+      source.advisoryError = new Error('GitHub API returned 404');
+      await checker.check(repo, { forceAdvisories: true });
+      const saved = store.get(repo.id)!;
+      assert.equal(saved.advisoriesError, 'GitHub: GitHub API returned 404');
+      assert.equal(saved.lastError, null);
+      assert.equal(store.listAdvisories(repo.id).length, 1);
+    });
+
+    it('does not notify when vulnerability notifications are off', async () => {
+      const quiet = new ReleaseChecker({
+        store,
+        source,
+        dispatcher: new NotificationDispatcher([notifier], silentLog, () => ({
+          digest: false,
+          releases: true,
+          vulnerabilities: false,
+          appUpdates: true,
+          aptUpdates: true,
+          updateSucceeded: false,
+          updateFailed: false,
+        })),
+        log: silentLog,
+      });
+      const repo = store.add('acme', 'widget', false);
+      await quiet.check(repo);
+      source.advisories = [advisory('GHSA-a', 1)];
+      await quiet.check(repo, { forceAdvisories: true });
+      assert.equal(notifier.vulnerabilitiesSent.length, 0);
+      assert.equal(store.listAdvisories(repo.id).length, 1);
+    });
+      describe('OSV.dev', () => {
+      const osvAdvisory = (id: string, day: number, extra: Partial<SecurityAdvisory> = {}) =>
+        advisory(id, day, '< 2.0.0', { source: 'osv', htmlUrl: `https://osv.dev/vulnerability/${id}`, ...extra });
+      let osvResults: SecurityAdvisory[];
+      let osvError: Error | null;
+      let sources: { github: boolean; osv: boolean };
+      let osvChecker: ReleaseChecker;
+
+      beforeEach(() => {
+        osvResults = [];
+        osvError = null;
+        sources = { github: true, osv: true };
+        osvChecker = new ReleaseChecker({
+          store,
+          source,
+          dispatcher: new NotificationDispatcher([notifier], silentLog),
+          log: silentLog,
+          osv: {
+            queryPackage: async () => {
+              if (osvError) {
+                throw osvError;
+              }
+              return osvResults;
+            },
+          },
+          advisorySources: () => sources,
+        });
+      });
+
+      it('reads the package from OSV.dev, skips duplicates of GitHub advisories and keeps a baseline per source', async () => {
+        const repo = store.add('acme', 'widget', false);
+        source.advisories = [advisory('GHSA-gh', 1)];
+        await osvChecker.check(repo);
+        assert.equal(source.advisoryCalls, 1);
+        assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id), ['GHSA-gh']);
+
+        // Setting a package later: its first read is a baseline too – no flood of old vulnerabilities.
+        repo.osvEcosystem = 'npm';
+        repo.osvPackage = 'widget';
+        osvResults = [osvAdvisory('GHSA-gh', 1), osvAdvisory('GO-old', 2), osvAdvisory('PYSEC-dup', 3, { aliases: ['ghsa-gh'] })];
+        await osvChecker.check(repo, { forceAdvisories: true });
+        assert.equal(notifier.vulnerabilitiesSent.length, 0);
+        assert.deepEqual(
+          store.listAdvisories(repo.id).map((a) => `${a.source}:${a.id}`).sort(),
+          ['github:GHSA-gh', 'osv:GO-old'],
+        );
+        assert.deepEqual(store.get(repo.id)?.advisoryBaselines, ['github', 'osv:npm/widget']);
+
+        osvResults = [...osvResults, osvAdvisory('GO-new', 4)];
+        const result = await osvChecker.check(repo, { forceAdvisories: true });
+        assert.equal(result.advisoryCount, 1);
+        assert.equal(notifier.vulnerabilitiesSent[0]?.advisory.id, 'GO-new');
+        assert.equal(notifier.vulnerabilitiesSent[0]?.advisory.source, 'osv');
+      });
+
+      it('drops the advisories of a disabled source and starts a new baseline when it is enabled again', async () => {
+        const repo = store.add('acme', 'widget', false);
+        repo.osvEcosystem = 'npm';
+        repo.osvPackage = 'widget';
+        source.advisories = [advisory('GHSA-gh', 1)];
+        osvResults = [osvAdvisory('GO-1', 2)];
+        await osvChecker.check(repo);
+        assert.equal(store.listAdvisories(repo.id).length, 2);
+
+        sources = { github: false, osv: true };
+        await osvChecker.check(repo, { forceAdvisories: true });
+        assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id), ['GO-1']);
+        assert.deepEqual(store.get(repo.id)?.advisoryBaselines, ['osv:npm/widget']);
+
+        sources = { github: true, osv: true };
+        source.advisories = [advisory('GHSA-gh', 1), advisory('GHSA-gh2', 3)];
+        await osvChecker.check(repo, { forceAdvisories: true });
+        assert.equal(notifier.vulnerabilitiesSent.length, 0);
+        assert.equal(store.listAdvisories(repo.id).length, 3);
+      });
+
+      it('keeps the advisories of a source that failed and reports which one', async () => {
+        const repo = store.add('acme', 'widget', false);
+        repo.osvEcosystem = 'npm';
+        repo.osvPackage = 'widget';
+        osvResults = [osvAdvisory('GO-1', 2)];
+        await osvChecker.check(repo);
+        osvError = new Error('OSV.dev returned 500: down');
+        await osvChecker.check(repo, { forceAdvisories: true });
+        const saved = store.get(repo.id)!;
+        assert.equal(saved.advisoriesError, 'OSV.dev: OSV.dev returned 500: down');
+        assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id), ['GO-1']);
+        assert.ok(saved.advisoryBaselines.includes('osv:npm/widget'));
+      });
+    });
   });
 });

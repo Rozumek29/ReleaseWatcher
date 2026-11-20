@@ -30,6 +30,13 @@
           @if (item.path === '/repositories' && statusService.status(); as s) {
             <span class="count">{{ s.repositories.total }}</span>
           }
+          @if (item.path === '/vulnerabilities' && statusService.status()?.advisories; as a) {
+            @if (a.affecting > 0) {
+              <span class="count danger" [title]="a.affecting + ' affect installed versions'">{{ a.affecting }}</span>
+            } @else if (a.total > 0) {
+              <span class="count">{{ a.total }}</span>
+            }
+          }
           @if (item.path === '/containers' && statusService.status()?.containers; as c) {
             @if (c.total > 0) {
               <span class="count">{{ c.total }}</span>

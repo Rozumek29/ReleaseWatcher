@@ -21,6 +21,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
                  │ Poller (interval) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub │
+                 │                            ├─▶ OsvClient (osv.ts) ─▶ OSV.dev (vulnerabilities)           │
                  │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord/SMTP│
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
                  │                                                                                │
@@ -28,7 +29,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, Discord, the
+- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, OSV.dev, Discord, the
   user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
@@ -40,7 +41,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 | Layer | Files | May depend on | Must not |
 | --- | --- | --- | --- |
-| Domain | `domain.ts`, `version.ts`, `cron.ts`, `proxmox/domain.ts` | nothing with I/O | touch DB, network, clock (`Date.now()` is passed in) |
+| Domain | `domain.ts`, `version.ts`, `advisories.ts`, `cron.ts`, `proxmox/domain.ts` | nothing with I/O | touch DB, network, clock (`Date.now()` is passed in) |
 | Store | `db.ts`, `proxmox/store.ts` | domain types | contain business rules |
 | Service | `checker.ts`, `poller.ts`, `proxmox/service.ts`, `proxmox/scheduler.ts` | domain, stores, interfaces (`ReleaseSource`, `Notifier`, `NodeShell`) | know about HTTP |
 | HTTP | `app.ts`, `proxmox/routes.ts`, `http.ts`, `validation.ts` | everything above | hold logic beyond validation, mapping and status codes |
@@ -164,6 +165,7 @@ Global classes (from `styles.scss`) – use them instead of restyling:
 | `.page-header`, `.visually-hidden` | page title block; accessible-only labels |
 | `.toolbar` > `.tabs` (`.tab`, `.tab-count`) + `.search` | filter tabs and search above a list |
 | `.callout`, `.card.empty` + `.empty-icon`, `.skeleton`, `.spin`, `.muted` | missing config warning, empty state, loading, busy icon, secondary text |
+| `.dialog` > `.dialog-card` > `.dialog-head` / `.dialog-body` / `.dialog-foot`, `fieldset.group` | native `<dialog>` shell (see *Dialogs*) |
 | `.enter`, `.fade-in` | enter animations (see *Motion*) |
 
 Shared components in `web/src/app/shared/`:
@@ -192,8 +194,10 @@ Shared components in `web/src/app/shared/`:
 - **Dialogs:** native `<dialog>` opened with `showModal()` from an `effect()` on an input signal
   (`input<T | null>` – `null` closes), `saved` / `closed` outputs, backdrop click closes
   (`appBackdropClose` – not a bare `(click)`, which also fires when a text selection ends outside the dialog), structure `.dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot`,
-  grouped fields in `fieldset.group` with a `legend`. Dialogs and their `::backdrop` set
-  `overscroll-behavior: contain` (the backdrop also `overflow: hidden`) so scrolling never moves the page underneath. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
+  grouped fields in `fieldset.group` with a `legend`. The dialog shell (`.dialog`, `.dialog-*`, `.group`, `.optional`,
+  `.save-error`) lives in `styles.scss`; a component only overrides what differs (e.g. the width). Dialogs and their
+  `::backdrop` set `overscroll-behavior: contain` (the backdrop also `overflow: hidden`) so scrolling never moves the
+  page underneath. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”
@@ -270,9 +274,6 @@ Shared components in `web/src/app/shared/`:
 
 These exist today; do not copy them into new code:
 
-- `pages/containers/dialog.scss` copies the dialog styles of `repository-settings.dialog.scss`. Target: move them
-  to `styles.scss` and delete the copies. (`.callout`, `.empty`, `.skeleton`, `.spin`, `.muted` and the toolbar/tabs/
-  search already live there.)
 - `run-log.dialog.scss` hard-codes terminal colours (`#0f1115`, `#dfe3ea`) – should become tokens
   (e.g. `--terminal-bg`, `--terminal-text`).
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own

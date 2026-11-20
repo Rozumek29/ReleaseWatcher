@@ -1,7 +1,14 @@
+import { normalizeSeverity, type SecurityAdvisory } from './advisories.ts';
 import type { ReleaseInfo } from './domain.ts';
 
 export interface ReleaseFetchResult {
   releases: ReleaseInfo[];
+  etag: string | null;
+  notModified: boolean;
+}
+
+export interface AdvisoryFetchResult {
+  advisories: SecurityAdvisory[];
   etag: string | null;
   notModified: boolean;
 }
@@ -21,6 +28,8 @@ export interface ReleaseSource {
   repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean>;
   /** Most recent published releases (drafts excluded). Pass the previous ETag to get a cheap 304. */
   getRecentReleases(owner: string, name: string, etag: string | null, token?: string | null): Promise<ReleaseFetchResult>;
+  /** Published security advisories of the repository (withdrawn ones excluded). Optional: not every provider has them. */
+  getSecurityAdvisories?(owner: string, name: string, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult>;
 }
 
 export class GitHubApiError extends Error {
@@ -43,6 +52,25 @@ interface GitHubReleaseDto {
   published_at: string | null;
   author: { login: string; avatar_url: string | null } | null;
 }
+
+interface GitHubAdvisoryDto {
+  ghsa_id: string;
+  cve_id: string | null;
+  html_url: string;
+  summary: string | null;
+  severity: string | null;
+  cvss?: { score: number | null } | null;
+  cvss_severities?: { cvss_v3?: { score: number | null } | null; cvss_v4?: { score: number | null } | null } | null;
+  published_at: string | null;
+  updated_at: string | null;
+  withdrawn_at: string | null;
+  vulnerabilities:
+    | { package: { name: string | null } | null; vulnerable_version_range: string | null; patched_versions: string | null }[]
+    | null;
+}
+
+/** Advisories read per repository (one page, newest first). */
+const ADVISORIES_PER_PAGE = 100;
 
 export interface GitHubOptions {
   apiBaseUrl: string;
@@ -111,6 +139,47 @@ export class GitHubReleaseSource implements ReleaseSource {
       );
 
     return { releases, etag: response.headers.get('etag'), notModified: false };
+  }
+
+  async getSecurityAdvisories(
+    owner: string,
+    name: string,
+    etag: string | null,
+    token?: string | null,
+  ): Promise<AdvisoryFetchResult> {
+    const path =
+      `${this.repoPath(owner, name)}/security-advisories?state=published&sort=published&direction=desc&per_page=${ADVISORIES_PER_PAGE}`;
+    const response = await this.request(path, etag ? { 'If-None-Match': etag } : {}, token);
+
+    if (response.status === 304) {
+      return { advisories: [], etag, notModified: true };
+    }
+    await ensureOk(response);
+
+    const dtos = (await response.json()) as GitHubAdvisoryDto[];
+    const advisories = dtos
+      .filter((d) => !d.withdrawn_at && d.published_at)
+      .map(
+        (d): SecurityAdvisory => ({
+          id: d.ghsa_id,
+          source: 'github',
+          aliases: [],
+          cveId: d.cve_id ?? null,
+          summary: d.summary?.trim() || d.ghsa_id,
+          severity: normalizeSeverity(d.severity),
+          cvssScore: d.cvss_severities?.cvss_v4?.score || d.cvss_severities?.cvss_v3?.score || d.cvss?.score || null,
+          htmlUrl: d.html_url,
+          publishedAt: d.published_at!,
+          updatedAt: d.updated_at ?? null,
+          vulnerabilities: (d.vulnerabilities ?? []).map((v) => ({
+            packageName: v.package?.name ?? null,
+            vulnerableRange: v.vulnerable_version_range?.trim() || null,
+            patchedVersions: v.patched_versions?.trim() || null,
+          })),
+        }),
+      );
+
+    return { advisories, etag: response.headers.get('etag'), notModified: false };
   }
 
   private repoPath(owner: string, name: string): string {

@@ -36,6 +36,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
   summary per check run.
 - **Installed version** of your self-hosted instance (e.g. Vaultwarden's `/api/version`): see
   *Update available 1.34.1 → 1.34.3* at a glance, and skip releases you already run.
+- **Vulnerabilities** of every watched repository from GitHub security advisories and **OSV.dev** (sources switchable
+  in Settings): a *Vulnerabilities* page shows which ones affect your installed version, and new ones are notified.
 - Rate-limit friendly: conditional requests with ETags, optional token (global or per repository).
 
 **Proxmox LXC containers**
@@ -109,7 +111,7 @@ Open <http://localhost:8080>, create the account with the setup code, then:
    (`If-None-Match` / ETag – a `304` does not count against GitHub's rate limit).
 4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check), then the
    baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
-5. **Settings → Notifications** chooses what is sent (new releases, application updates, apt updates, finished and
+5. **Settings → Notifications** chooses what is sent (new releases, new vulnerabilities, application updates, apt updates, finished and
    failed updates) and whether one check run sends **one summary** (digest) instead of one message per item. The
    summary is sent when a run of all repositories or of the scheduled containers ends; checking a single repository
    or container still notifies right away. Held-back items are lost if the process stops before the run ends (they
@@ -120,6 +122,28 @@ Open <http://localhost:8080>, create the account with the setup code, then:
 or an explicit JSON path such as `data.version` – and **Test URL** previews the result. Optional request headers
 (`Authorization: Bearer …`, `X-Api-Key`) are stored encrypted and never returned by the API. Releases you already
 run (installed ≥ release) are not announced, and Discord messages include the installed version.
+
+### Vulnerabilities
+
+Each check also reads the known vulnerabilities of a repository – at most every 6 hours (a manual **Check** always
+reads them). **Settings → General → Vulnerability sources** switches each source on or off:
+
+| Source | What it reads | Setup |
+| --- | --- | --- |
+| **GitHub security advisories** | the GHSA entries maintainers publish under *Security → Advisories* (`GET /repos/{owner}/{repo}/security-advisories`, with ETags and the same token as the releases) | none |
+| **OSV.dev** | the [OSV](https://osv.dev) database (GitHub, Go, PyPI, RustSec, … with CVE aliases) for the package the app is published as (`POST https://api.osv.dev/v1/query`) | repository settings → *Vulnerabilities from OSV.dev*: ecosystem + package, e.g. `npm` / `n8n` or `Go` / `github.com/gitea/gitea` |
+
+- Vulnerabilities reported by both sources (same GHSA/CVE id) are listed once. Withdrawn ones are dropped; switching a
+  source off removes its entries.
+- The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed version**. The **Vulnerabilities**
+  page lists all of them – affecting the installed version first – with severity, CVSS score, ids, vulnerable and
+  patched versions, filters (impact, severity, source) and search; the sidebar counts those affecting an installed
+  version. Each repository also shows a badge (red *N vulnerabilities affect installed* / grey *N advisories*) that
+  opens its list, and the *Vulnerable* filter tab.
+- As with releases, the first read of each source (and of a newly set OSV.dev package) only stores a baseline.
+  Vulnerabilities published later are sent to the notifiers (*New vulnerabilities*, max 5 per check) unless the
+  installed version is known not to be affected.
+- A failed read is shown on the repository (per source) and never marks the release check as failed.
 
 ### Proxmox LXC containers
 
@@ -398,7 +422,7 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GITHUB_TOKEN` | – | Optional PAT – raises the limit from 60 to 5000 requests/hour and allows private repositories (fine-grained: **Contents: Read-only**; classic: `repo`). A repository can have its own token, e.g. for a repository of another user. |
+| `GITHUB_TOKEN` | – | Optional PAT – raises the limit from 60 to 5000 requests/hour and allows private repositories (fine-grained: **Contents: Read-only**, plus **Repository security advisories: Read-only** for advisories of private repositories; classic: `repo`). A repository can have its own token, e.g. for a repository of another user. |
 | `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
 
@@ -458,9 +482,11 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
 | `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"? }` – a header with `value: null` keeps the saved value; `githubToken`: omit = keep, `null` = remove |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `githubToken` and the OSV.dev package: omit = keep, `null` = remove |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
-| `POST` | `/api/repositories/:id/check` | Check immediately |
+| `POST` | `/api/repositories/:id/check` | Check immediately (including security advisories) |
+| `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`) and `affectsInstalled` (`true`/`false`/`null` when unknown) |
+| `GET` | `/api/advisories` | Vulnerabilities of all repositories, each with its `repository` (Vulnerabilities page) |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |
@@ -567,6 +593,8 @@ src/
   main.ts            entry point: config, DB, HTTP server, poller, graceful shutdown
   app.ts             HTTP routes (Bun.serve) + static UI with SPA fallback
   domain.ts          types, repository-name parsing, new-release selection
+  advisories.ts      vulnerabilities: version ranges, impact on the installed version, summaries
+  osv.ts             OSV.dev client and mapping of OSV records
   version.ts         version parsing/comparison, installed-version reading
   checker.ts         checks repositories, dispatches notifications
   poller.ts          interval scheduler (interval can change at runtime)
@@ -589,7 +617,8 @@ scripts/             compile, package, deploy-lxc, ensure-web
 <details>
 <summary><b>Adding a notifier</b> (Slack, Teams, …)</summary>
 
-1. Implement `Notifier` from `src/notifiers/notifier.ts`: `notify()` for releases, `notifyContainerUpdates()` for
+1. Implement `Notifier` from `src/notifiers/notifier.ts`: `notify()` for releases, `notifyVulnerability()` for new
+   security advisories, `notifyContainerUpdates()` for
    pending container updates, `notifyUpdateResult()` for finished/failed updates and `notifyDigest()` for summaries.
 2. Register it in `src/notifiers/index.ts`. Options come through a callback, so values changed in the UI apply
    without a restart:

@@ -38,10 +38,16 @@ export interface Settings {
   /** Send the notifications of one check run as one summary. */
   notificationDigest: boolean;
   notifyReleases: boolean;
+  /** New security advisories of watched repositories. */
+  notifyVulnerabilities: boolean;
   notifyAppUpdates: boolean;
   notifyAptUpdates: boolean;
   notifyUpdateSucceeded: boolean;
   notifyUpdateFailed: boolean;
+  /** Read GitHub repository security advisories. */
+  advisoriesGithub: boolean;
+  /** Query OSV.dev for repositories with an OSV package. */
+  advisoriesOsv: boolean;
 }
 
 /** On/off settings (stored as "true"/"false"). */
@@ -49,10 +55,13 @@ const BOOLEAN_SETTINGS: ReadonlySet<SettingKey> = new Set([
   'backupBeforeUpdate',
   'notificationDigest',
   'notifyReleases',
+  'notifyVulnerabilities',
   'notifyAppUpdates',
   'notifyAptUpdates',
   'notifyUpdateSucceeded',
   'notifyUpdateFailed',
+  'advisoriesGithub',
+  'advisoriesOsv',
 ]);
 
 export const MIN_CHECK_CONCURRENCY = 1;
@@ -108,10 +117,13 @@ export class SettingsService {
       emailTo: config.email.to,
       notificationDigest: config.notificationDigest,
       notifyReleases: DEFAULT_NOTIFICATION_PREFERENCES.releases,
+      notifyVulnerabilities: DEFAULT_NOTIFICATION_PREFERENCES.vulnerabilities,
       notifyAppUpdates: DEFAULT_NOTIFICATION_PREFERENCES.appUpdates,
       notifyAptUpdates: DEFAULT_NOTIFICATION_PREFERENCES.aptUpdates,
       notifyUpdateSucceeded: DEFAULT_NOTIFICATION_PREFERENCES.updateSucceeded,
       notifyUpdateFailed: DEFAULT_NOTIFICATION_PREFERENCES.updateFailed,
+      advisoriesGithub: true,
+      advisoriesOsv: true,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
   }
@@ -146,10 +158,13 @@ export class SettingsService {
       emailTo: o.emailTo ?? this.defaults.emailTo,
       notificationDigest: flag('notificationDigest'),
       notifyReleases: flag('notifyReleases'),
+      notifyVulnerabilities: flag('notifyVulnerabilities'),
       notifyAppUpdates: flag('notifyAppUpdates'),
       notifyAptUpdates: flag('notifyAptUpdates'),
       notifyUpdateSucceeded: flag('notifyUpdateSucceeded'),
       notifyUpdateFailed: flag('notifyUpdateFailed'),
+      advisoriesGithub: flag('advisoriesGithub'),
+      advisoriesOsv: flag('advisoriesOsv'),
     };
   }
 

@@ -1,5 +1,6 @@
 import { resolve } from 'node:path';
 import { APP_VERSION } from './app-version.ts';
+import { advisoryAffects, OSV_ECOSYSTEMS, sortAdvisories, summarizeAdvisories, type SecurityAdvisory } from './advisories.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
@@ -11,6 +12,7 @@ import { errorMessage, noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
+import type { OsvClient } from './osv.ts';
 import { Poller } from './poller.ts';
 import { containerRoutes, containerStatus } from './proxmox/routes.ts';
 import { ContainerScheduler } from './proxmox/scheduler.ts';
@@ -85,6 +87,8 @@ export interface AppDeps {
     field: string | null,
     headers: readonly HttpHeader[],
   ) => Promise<{ version: string; preview: string }>;
+  /** OSV.dev client for security advisories of packages; without it OSV.dev is not queried. */
+  osv?: OsvClient | null;
   /** Directory with the built Angular UI; skipped when missing. */
   publicDir?: string;
   /** UI files embedded in a compiled executable (URL path → embedded file); takes precedence over `publicDir`. */
@@ -138,8 +142,29 @@ export interface App {
   close(): Promise<void>;
 }
 
+/** Public shape of a security advisory, with its impact on the installed version. */
+export const advisoryDto = (a: SecurityAdvisory, installedVersion: string | null) => ({
+  id: a.id,
+  source: a.source,
+  aliases: a.aliases,
+  cveId: a.cveId,
+  summary: a.summary,
+  severity: a.severity,
+  cvssScore: a.cvssScore,
+  htmlUrl: a.htmlUrl,
+  publishedAt: a.publishedAt,
+  updatedAt: a.updatedAt,
+  vulnerabilities: a.vulnerabilities.map((v) => ({
+    packageName: v.packageName,
+    vulnerableRange: v.vulnerableRange,
+    patchedVersions: v.patchedVersions,
+  })),
+  /** True/false when the installed version is known and comparable, otherwise null. */
+  affectsInstalled: advisoryAffects(a, installedVersion),
+});
+
 /** Public shape of a watched repository (internal fields like the ETag are not exposed). */
-export const toDto = (r: WatchedRepository) => ({
+export const toDto = (r: WatchedRepository, advisories: readonly SecurityAdvisory[] = []) => ({
   id: r.id,
   owner: r.owner,
   name: r.name,
@@ -168,6 +193,13 @@ export const toDto = (r: WatchedRepository) => ({
     const diff = compareVersions(r.lastSeenTag, r.installedVersion);
     return diff === null ? null : diff > 0;
   })(),
+  osvEcosystem: r.osvEcosystem,
+  osvPackage: r.osvPackage,
+  advisories: {
+    ...summarizeAdvisories(advisories, r.installedVersion),
+    checkedAt: r.advisoriesCheckedAt,
+    error: r.advisoriesError,
+  },
 });
 
 const addRepositorySchema: ObjectSchema = {
@@ -189,6 +221,8 @@ const updateRepositorySchema: ObjectSchema = {
     installedVersionField: { type: 'string', nullable: true, maxLength: 200 },
     installedVersionHeaders: headersSchema,
     githubToken: { type: 'string', nullable: true, maxLength: 1000 },
+    osvEcosystem: { type: 'string', nullable: true, maxLength: 50 },
+    osvPackage: { type: 'string', nullable: true, maxLength: 300 },
   },
   required: ['includePrereleases', 'isEnabled'],
 };
@@ -229,10 +263,13 @@ const settingsSchema: ObjectSchema = {
     emailTo: { type: 'string', nullable: true, maxLength: 5000 },
     notificationDigest: { type: 'boolean', nullable: true },
     notifyReleases: { type: 'boolean', nullable: true },
+    notifyVulnerabilities: { type: 'boolean', nullable: true },
     notifyAppUpdates: { type: 'boolean', nullable: true },
     notifyAptUpdates: { type: 'boolean', nullable: true },
     notifyUpdateSucceeded: { type: 'boolean', nullable: true },
     notifyUpdateFailed: { type: 'boolean', nullable: true },
+    advisoriesGithub: { type: 'boolean', nullable: true },
+    advisoriesOsv: { type: 'boolean', nullable: true },
   },
 };
 
@@ -256,6 +293,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return {
       digest: current.notificationDigest,
       releases: current.notifyReleases,
+      vulnerabilities: current.notifyVulnerabilities,
       appUpdates: current.notifyAppUpdates,
       aptUpdates: current.notifyAptUpdates,
       updateSucceeded: current.notifyUpdateSucceeded,
@@ -268,6 +306,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     dispatcher,
     log,
     ...(deps.fetchInstalledVersion ? { fetchInstalledVersion: deps.fetchInstalledVersion } : {}),
+    osv: deps.osv ?? null,
+    advisorySources: () => ({ github: deps.settings.current.advisoriesGithub, osv: deps.settings.current.advisoriesOsv }),
   });
   const { store, source, settings } = deps;
   const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, log);
@@ -362,10 +402,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         digest: current.notificationDigest,
         digestSource: settings.sourceOf('notificationDigest'),
         releases: current.notifyReleases,
+        vulnerabilities: current.notifyVulnerabilities,
         appUpdates: current.notifyAppUpdates,
         aptUpdates: current.notifyAptUpdates,
         updateSucceeded: current.notifyUpdateSucceeded,
         updateFailed: current.notifyUpdateFailed,
+      },
+      advisories: {
+        github: current.advisoriesGithub,
+        osv: current.advisoriesOsv,
+        osvEcosystems: OSV_ECOSYSTEMS,
       },
     };
   };
@@ -382,10 +428,22 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
       containers: containerStatus(containerStore),
+      advisories: (() => {
+        const all = store.listAllAdvisories();
+        let total = 0;
+        let affecting = 0;
+        for (const repo of repositories) {
+          const summary = summarizeAdvisories(all.get(repo.id) ?? [], repo.installedVersion);
+          total += summary.total;
+          affecting += summary.affecting;
+        }
+        return { total, affecting };
+      })(),
     };
   };
 
   const findRepository = (rawId: string) => store.get(parseId(rawId));
+  const repositoryDto = (repo: WatchedRepository) => toDto(repo, store.listAdvisories(repo.id));
 
   const addRepository = async (req: Request) => {
     const body = await readBody<{ repository: string; includePrereleases?: boolean; githubToken?: string | null }>(
@@ -422,7 +480,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     // Establish the baseline right away so the UI shows the current latest release.
     await checker.check(repo);
 
-    return Response.json(toDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
+    return Response.json(repositoryDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
   };
 
   const updateRepository = async (req: Request, rawId: string) => {
@@ -435,6 +493,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       installedVersionHeaders?: HeaderInput[] | null;
       /** Omit = keep, null/"" = remove (use the global token). */
       githubToken?: string | null;
+      /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
+      osvEcosystem?: string | null;
+      osvPackage?: string | null;
     }>(req, updateRepositorySchema);
     if (!repo) {
       return problem(404, 'Repository not found.');
@@ -447,7 +508,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       const token = body.githubToken?.trim() || null;
       if (token !== repo.githubToken) {
         repo.githubToken = token;
-        repo.etag = null; // another token may see different data
+        // Another token may see different data.
+        repo.etag = null;
+        repo.advisoriesEtag = null;
       }
     }
     repo.includePrereleases = body.includePrereleases;
@@ -483,8 +546,27 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       }
     }
 
+    let osvChanged = false;
+    if (body.osvEcosystem !== undefined || body.osvPackage !== undefined) {
+      const ecosystem = body.osvEcosystem === undefined ? repo.osvEcosystem : body.osvEcosystem?.trim() || null;
+      const name = body.osvPackage === undefined ? repo.osvPackage : body.osvPackage?.trim() || null;
+      if (ecosystem && !(OSV_ECOSYSTEMS as readonly string[]).includes(ecosystem)) {
+        return validationProblem('osvEcosystem', `Choose one of: ${OSV_ECOSYSTEMS.join(', ')}.`);
+      }
+      if (!ecosystem !== !name) {
+        return validationProblem(ecosystem ? 'osvPackage' : 'osvEcosystem', 'Set both the ecosystem and the package name, or neither.');
+      }
+      osvChanged = ecosystem !== repo.osvEcosystem || name !== repo.osvPackage;
+      repo.osvEcosystem = ecosystem;
+      repo.osvPackage = name;
+    }
+    if (osvChanged) {
+      // Read the new package right away (its first read only sets the baseline).
+      await checker.refreshAdvisories(repo, true);
+    }
+
     store.save(repo);
-    return Response.json(toDto(repo));
+    return Response.json(repositoryDto(repo));
   };
 
   // Tries an installed-version URL without saving it (used by the "Test" button in the UI).
@@ -619,13 +701,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         }),
 
         '/api/repositories': {
-          GET: () => Response.json(store.list().map(toDto)),
+          GET: () => {
+            const advisories = store.listAllAdvisories();
+            return Response.json(store.list().map((r) => toDto(r, advisories.get(r.id))));
+          },
           POST: addRepository,
         },
         '/api/repositories/:id': {
           GET: (req) => {
             const repo = findRepository(req.params.id);
-            return repo ? Response.json(toDto(repo)) : problem(404, 'Repository not found.');
+            return repo ? Response.json(repositoryDto(repo)) : problem(404, 'Repository not found.');
           },
           PUT: (req) => updateRepository(req, req.params.id),
           DELETE: (req) =>
@@ -637,8 +722,39 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             if (!repo) {
               return problem(404, 'Repository not found.');
             }
-            const result = await checker.check(repo);
-            return Response.json({ repository: toDto(repo), notifiedCount: result.notifiedCount });
+            const result = await checker.check(repo, { forceAdvisories: true });
+            return Response.json({ repository: repositoryDto(repo), notifiedCount: result.notifiedCount + result.advisoryCount });
+          },
+        },
+        // Security advisories of all repositories (Vulnerabilities page), newest first.
+        '/api/advisories': {
+          GET: () => {
+            const all = store.listAllAdvisories();
+            return Response.json(
+              store.list().flatMap((repo) =>
+                sortAdvisories(all.get(repo.id) ?? []).map((a) => ({
+                  ...advisoryDto(a, repo.installedVersion),
+                  repository: {
+                    id: repo.id,
+                    fullName: fullName(repo),
+                    owner: repo.owner,
+                    url: `https://github.com/${fullName(repo)}`,
+                    avatarUrl: ownerAvatarUrl(repo.owner),
+                    installedVersion: repo.installedVersion,
+                  },
+                })),
+              ),
+            );
+          },
+        },
+        // Security advisories of the repository, newest first.
+        '/api/repositories/:id/advisories': {
+          GET: (req) => {
+            const repo = findRepository(req.params.id);
+            if (!repo) {
+              return problem(404, 'Repository not found.');
+            }
+            return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, repo.installedVersion)));
           },
         },
 

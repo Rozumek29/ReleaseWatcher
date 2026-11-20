@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import {
+  advisoryIds,
+  affectedVersions,
   type ContainerUpdatesNotification,
   digestSummary,
   type NotificationEvent,
@@ -9,7 +11,10 @@ import {
   type ReleaseNotification,
   targetName,
   updateLabel,
+  installedImpact,
+  severityLabel,
   type UpdateResultNotification,
+  type VulnerabilityNotification,
 } from './notifier.ts';
 import { sendMail, type SmtpServer } from './smtp.ts';
 
@@ -45,6 +50,10 @@ export class EmailNotifier implements Notifier {
 
   notify(notification: ReleaseNotification): Promise<void> {
     return this.send(buildEmail([{ type: 'release', release: notification }], this.getOptions()));
+  }
+
+  notifyVulnerability(notification: VulnerabilityNotification): Promise<void> {
+    return this.send(buildEmail([{ type: 'vulnerability', vulnerability: notification }], this.getOptions()));
   }
 
   notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void> {
@@ -95,7 +104,7 @@ export function buildEmail(
   const single = events.length === 1 && only;
   const subject = single ? only.subject : `ReleaseWatcher: ${digestSummary(events)}`;
   const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
-  const showContainersLink = containersUrl !== null && events.some((e) => e.type !== 'release');
+  const showContainersLink = containersUrl !== null && events.some((e) => e.type === 'container-updates' || e.type === 'update-result');
 
   const text = [
     ...(single ? [] : [`${digestSummary(events)}\n`]),
@@ -129,6 +138,8 @@ function section(event: NotificationEvent, options: Pick<EmailOptions, 'maxBodyL
   switch (event.type) {
     case 'release':
       return releaseSection(event.release, options.maxBodyLength);
+    case 'vulnerability':
+      return vulnerabilitySection(event.vulnerability);
     case 'container-updates':
       return containerSection(event.updates);
     case 'update-result':
@@ -156,6 +167,34 @@ function releaseSection(notification: ReleaseNotification, maxBodyLength: number
       body
         ? `<pre style="margin:12px 0 0;padding:12px;background:#f6f8fa;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${escapeHtml(body)}</pre>`
         : '',
+    ].join(''),
+  };
+}
+
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: '#82071e',
+  high: '#cf222e',
+  medium: '#bc4c00',
+  low: '#9a6700',
+  unknown: '#6a737d',
+};
+
+function vulnerabilitySection(notification: VulnerabilityNotification): Section {
+  const { advisory } = notification;
+  const repo = notificationFullName(notification);
+  const severity = advisory.cvssScore !== null ? `${severityLabel(notification)} (CVSS ${advisory.cvssScore.toFixed(1)})` : severityLabel(notification);
+  const meta = [severity, advisoryIds(notification), `published ${formatDate(advisory.publishedAt)}`].join(' · ');
+  const impact = installedImpact(notification);
+  const versions = affectedVersions(notification);
+  const color = SEVERITY_COLORS[advisory.severity] ?? '#6a737d';
+  return {
+    subject: `${repo}: ${severityLabel(notification).toLowerCase()} vulnerability – ${advisory.summary}`,
+    text: [`${repo}: ${advisory.summary}`, meta, ...(impact ? [impact] : []), ...(versions ? [versions] : []), advisory.htmlUrl].join('\n'),
+    html: [
+      `<div style="color:${color};font-size:13px;font-weight:600">${escapeHtml(meta)}</div>`,
+      `<h2 style="margin:2px 0 6px;font-size:18px;font-weight:650"><a href="${escapeHtml(advisory.htmlUrl)}" style="color:#4752c4;text-decoration:none">${escapeHtml(`${repo}: ${advisory.summary}`)}</a></h2>`,
+      impact ? `<div style="font-weight:600${notification.affectsInstalled ? `;color:${SEVERITY_COLORS['high']}` : ''}">${escapeHtml(impact)}</div>` : '',
+      versions ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;margin-top:4px">${escapeHtml(versions)}</div>` : '',
     ].join(''),
   };
 }

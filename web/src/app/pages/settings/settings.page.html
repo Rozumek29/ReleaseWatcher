@@ -91,8 +91,10 @@
                 <li>
                   <strong>Fine-grained token (recommended):</strong> <em>Repository access</em> → <em>Only select
                   repositories</em> (the private ones you watch), <em>Repository permissions</em> →
-                  <strong>Contents: Read-only</strong> (releases and their files). <em>Metadata: Read-only</em> is added
-                  automatically. Nothing else is needed – the token is never used to write.
+                  <strong>Contents: Read-only</strong> (releases and their files) and, for the security advisories of
+                  private repositories, <strong>Repository security advisories: Read-only</strong>.
+                  <em>Metadata: Read-only</em> is added automatically. Nothing else is needed – the token is never used
+                  to write.
                 </li>
                 <li>
                   <strong>Repositories of an organization:</strong> set <em>Resource owner</em> to the organization; the
@@ -181,8 +183,56 @@
       </form>
     </section>
 
+    <!-- Vulnerability sources -->
+    <section class="card section enter" style="--i: 2" aria-labelledby="advisories-title">
+      <div class="section-head">
+        <span class="section-icon advisories"><app-icon name="shield" /></span>
+        <div class="section-title">
+          <h2 id="advisories-title">Vulnerability sources</h2>
+          <p>Where security advisories of the watched repositories come from.</p>
+        </div>
+      </div>
+
+      <form class="section-body" (ngSubmit)="saveAdvisories()">
+        <ul class="kinds" aria-label="Vulnerability sources">
+          <li>
+            <app-switch label="GitHub security advisories" [showLabel]="false" [checked]="advisoriesGithub" (toggled)="advisoriesGithub = !advisoriesGithub" />
+            <div class="kind-text">
+              <span class="kind-label" (click)="advisoriesGithub = !advisoriesGithub">GitHub security advisories</span>
+              <span class="hint">Advisories maintainers publish in each repository (Security → Advisories). Uses the GitHub token.</span>
+            </div>
+          </li>
+          <li>
+            <app-switch label="OSV.dev" [showLabel]="false" [checked]="advisoriesOsv" (toggled)="advisoriesOsv = !advisoriesOsv" />
+            <div class="kind-text">
+              <span class="kind-label" (click)="advisoriesOsv = !advisoriesOsv">OSV.dev</span>
+              <span class="hint">
+                Open vulnerability database (GitHub, Go, PyPI, RustSec … with CVE aliases). Queried for repositories with an
+                OSV.dev package set in their settings; no account needed.
+              </span>
+            </div>
+          </li>
+        </ul>
+        <p class="hint advisories-note">
+          Advisories are read with the checks, at most every 6 hours. Switching a source off removes its advisories;
+          switching it on reads it again without notifying about old ones.
+        </p>
+
+        <div class="section-actions">
+          <span class="spacer"></span>
+          <button
+            type="submit"
+            class="btn"
+            [disabled]="saving() === 'advisories' || (advisoriesGithub === s.advisories.github && advisoriesOsv === s.advisories.osv)"
+          >
+            {{ saving() === 'advisories' ? 'Saving…' : 'Save' }}
+          </button>
+        </div>
+      </form>
+    </section>
+
     <!-- Proxmox node -->
-    <section class="card section wide enter" style="--i: 2" aria-labelledby="proxmox-title">
+    <section class="card section wide enter" style="--i: 3" aria-labelledby="proxmox-title">
       <div class="section-head">
         <span class="section-icon proxmox"><app-icon name="box" /></span>
         <div class="section-title">

@@ -28,6 +28,9 @@ const repo: WatchedRepository = {
   updateAvailable: null,
   hasOwnToken: false,
   githubTokenMasked: null,
+  osvEcosystem: null,
+  osvPackage: null,
+  advisories: { total: 0, affecting: 0, highestSeverity: null, checkedAt: null, error: null },
 };
 
 describe('RepositorySettingsDialog', () => {
@@ -121,5 +124,31 @@ describe('RepositorySettingsDialog', () => {
     request.flush({ ...repo });
     await settle(fixture);
     http.verify();
+  });
+
+  it('saves the OSV.dev package only with both the ecosystem and the name', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', repo);
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+
+    const ecosystem = el.querySelector<HTMLSelectElement>('#osv-ecosystem')!;
+    const name = el.querySelector<HTMLInputElement>('#osv-package')!;
+    expect(name.disabled).toBe(true);
+    ecosystem.value = 'Go';
+    ecosystem.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    name.value = ' github.com/dani-garcia/vaultwarden ';
+    name.dispatchEvent(new Event('input'));
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.osvEcosystem).toBe('Go');
+    expect(request.request.body.osvPackage).toBe('github.com/dani-garcia/vaultwarden');
   });
 });

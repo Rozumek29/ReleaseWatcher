@@ -41,11 +41,13 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     digest: false,
     digestSource: 'env',
     releases: true,
+    vulnerabilities: true,
     appUpdates: true,
     aptUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
   },
+  advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 });
 
 export const container = (overrides: Partial<Container> = {}): Container => ({

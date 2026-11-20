@@ -1,5 +1,6 @@
+import type { SecurityAdvisory } from '../src/advisories.ts';
 import type { ReleaseInfo } from '../src/domain.ts';
-import type { ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
+import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
 import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
 import type {
@@ -8,6 +9,7 @@ import type {
   Notifier,
   ReleaseNotification,
   UpdateResultNotification,
+  VulnerabilityNotification,
 } from '../src/notifiers/notifier.ts';
 
 export const silentLog = { info() {}, warn() {}, error() {} };
@@ -25,10 +27,31 @@ export function release(tag: string, day: number, isPrerelease = false): Release
   };
 }
 
+export function advisory(id: string, day: number, vulnerableRange: string | null = '< 2.0.0', extra: Partial<SecurityAdvisory> = {}): SecurityAdvisory {
+  return {
+    id,
+    source: 'github',
+    aliases: [],
+    cveId: null,
+    summary: `Problem ${id}`,
+    severity: 'high',
+    cvssScore: 8.1,
+    htmlUrl: `https://github.com/acme/widget/security/advisories/${id}`,
+    publishedAt: new Date(Date.UTC(2026, 0, 1 + day)).toISOString(),
+    updatedAt: null,
+    vulnerabilities: [{ packageName: 'widget', vulnerableRange, patchedVersions: '2.0.0' }],
+    ...extra,
+  };
+}
+
 export const dayIso = (day: number): string => new Date(Date.UTC(2026, 0, 1 + day)).toISOString();
 
 export class FakeSource implements ReleaseSource {
   releases: ReleaseInfo[] = [];
+  advisories: SecurityAdvisory[] = [];
+  advisoriesNotModified = false;
+  advisoryError: Error | null = null;
+  advisoryCalls = 0;
   notModified = false;
   error: Error | null = null;
   existing = new Set(['acme/widget']);
@@ -55,6 +78,17 @@ export class FakeSource implements ReleaseSource {
       ? { releases: [], etag, notModified: true }
       : { releases: this.releases, etag: '"etag"', notModified: false };
   }
+
+  async getSecurityAdvisories(_owner: string, _name: string, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {
+    this.advisoryCalls++;
+    this.lastToken = token;
+    if (this.advisoryError) {
+      throw this.advisoryError;
+    }
+    return this.advisoriesNotModified
+      ? { advisories: [], etag, notModified: true }
+      : { advisories: this.advisories, etag: '"advisories-etag"', notModified: false };
+  }
 }
 
 export class RecordingNotifier implements Notifier {
@@ -62,6 +96,7 @@ export class RecordingNotifier implements Notifier {
   isEnabled = true;
   fail = false;
   readonly sent: ReleaseNotification[] = [];
+  readonly vulnerabilitiesSent: VulnerabilityNotification[] = [];
   readonly containerSent: ContainerUpdatesNotification[] = [];
   readonly resultsSent: UpdateResultNotification[] = [];
   readonly digests: NotificationEvent[][] = [];
@@ -71,6 +106,13 @@ export class RecordingNotifier implements Notifier {
       throw new Error('boom');
     }
     this.sent.push(notification);
+  }
+
+  async notifyVulnerability(notification: VulnerabilityNotification): Promise<void> {
+    if (this.fail) {
+      throw new Error('boom');
+    }
+    this.vulnerabilitiesSent.push(notification);
   }
 
   async notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void> {

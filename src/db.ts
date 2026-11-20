@@ -1,4 +1,5 @@
 import { Database } from 'bun:sqlite';
+import { normalizeSeverity, type AdvisorySource, type AdvisoryVulnerability, type SecurityAdvisory } from './advisories.ts';
 import type { WatchedRepository } from './domain.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -28,6 +29,62 @@ interface Row {
   installed_version_checked_at: string | null;
   installed_version_error: string | null;
   github_token: string | null;
+  advisories_etag: string | null;
+  advisories_checked_at: string | null;
+  advisories_error: string | null;
+  osv_ecosystem: string | null;
+  osv_package: string | null;
+  advisory_baselines: string | null;
+}
+
+interface AdvisoryRow {
+  repository_id: number;
+  advisory_id: string;
+  source: string;
+  aliases: string;
+  cve_id: string | null;
+  summary: string;
+  severity: string;
+  cvss_score: number | null;
+  html_url: string;
+  published_at: string;
+  updated_at: string | null;
+  vulnerabilities: string;
+}
+
+const toAdvisory = (r: AdvisoryRow): SecurityAdvisory => ({
+  id: r.advisory_id,
+  source: r.source === 'osv' ? 'osv' : 'github',
+  aliases: parseStringArray(r.aliases),
+  cveId: r.cve_id,
+  summary: r.summary,
+  severity: normalizeSeverity(r.severity),
+  cvssScore: r.cvss_score,
+  htmlUrl: r.html_url,
+  publishedAt: r.published_at,
+  updatedAt: r.updated_at,
+  vulnerabilities: parseVulnerabilities(r.vulnerabilities),
+});
+
+function parseStringArray(json: string | null): string[] {
+  if (!json) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseVulnerabilities(json: string): AdvisoryVulnerability[] {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
+  } catch {
+    return [];
+  }
 }
 
 const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
@@ -49,6 +106,12 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   installedVersionCheckedAt: r.installed_version_checked_at,
   installedVersionError: r.installed_version_error,
   githubToken: secrets.decryptNullable(r.github_token),
+  advisoriesEtag: r.advisories_etag,
+  advisoriesCheckedAt: r.advisories_checked_at,
+  advisoriesError: r.advisories_error,
+  osvEcosystem: r.osv_ecosystem,
+  osvPackage: r.osv_package,
+  advisoryBaselines: parseStringArray(r.advisory_baselines),
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -201,6 +264,30 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE container_runs ADD COLUMN resume TEXT;`,
   // Reasons why a container or the host should be restarted (JSON array of strings, from the last check).
   `ALTER TABLE containers ADD COLUMN restart_reasons TEXT;`,
+  // Security advisories (GitHub, OSV.dev) of watched repositories, refreshed with the release checks.
+  `ALTER TABLE watched_repositories ADD COLUMN advisories_etag TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN advisories_checked_at TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN advisories_error TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN osv_ecosystem TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN osv_package TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN advisory_baselines TEXT;
+
+   CREATE TABLE repository_advisories (
+     repository_id   INTEGER NOT NULL REFERENCES watched_repositories (id) ON DELETE CASCADE,
+     advisory_id     TEXT    NOT NULL,
+     source          TEXT    NOT NULL,
+     aliases         TEXT    NOT NULL DEFAULT '[]',
+     cve_id          TEXT,
+     summary         TEXT    NOT NULL,
+     severity        TEXT    NOT NULL,
+     cvss_score      REAL,
+     html_url        TEXT    NOT NULL,
+     published_at    TEXT    NOT NULL,
+     updated_at      TEXT,
+     vulnerabilities TEXT    NOT NULL DEFAULT '[]',
+     first_seen_at   TEXT    NOT NULL,
+     PRIMARY KEY (repository_id, advisory_id)
+   );`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -271,13 +358,14 @@ export class RepositoryStore {
   }
 
   /** The few fields the status summary needs – without reading (and decrypting) the secrets of every repository. */
-  listStatusFields(): Pick<WatchedRepository, 'isEnabled' | 'lastError' | 'lastSeenTag' | 'installedVersion'>[] {
+  listStatusFields(): Pick<WatchedRepository, 'id' | 'isEnabled' | 'lastError' | 'lastSeenTag' | 'installedVersion'>[] {
     return this.db
-      .query<Pick<Row, 'is_enabled' | 'last_error' | 'last_seen_tag' | 'installed_version'>, []>(
-        'SELECT is_enabled, last_error, last_seen_tag, installed_version FROM watched_repositories',
+      .query<Pick<Row, 'id' | 'is_enabled' | 'last_error' | 'last_seen_tag' | 'installed_version'>, []>(
+        'SELECT id, is_enabled, last_error, last_seen_tag, installed_version FROM watched_repositories',
       )
       .all()
       .map((r) => ({
+        id: r.id,
         isEnabled: r.is_enabled === 1,
         lastError: r.last_error,
         lastSeenTag: r.last_seen_tag,
@@ -314,7 +402,9 @@ export class RepositoryStore {
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            etag = ?, last_checked_at = ?, last_error = ?,
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?, installed_version = ?,
-           installed_version_checked_at = ?, installed_version_error = ?, github_token = ?
+           installed_version_checked_at = ?, installed_version_error = ?, github_token = ?,
+           advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
+           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?
          WHERE id = ?`,
       )
       .run(
@@ -332,8 +422,72 @@ export class RepositoryStore {
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
         this.secrets.encryptNullable(repo.githubToken),
+        repo.advisoriesEtag,
+        repo.advisoriesCheckedAt,
+        repo.advisoriesError,
+        repo.osvEcosystem,
+        repo.osvPackage,
+        repo.advisoryBaselines.length > 0 ? JSON.stringify(repo.advisoryBaselines) : null,
         repo.id,
       );
+  }
+
+  /** Stored security advisories of one repository (unsorted). */
+  listAdvisories(repositoryId: number): SecurityAdvisory[] {
+    return this.db
+      .query<AdvisoryRow, [number]>('SELECT * FROM repository_advisories WHERE repository_id = ?')
+      .all(repositoryId)
+      .map(toAdvisory);
+  }
+
+  /** Security advisories of all repositories, by repository id. */
+  listAllAdvisories(): Map<number, SecurityAdvisory[]> {
+    const result = new Map<number, SecurityAdvisory[]>();
+    for (const row of this.db.query<AdvisoryRow, []>('SELECT * FROM repository_advisories').all()) {
+      const list = result.get(row.repository_id) ?? [];
+      list.push(toAdvisory(row));
+      result.set(row.repository_id, list);
+    }
+    return result;
+  }
+
+  /** Inserts or updates one advisory (keeps the date it was first seen). */
+  saveAdvisory(repositoryId: number, advisory: SecurityAdvisory, now: Date): void {
+    this.db
+      .query(
+        `INSERT INTO repository_advisories
+           (repository_id, advisory_id, source, aliases, cve_id, summary, severity, cvss_score, html_url, published_at,
+            updated_at, vulnerabilities, first_seen_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT (repository_id, advisory_id) DO UPDATE SET
+           source = excluded.source, aliases = excluded.aliases, cve_id = excluded.cve_id, summary = excluded.summary, severity = excluded.severity,
+           cvss_score = excluded.cvss_score, html_url = excluded.html_url, published_at = excluded.published_at,
+           updated_at = excluded.updated_at, vulnerabilities = excluded.vulnerabilities`,
+      )
+      .run(
+        repositoryId,
+        advisory.id,
+        advisory.source,
+        JSON.stringify(advisory.aliases),
+        advisory.cveId,
+        advisory.summary,
+        advisory.severity,
+        advisory.cvssScore,
+        advisory.htmlUrl,
+        advisory.publishedAt,
+        advisory.updatedAt,
+        JSON.stringify(advisory.vulnerabilities),
+        now.toISOString(),
+      );
+  }
+
+  /** Removes advisories of `source` that are no longer published (withdrawn or deleted), or all of it without `keepIds`. */
+  removeAdvisoriesExcept(repositoryId: number, source: AdvisorySource, keepIds: readonly string[] = []): void {
+    const keep = new Set(keepIds);
+    const stale = this.listAdvisories(repositoryId).filter((a) => a.source === source && !keep.has(a.id));
+    for (const advisory of stale) {
+      this.db.query('DELETE FROM repository_advisories WHERE repository_id = ? AND advisory_id = ?').run(repositoryId, advisory.id);
+    }
   }
 
   delete(id: number): boolean {

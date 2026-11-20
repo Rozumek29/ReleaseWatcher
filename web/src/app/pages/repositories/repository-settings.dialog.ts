@@ -13,6 +13,7 @@ interface HeaderRow {
 }
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
+import { OSV_ECOSYSTEMS } from '../../shared/severity';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
 
@@ -41,6 +42,9 @@ export class RepositorySettingsDialog {
   /** New repository token; empty keeps the saved one. */
   protected token = '';
   protected removeToken = false;
+  protected osvEcosystem = '';
+  protected osvPackage = '';
+  protected readonly ecosystems = OSV_ECOSYSTEMS;
   protected readonly showValues = signal(false);
   private nextHeaderId = 1;
 
@@ -61,6 +65,8 @@ export class RepositorySettingsDialog {
         this.isEnabled = repo.isEnabled;
         this.token = '';
         this.removeToken = false;
+        this.osvEcosystem = repo.osvEcosystem ?? '';
+        this.osvPackage = repo.osvPackage ?? '';
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
         this.testResult.set(null);
@@ -102,6 +108,7 @@ export class RepositorySettingsDialog {
     }
     this.saving.set(true);
     this.saveError.set(null);
+    const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
     try {
       const updated = await firstValueFrom(
         this.api.updateRepository(repo.id, {
@@ -112,6 +119,9 @@ export class RepositorySettingsDialog {
           installedVersionHeaders: this.headerInputs(),
           // The token is never sent back to the UI: empty = keep, "Remove" = null.
           ...(this.token.trim() ? { githubToken: this.token.trim() } : this.removeToken ? { githubToken: null } : {}),
+          // Both or neither: an ecosystem without a package removes the OSV.dev package.
+          osvEcosystem: hasOsv ? this.osvEcosystem : null,
+          osvPackage: hasOsv ? this.osvPackage.trim() : null,
         }),
       );
       this.saved.emit(updated);

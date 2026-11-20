@@ -91,6 +91,11 @@
     color: var(--success);
   }
 
+  &.advisories {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+
   &.proxmox,
   &.bell {
     background: var(--warning-soft);
@@ -375,4 +380,10 @@
     flex: 1;
     min-width: 0;
   }
+}
+
+.advisories-note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
 }
