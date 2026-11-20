@@ -23,7 +23,7 @@ if (process.argv.includes('--version')) {
 }
 
 const config = loadConfig();
-const log = createLogger(process.env['LOG_LEVEL'] ?? 'info');
+const log = createLogger(config.log.level, { file: config.log.file });
 const dataDir = config.databasePath === ':memory:' ? null : dirname(resolve(config.databasePath));
 const secrets = loadSecretBox({ key: config.encryptionKey, dataDir });
 if (secrets.source === 'created') {
@@ -83,6 +83,7 @@ const shutdown = async (signal: string) => {
   await app.close(); // also stops the poller and the container scheduler
   shell.dispose();
   store.close();
+  log.close();
   process.exit(0);
 };
 process.once('SIGINT', () => void shutdown('SIGINT'));

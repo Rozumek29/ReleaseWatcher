@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import type { LogFileOptions } from './log.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
 
 /** Application configuration read from environment variables (see .env.example). */
@@ -55,6 +56,12 @@ export interface Config {
   publicUrl: string | null;
   /** Trust X-Forwarded-For for the client IP (only behind a reverse proxy that sets it). */
   trustProxy: boolean;
+  log: {
+    /** Minimum level (`debug`, `info`, `warn`, `error`) or `silent`. */
+    level: string;
+    /** Copy of the log in a file (rotated by size); null = console only. */
+    file: LogFileOptions | null;
+  };
 }
 
 type Env = Record<string, string | undefined>;
@@ -64,6 +71,7 @@ export function loadConfig(env: Env = process.env): Config {
   const keyFile = str(env, 'PROXMOX_SSH_KEY_FILE');
   const authUser = str(env, 'BASIC_AUTH_USERNAME');
   const authPassword = str(env, 'BASIC_AUTH_PASSWORD');
+  const logFile = str(env, 'LOG_FILE');
   return {
     port: int(env, 'PORT', 8080),
     host: str(env, 'HOST') ?? '0.0.0.0',
@@ -110,6 +118,16 @@ export function loadConfig(env: Env = process.env): Config {
     basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
     publicUrl: publicUrl(str(env, 'PUBLIC_URL')),
     trustProxy: (str(env, 'TRUST_PROXY') ?? 'false').toLowerCase() === 'true',
+    log: {
+      level: str(env, 'LOG_LEVEL') ?? 'info',
+      file: logFile
+        ? {
+            path: logFile,
+            maxSizeBytes: Math.round(int(env, 'LOG_FILE_MAX_SIZE_MB', 10) * 1024 * 1024),
+            maxFiles: Math.floor(int(env, 'LOG_FILE_MAX_FILES', 5)),
+          }
+        : null,
+    },
   };
 }
 

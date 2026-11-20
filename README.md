@@ -477,6 +477,9 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 | `TRUST_PROXY` | `false` | Take the client IP from `X-Forwarded-For` – only behind a proxy that sets it. |
 | `BASIC_AUTH_USERNAME` / `BASIC_AUTH_PASSWORD` | – | Upgrade path from Basic auth (see above). |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `warn`, `error` or `silent`; logs are JSON lines. |
+| `LOG_FILE` | – | Also write the log to this file; empty = console only. Docker: `/data/releasewatcher.log`, native install: `/var/log/releasewatcher/releasewatcher.log` (the only writable log directory of the systemd unit). |
+| `LOG_FILE_MAX_SIZE_MB` | `10` | Rotate the log file at this size (`0` = never); the old file becomes `<file>.1`. |
+| `LOG_FILE_MAX_FILES` | `5` | Rotated log files to keep (`<file>.1` … `<file>.N`); `0` = start the file over. |
 | `TZ` | system | Time zone of the cron schedules. |
 
 </details>

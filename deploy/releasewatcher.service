@@ -32,6 +32,9 @@ TimeoutStopSec=30
 NoNewPrivileges=yes
 ProtectSystem=strict
 ReadWritePaths=/var/lib/releasewatcher
+# Creates /var/log/releasewatcher (owned by the service user) – the place for LOG_FILE, e.g.
+# LOG_FILE=/var/log/releasewatcher/releasewatcher.log; other paths outside ReadWritePaths are read-only.
+LogsDirectory=releasewatcher
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
