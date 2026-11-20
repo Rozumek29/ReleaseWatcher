@@ -309,6 +309,17 @@ code {
   white-space: nowrap;
 }
 
+/* Secret input with Show/Hide (and Remove) buttons next to it. */
+.input-with-action {
+  display: flex;
+  gap: 6px;
+
+  .input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 /* ---------- Shared page pieces ---------- */
 
 .muted {

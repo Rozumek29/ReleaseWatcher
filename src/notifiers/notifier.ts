@@ -29,8 +29,8 @@ export interface UpdateResultNotification {
   isNode?: boolean;
   isVm?: boolean;
   containerName: string;
-  kind: 'apt-upgrade' | 'app-update';
-  /** Application name for `app-update`. */
+  kind: 'apt-upgrade' | 'app-update' | 'home-assistant-update';
+  /** Application name for `app-update` ("Home Assistant" for `home-assistant-update`). */
   appName: string | null;
   succeeded: boolean;
   /** Last line of the run log, e.g. "Update failed – exit code 1". */
@@ -51,9 +51,9 @@ export const notificationRepoUrl = (n: ReleaseNotification): string =>
 export const targetName = (n: { vmid: number; isNode?: boolean; isVm?: boolean; containerName: string }): string =>
   `${n.isNode ? 'Proxmox host' : n.isVm ? `VM ${n.vmid}` : `CT ${n.vmid}`} (${n.containerName})`;
 
-/** "apt upgrade" or "update of Nextcloud". */
+/** "apt upgrade", "update of Nextcloud" or "update of Home Assistant". */
 export const updateLabel = (n: UpdateResultNotification): string =>
-  n.kind === 'app-update' ? `update of ${n.appName ?? 'the application'}` : 'apt upgrade';
+  n.kind === 'apt-upgrade' ? 'apt upgrade' : `update of ${n.appName ?? 'the application'}`;
 
 /** Short heading of a digest, e.g. "2 new releases, 1 container with updates". */
 export function digestSummary(events: readonly NotificationEvent[]): string {

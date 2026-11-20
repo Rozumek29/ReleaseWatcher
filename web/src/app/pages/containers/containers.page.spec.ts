@@ -5,7 +5,7 @@ import { provideRouter } from '@angular/router';
 import { Container, Run } from '../../core/models';
 import { settle } from '../../testing';
 import { ContainersPage } from './containers.page';
-import { container, proxmoxSettings } from './fixtures';
+import { container, homeAssistant, proxmoxSettings } from './fixtures';
 
 const run = (overrides: Partial<Run> = {}): Run => ({
   id: 9,
@@ -62,6 +62,95 @@ describe('ContainersPage', () => {
     [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
     await settle(fixture);
     expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
+  });
+
+  it('shows Home Assistant updates and installs an app update after a confirmation', async () => {
+    const vm = container({
+      kind: 'vm',
+      vmid: 111,
+      name: 'ha',
+      aptEnabled: false,
+      aptUpgradable: [],
+      apps: [],
+      homeAssistant: homeAssistant(),
+      updatesAvailable: 2,
+    });
+    const { fixture, el } = await create([vm]);
+
+    expect(el.textContent).toContain('Home Assistant');
+    expect(el.textContent).toContain('Core 2026.11.2 · OS 18.4');
+    expect(el.textContent).toContain('integrations as of');
+    expect(el.textContent).toContain('Mosquitto broker');
+    expect(el.textContent).toContain('Integration (marketplace)');
+    // No application hint for Home Assistant OS.
+    expect(el.textContent).not.toContain('No applications configured');
+    // The integration waits for a token: no Update button on its row, a hint with a link to the settings instead.
+    const rows = [...el.querySelectorAll<HTMLElement>('.item')];
+    const dahua = rows.find((r) => r.textContent?.includes('Dahua'))!;
+    expect([...dahua.querySelectorAll('button')].some((b) => b.textContent?.includes('Update'))).toBe(false);
+    expect(el.textContent).toContain('Integration updates can be installed after you add an access token.');
+    // An update Home Assistant cannot install explains why, even without a token.
+    expect(el.textContent).toContain('Home Assistant only announces this update');
+    expect(el.textContent).not.toContain('Add a Home Assistant access token in the settings');
+    // Only one installable update: no "Update all" for Home Assistant.
+    expect(el.querySelector('.ha-item .item-actions')).toBeNull();
+
+    const mosquitto = rows.find((r) => r.textContent?.includes('Mosquitto broker') && !r.classList.contains('ha-item'))!;
+    [...mosquitto.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Update'))!.click();
+    await settle(fixture);
+    http.expectNone('/api/containers/1/home-assistant-update');
+    expect(el.textContent).toContain('Update Mosquitto broker?');
+    el.querySelector<HTMLInputElement>('.backup-check input')!.click();
+
+    [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const request = http.expectOne('/api/containers/1/home-assistant-update');
+    expect(request.request.body).toEqual({ backup: false, ids: ['app:core_mosquitto'] });
+    request.flush(run({ kind: 'home-assistant-update', status: 'running', finishedAt: null, exitCode: null }), {
+      status: 202,
+      statusText: 'Accepted',
+    });
+    await settle(fixture);
+    http.expectOne('/api/runs/9').flush(run({ kind: 'home-assistant-update', output: '» Updating Mosquitto broker\n' }));
+    await settle(fixture);
+    expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
+    http.expectOne('/api/containers').flush([vm]);
+    http.expectOne('/api/settings').flush(proxmoxSettings(true));
+    http.expectOne('/api/status').flush({});
+    await settle(fixture);
+  });
+
+  it('only reports Home Assistant updates when installing from ReleaseWatcher is switched off', async () => {
+    const blocked = 'Installing from ReleaseWatcher is switched off for this virtual machine – install it in Home Assistant.';
+    const ha = homeAssistant({ installEnabled: false, url: 'http://ha:8123' });
+    ha.updates = ha.updates.map((u) => ({ ...u, installBlocker: blocked }));
+    const { el } = await create([
+      container({ kind: 'vm', vmid: 111, name: 'ha', aptEnabled: false, aptUpgradable: [], apps: [], homeAssistant: ha }),
+    ]);
+    expect(el.textContent).toContain('Mosquitto broker');
+    expect(el.textContent).toContain('install in Home Assistant');
+    expect(el.querySelector<HTMLAnchorElement>('.ha-item a')?.href).toBe('http://ha:8123/config/updates');
+    // No update buttons and no per-row or token hints.
+    const haRows = [...el.querySelectorAll<HTMLElement>('.item')].filter((r) => /Mosquitto|Dahua|Frigate/.test(r.textContent ?? ''));
+    expect(haRows.some((r) => [...r.querySelectorAll('button')].some((b) => b.textContent?.includes('Update')))).toBe(false);
+    expect(el.textContent).not.toContain('switched off for this virtual machine');
+    expect(el.textContent).not.toContain('after you add an access token');
+  });
+
+  it('offers "Update all" for several installable Home Assistant updates and shows live reads', async () => {
+    const ha = homeAssistant({ hasToken: true, url: 'http://ha:8123', tokenMasked: 'eyJh…abcd', entitiesSavedAt: null });
+    ha.updates = ha.updates.filter((u) => u.installable).map((u) => ({ ...u, installBlocker: null }));
+    const { fixture, el } = await create([
+      container({ kind: 'vm', vmid: 111, name: 'ha', aptEnabled: false, aptUpgradable: [], apps: [], homeAssistant: ha }),
+    ]);
+    expect(el.textContent).toContain('integrations read live through the API');
+    [...el.querySelectorAll<HTMLButtonElement>('.ha-item button')].find((b) => b.textContent?.includes('Update all'))!.click();
+    await settle(fixture);
+    expect(el.textContent).toContain('Install 2 Home Assistant update(s)?');
+    [...el.querySelectorAll<HTMLButtonElement>('.ha-item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const request = http.expectOne('/api/containers/1/home-assistant-update');
+    expect(request.request.body).toEqual({ backup: true });
+    request.flush({ message: 'busy' }, { status: 409, statusText: 'Conflict' });
+    await settle(fixture);
   });
 
   it('shows a hint linking to Settings when the node is not configured', async () => {

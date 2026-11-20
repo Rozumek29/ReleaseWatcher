@@ -92,6 +92,13 @@ export class ContainerSettingsDialog {
   protected checkCron = '';
   protected updateCores: number | null = null;
   protected updateMemoryMb: number | null = null;
+  protected homeAssistantUrl = '';
+  /** A new token; empty = keep the saved one. */
+  protected homeAssistantToken = '';
+  /** Remove the saved token on save. */
+  protected removeToken = false;
+  protected homeAssistantInstall = false;
+  protected readonly showToken = signal(false);
 
   protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
@@ -126,6 +133,11 @@ export class ContainerSettingsDialog {
           this.checkCron = container.checkCron ?? '';
           this.updateCores = container.updateCores;
           this.updateMemoryMb = container.updateMemoryMb;
+          this.homeAssistantUrl = container.homeAssistant?.url ?? '';
+          this.homeAssistantToken = '';
+          this.removeToken = false;
+          this.homeAssistantInstall = container.homeAssistant?.installEnabled ?? false;
+          this.showToken.set(false);
           this.apps.set(container.apps);
           this.appForm.set(null);
           this.confirmDeleteAppId.set(null);
@@ -162,6 +174,18 @@ export class ContainerSettingsDialog {
           checkCron: this.checkCron.trim() || null,
           ...(container.kind === 'lxc'
             ? { updateCores: this.updateCores || null, updateMemoryMb: this.updateMemoryMb || null }
+            : {}),
+          ...(container.kind === 'vm'
+            ? {
+                homeAssistantUrl: this.homeAssistantUrl.trim() || null,
+                homeAssistantInstall: this.homeAssistantInstall,
+                // Omitted keeps the saved token.
+                ...(this.removeToken
+                  ? { homeAssistantToken: null }
+                  : this.homeAssistantToken.trim()
+                    ? { homeAssistantToken: this.homeAssistantToken.trim() }
+                    : {}),
+              }
             : {}),
         }),
       );

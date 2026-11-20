@@ -1,4 +1,4 @@
-import { AppSettings, Container } from '../../core/models';
+import { AppSettings, Container, HomeAssistantInfo } from '../../core/models';
 
 /** Test data shared by the specs of the containers page. */
 export const proxmoxSettings = (configured: boolean): AppSettings => ({
@@ -69,6 +69,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
     { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
   ],
   restartReasons: [],
+  homeAssistant: null,
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',
@@ -94,5 +95,53 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
     },
   ],
   updatesAvailable: 2,
+  ...overrides,
+});
+
+/** Home Assistant OS found in a virtual machine: an app update and a marketplace integration update. */
+export const homeAssistant = (overrides: Partial<HomeAssistantInfo> = {}): HomeAssistantInfo => ({
+  detected: true,
+  coreVersion: '2026.11.2',
+  osVersion: '18.4',
+  entitiesSavedAt: '2026-11-20T11:39:04Z',
+  installEnabled: true,
+  url: null,
+  hasToken: false,
+  tokenMasked: null,
+  updates: [
+    {
+      id: 'app:core_mosquitto',
+      source: 'app',
+      name: 'Mosquitto broker',
+      installedVersion: '7.1.3',
+      latestVersion: '7.2.0',
+      releaseUrl: null,
+      platform: null,
+      installable: true,
+      installBlocker: null,
+    },
+    {
+      id: 'update.dahua_update',
+      source: 'entity',
+      name: 'Dahua',
+      installedVersion: '3.0.0',
+      latestVersion: '3.1.0',
+      releaseUrl: 'https://github.com/rroller/dahua/releases/tag/3.1.0',
+      platform: 'marketplace',
+      installable: true,
+      installBlocker: 'Add a Home Assistant access token in the settings of this virtual machine to install integration updates.',
+    },
+    {
+      id: 'update.frigate_server',
+      source: 'entity',
+      name: 'Frigate Server',
+      installedVersion: '0.18.0',
+      latestVersion: '0.18.3',
+      releaseUrl: null,
+      platform: 'frigate',
+      installable: false,
+      installBlocker: 'Home Assistant only announces this update – install it where it runs.',
+    },
+  ],
   ...overrides,
 });

@@ -41,6 +41,68 @@
                 <code>qemu-guest-agent</code> in the virtual machine and enable “QEMU Guest Agent” in its Proxmox
                 options. The output of an update appears when it has finished.
               </p>
+              <div class="field">
+                <label for="ct-ha-url">Home Assistant URL <span class="optional">Home Assistant OS only</span></label>
+                <input
+                  id="ct-ha-url"
+                  class="input mono"
+                  name="homeAssistantUrl"
+                  [(ngModel)]="homeAssistantUrl"
+                  placeholder="http://192.168.1.20:8123"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+                <span class="hint">
+                  Home Assistant OS is found automatically. Without URL and token, integration updates come from the
+                  states Home Assistant saves every 15 minutes and only Core, the Supervisor and apps can be updated
+                  from here.
+                </span>
+              </div>
+              <div class="field">
+                <label for="ct-ha-token">Long-lived access token</label>
+                <div class="input-with-action">
+                  <input
+                    id="ct-ha-token"
+                    class="input mono"
+                    name="homeAssistantToken"
+                    [type]="showToken() ? 'text' : 'password'"
+                    [(ngModel)]="homeAssistantToken"
+                    [placeholder]="removeToken ? 'removed when saved' : (c.homeAssistant?.tokenMasked ?? 'eyJhbGciOi…')"
+                    [disabled]="removeToken"
+                    autocomplete="off"
+                    spellcheck="false"
+                  />
+                  <button type="button" class="btn btn-ghost btn-sm" (click)="showToken.set(!showToken())">
+                    {{ showToken() ? 'Hide' : 'Show' }}
+                  </button>
+                  @if (c.homeAssistant?.hasToken) {
+                    <button type="button" class="btn btn-ghost btn-sm" (click)="removeToken = !removeToken; homeAssistantToken = ''">
+                      {{ removeToken ? 'Keep' : 'Remove' }}
+                    </button>
+                  }
+                </div>
+                <span class="hint">
+                  In Home Assistant: your profile → Security → Long-lived access tokens → Create token. With it,
+                  integration updates are read live (and can be installed when installing is switched on below). It is
+                  stored encrypted and sent only to the URL above. Home Assistant tokens cannot be limited to reading – a
+                  user without administrator rights keeps it as small as possible.
+                  @if (c.homeAssistant?.hasToken) {
+                    Leave empty to keep the current one.
+                  }
+                </span>
+              </div>
+              <div class="field">
+                <app-switch
+                  label="Install Home Assistant updates from ReleaseWatcher"
+                  [checked]="homeAssistantInstall"
+                  (toggled)="homeAssistantInstall = !homeAssistantInstall"
+                />
+                <span class="hint">
+                  Off: updates are only checked and reported – you install them in Home Assistant. On: Core, the
+                  Supervisor and apps are updated with the <code>ha</code> CLI and integrations through the API (needs
+                  the token).
+                </span>
+              </div>
             }
             <div class="field">
               <app-switch

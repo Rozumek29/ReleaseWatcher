@@ -181,6 +181,17 @@ export class ApiService {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });
   }
 
+  /**
+   * Installs Home Assistant updates of a Home Assistant OS virtual machine: `ids` selects them (omitted = every one
+   * that can be installed from here). `backup` decides about a backup (vzdump) first.
+   */
+  updateHomeAssistant(id: number, backup: boolean, ids?: string[]): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/home-assistant-update`, {
+      backup,
+      ...(ids ? { ids } : {}),
+    });
+  }
+
   /** Applications found in a running container with their GitHub repository (suggestions, nothing is saved). */
   detectContainerApps(containerId: number): Observable<DetectedApp[]> {
     return this.http.post<DetectedApp[]>(`${this.baseUrl}/containers/${containerId}/detect-apps`, {});

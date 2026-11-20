@@ -1,4 +1,6 @@
 import type { Database } from 'bun:sqlite';
+import type { SecretBox } from '../secret-box.ts';
+import type { HomeAssistantState } from './home-assistant.ts';
 import {
   type AptPackage,
   type Container,
@@ -31,6 +33,10 @@ interface ContainerRow {
   status: string | null;
   apt_upgradable: string | null;
   restart_reasons: string | null;
+  home_assistant: string | null;
+  home_assistant_url: string | null;
+  home_assistant_token: string | null;
+  home_assistant_install: number;
   last_checked_at: string | null;
   last_error: string | null;
   notified_signature: string | null;
@@ -96,7 +102,7 @@ function parseStrings(json: string | null): string[] {
   return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
 }
 
-const toContainer = (r: ContainerRow): Container => ({
+const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   id: r.id,
   kind: r.kind as TargetKind,
   vmid: r.vmid,
@@ -112,11 +118,20 @@ const toContainer = (r: ContainerRow): Container => ({
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
   restartReasons: parseStrings(r.restart_reasons),
+  homeAssistant: parseHomeAssistant(r.home_assistant),
+  homeAssistantUrl: r.home_assistant_url,
+  homeAssistantToken: secrets.decryptNullable(r.home_assistant_token),
+  homeAssistantInstall: r.home_assistant_install === 1,
   lastCheckedAt: r.last_checked_at,
   lastError: r.last_error,
   notifiedSignature: r.notified_signature,
   createdAt: r.created_at,
 });
+
+function parseHomeAssistant(json: string | null): HomeAssistantState | null {
+  const parsed = parseJson<HomeAssistantState>(json);
+  return parsed && Array.isArray(parsed.updates) ? parsed : null;
+}
 
 const toApp = (r: AppRow): ContainerApp => ({
   id: r.id,
@@ -161,22 +176,26 @@ export const RUNS_KEPT_PER_CONTAINER = 50;
 /** SQLite persistence of containers, their applications and runs (tables created by `RepositoryStore`). */
 export class ContainerStore {
   private readonly db: Database;
+  private readonly secrets: SecretBox;
+  private readonly toContainer = (r: ContainerRow): Container => toContainer(r, this.secrets);
 
-  constructor(db: Database) {
+  /** @param secrets encrypts the Home Assistant token (the `RepositoryStore`'s box: `store.secretBox`) */
+  constructor(db: Database, secrets: SecretBox) {
     this.db = db;
+    this.secrets = secrets;
   }
 
   list(): Container[] {
-    return this.db.query<ContainerRow, []>('SELECT * FROM containers ORDER BY vmid').all().map(toContainer);
+    return this.db.query<ContainerRow, []>('SELECT * FROM containers ORDER BY vmid').all().map(this.toContainer);
   }
 
   listEnabled(): Container[] {
-    return this.db.query<ContainerRow, []>('SELECT * FROM containers WHERE is_enabled = 1 ORDER BY vmid').all().map(toContainer);
+    return this.db.query<ContainerRow, []>('SELECT * FROM containers WHERE is_enabled = 1 ORDER BY vmid').all().map(this.toContainer);
   }
 
   get(id: number): Container | null {
     const row = this.db.query<ContainerRow, [number]>('SELECT * FROM containers WHERE id = ?').get(id);
-    return row ? toContainer(row) : null;
+    return row ? this.toContainer(row) : null;
   }
 
   existsVmid(vmid: number): boolean {
@@ -186,7 +205,7 @@ export class ContainerStore {
   /** The Proxmox host entry, when it has been added. */
   getNode(): Container | null {
     const row = this.db.query<ContainerRow, []>("SELECT * FROM containers WHERE kind = 'node'").get();
-    return row ? toContainer(row) : null;
+    return row ? this.toContainer(row) : null;
   }
 
   /** Adds the Proxmox host as a target (apt only). */
@@ -211,7 +230,8 @@ export class ContainerStore {
         `UPDATE containers SET
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
-           apt_upgradable = ?, restart_reasons = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
+           apt_upgradable = ?, restart_reasons = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
+           home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
       .run(
@@ -226,6 +246,10 @@ export class ContainerStore {
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
         c.restartReasons.length > 0 ? JSON.stringify(c.restartReasons) : null,
+        c.homeAssistant ? JSON.stringify(c.homeAssistant) : null,
+        c.homeAssistantUrl,
+        this.secrets.encryptNullable(c.homeAssistantToken),
+        c.homeAssistantInstall ? 1 : 0,
         c.lastCheckedAt,
         c.lastError,
         c.notifiedSignature,

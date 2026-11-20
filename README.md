@@ -44,6 +44,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
   agent) and of the Proxmox host on a cron schedule, over a single SSH connection – guests need no SSH server.
 - **Restart needed** hints (new kernel, `reboot-required`, processes using upgraded libraries) with a one-click
   restart.
+- **Home Assistant OS** in a virtual machine is found automatically: updates of Core, the OS, the Supervisor, apps
+  and integrations (e.g. from the built-in marketplace) – with or without a Home Assistant access token.
 - One-click updates: apt upgrades, community-scripts `update`, or your own scripts, with live console output and
   run history. **Updates never run automatically.**
 - Optional **`vzdump` backup** before every update, **temporary CPU/RAM boost** for heavy updates, temporary start
@@ -146,7 +148,22 @@ dedicated to it.
   enabled in its Proxmox options – no SSH server. Checks, apt upgrades, applications, backups, temporary starts
   (`qm start`, waiting up to 3 minutes for the agent) and restarts work like for containers; the output of an
   update appears when it has finished (the agent returns it at the end), and VMs are not resized for updates.
-  Appliances without apt (e.g. Home Assistant OS) can be added with apt switched off.
+  Appliances without apt can be added with apt switched off.
+- **Home Assistant OS** is found by every check of a virtual machine (`ID=haos` in `/etc/os-release`); apt is then
+  switched off. Core, the operating system, the Supervisor and apps (add-ons) are read live with the `ha` CLI on the
+  HAOS host. Updates of integrations (update entities, e.g. from the built-in marketplace, formerly HACS) are read in
+  one of two ways:
+  - **without a token** from `core.restore_state`, which Home Assistant saves every 15 minutes (the UI shows its age);
+  - **with a long-lived access token** and the Home Assistant URL (VM settings) live from the REST API
+    (`GET /api/states`). The token is stored encrypted and sent only from ReleaseWatcher to that URL – never to the
+    Proxmox node.
+
+  By default updates are **only checked and reported** (install them in Home Assistant). With *Install Home Assistant
+  updates from ReleaseWatcher* switched on in the VM settings, Core, the Supervisor and apps are installed with
+  `ha core update` / `ha supervisor update` / `ha apps update <slug>`; integrations need the token (`update.install`
+  through the API), and Core is restarted afterwards for custom integrations. The operating system update restarts
+  the VM and is always left to Home Assistant itself. Home Assistant tokens cannot be limited to reading – create the
+  token for a user without administrator rights to keep it small.
 - **Add host** adds the Proxmox node itself (apt only): it is checked like a container and upgraded with
   `apt-get dist-upgrade` (followed by `apt-get autoremove`), as Proxmox VE requires. There is no backup before host upgrades and the host is never
   rebooted automatically – see *Restart needed* below.
@@ -486,7 +503,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"? }` – `null` = global default, omitted = keep |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"? }` – `null` = global default / remove, omitted = keep (the token is returned only as `homeAssistant.hasToken` + `tokenMasked`) |
 | `DELETE` | `/api/containers/:id` | Remove a container (`409` while a task runs) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (`202`) |
 | `POST` | `/api/containers/update-all` | Update every enabled container with pending updates, one after another; `{ "backup"? }` → `202` with `{ containers, updates }` |
@@ -494,6 +511,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/restart` | Restart a running container (`pct reboot`) or schedule a reboot of the host → `202` (`409` while updates run, for a stopped container, or – for the host – while any task runs) |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` (host: `dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
+| `POST` | `/api/containers/:id/home-assistant-update` | Install Home Assistant updates of a Home Assistant OS VM → `202`; `{ "backup"?, "ids"? }` (`ids` from `homeAssistant.updates`, omitted = every installable one; `409` when one cannot be installed or installing is switched off for the VM) |
 | `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
 | `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |

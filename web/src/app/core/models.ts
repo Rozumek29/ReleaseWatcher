@@ -209,6 +209,7 @@ export interface AppStatus {
     withErrors: number;
     aptPending: number;
     appUpdatesAvailable: number;
+    homeAssistantUpdatesAvailable?: number;
   };
 }
 
@@ -263,6 +264,41 @@ export interface DetectedApp {
   alreadyAdded: boolean;
 }
 
+/** One pending update of Home Assistant OS. */
+export interface HomeAssistantUpdate {
+  /** `core`, `os`, `supervisor`, `app:<slug>` or the entity ID (`update.…`) of an integration. */
+  id: string;
+  source: 'core' | 'os' | 'supervisor' | 'app' | 'entity';
+  name: string;
+  installedVersion: string | null;
+  latestVersion: string;
+  releaseUrl: string | null;
+  /** Integration providing the update entity (e.g. `marketplace`); null for Supervisor components. */
+  platform: string | null;
+  /** Home Assistant can install it; false = the entity only announces an update. */
+  installable: boolean;
+  /** Why it cannot be installed from ReleaseWatcher; null = it can. */
+  installBlocker: string | null;
+}
+
+/** Home Assistant OS in a virtual machine (`null` for containers and the host). */
+export interface HomeAssistantInfo {
+  /** Found by the last check. */
+  detected: boolean;
+  coreVersion: string | null;
+  osVersion: string | null;
+  /** When Home Assistant saved the states the integration updates come from (no token); null = read live. */
+  entitiesSavedAt: string | null;
+  updates: HomeAssistantUpdate[];
+  /** Updates may be installed from ReleaseWatcher; false = they are only checked and reported. */
+  installEnabled: boolean;
+  /** Base URL of the REST API; null = not configured. */
+  url: string | null;
+  hasToken: boolean;
+  /** Masked hint of the saved token. */
+  tokenMasked: string | null;
+}
+
 export interface Container {
   id: number;
   /**
@@ -293,6 +329,8 @@ export interface Container {
   aptUpgradable: AptPackage[];
   /** Why a restart is needed (last check); empty = none. */
   restartReasons: string[];
+  /** Home Assistant OS of a virtual machine; null for containers and the host. */
+  homeAssistant: HomeAssistantInfo | null;
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
@@ -301,7 +339,7 @@ export interface Container {
   /** The check/update running right now (its live log); null while waiting for its turn in "update all". */
   activeRunId: number | null;
   apps: ContainerApp[];
-  /** apt counts as one. */
+  /** apt counts as one, every Home Assistant update as one. */
   updatesAvailable: number;
 }
 
@@ -314,6 +352,12 @@ export interface UpdateContainerRequest {
   checkCron: string | null;
   updateCores?: number | null;
   updateMemoryMb?: number | null;
+  /** Virtual machines: Home Assistant REST API URL; null removes it. */
+  homeAssistantUrl?: string | null;
+  /** Omitted = keep, null = remove, value = set. */
+  homeAssistantToken?: string | null;
+  /** Install Home Assistant updates from ReleaseWatcher (false = check only). */
+  homeAssistantInstall?: boolean;
 }
 
 export interface ContainerAppRequest {
@@ -336,7 +380,7 @@ export interface DiscoveredContainer {
   added: boolean;
 }
 
-export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart';
+export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart' | 'home-assistant-update';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {

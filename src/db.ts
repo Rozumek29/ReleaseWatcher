@@ -201,6 +201,12 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE container_runs ADD COLUMN resume TEXT;`,
   // Reasons why a container or the host should be restarted (JSON array of strings, from the last check).
   `ALTER TABLE containers ADD COLUMN restart_reasons TEXT;`,
+  // Home Assistant OS in virtual machines: pending updates (JSON), the REST API connection (token encrypted) and
+  // whether its updates may be installed from here (off = check only).
+  `ALTER TABLE containers ADD COLUMN home_assistant TEXT;
+   ALTER TABLE containers ADD COLUMN home_assistant_url TEXT;
+   ALTER TABLE containers ADD COLUMN home_assistant_token TEXT;
+   ALTER TABLE containers ADD COLUMN home_assistant_install INTEGER NOT NULL DEFAULT 0;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -261,6 +267,11 @@ export class RepositoryStore {
   /** The shared connection (used by other stores such as `ContainerStore`). */
   get database(): Database {
     return this.db;
+  }
+
+  /** Encrypts secrets of other stores sharing the connection (`ContainerStore`). */
+  get secretBox(): SecretBox {
+    return this.secrets;
   }
 
   list(): WatchedRepository[] {

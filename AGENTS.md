@@ -105,8 +105,9 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 ### Secrets
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
-  Proxmox SSH private key, password hashes, session tokens and the setup code are secrets (the key is exposed only as `sshKeyConfigured`, a repository token as
-  `hasOwnToken` + masked value). The API never
+  Proxmox SSH private key, the Home Assistant access token of a VM, password hashes, session tokens and the setup code are secrets
+  (the key is exposed only as `sshKeyConfigured`, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
+  `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.
 - Secrets are also **encrypted at rest** (AES-256-GCM, `SecretBox` in `src/secret-box.ts`; key from `ENCRYPTION_KEY`

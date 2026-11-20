@@ -7,7 +7,7 @@ import { silentLogger } from '../src/log.ts';
 import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeShell, FakeSource, guestJson, RecordingNotifier, release } from './helpers.ts';
+import { FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
 
 const PCT_LIST = 'VMID       Status     Lock         Name\n101        running                 vaultwarden\n102        stopped                 old\n';
 const QM_LIST =
@@ -23,6 +23,8 @@ describe('containers API', () => {
   let source: FakeSource;
   let notifier: RecordingNotifier;
   let baseUrl: URL;
+  /** Answers requests to the Home Assistant REST API (tests never reach a real one). */
+  let haFetch: (url: string, init?: RequestInit) => Promise<Response>;
 
   const request = async (method: string, url: string, payload?: unknown, headers: Record<string, string> = {}) => {
     const response = await fetch(new URL(url, baseUrl), {
@@ -48,7 +50,23 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    app = await buildApp({ store, settings, source, notifiers: [notifier], log: silentLogger, shell, reconnectDelayMs: 0, resourcePollMs: 0, promptIdleMs: 40, auth: { requireAuth: false } });
+    haFetch = async () => {
+      throw new TypeError('Home Assistant is not reachable in this test');
+    };
+    app = await buildApp({
+      store,
+      settings,
+      source,
+      notifiers: [notifier],
+      log: silentLogger,
+      shell,
+      reconnectDelayMs: 0,
+      resourcePollMs: 0,
+      promptIdleMs: 40,
+      homeAssistantFetch: (url, init) => haFetch(url, init),
+      homeAssistantPollMs: 0,
+      auth: { requireAuth: false },
+    });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
 
@@ -153,6 +171,123 @@ describe('containers API', () => {
     assert.deepEqual(added.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['lxc:101', 'lxc:102']);
   });
 
+  it('finds Home Assistant OS in a virtual machine and installs its updates', async () => {
+    shell.on(/^qm status 137$/, { output: 'status: running\n' });
+    shell.on(/^qm guest exec 137 -- sh -lc .*ID=haos/, { output: HAOS_PROBE_OUTPUT });
+    const vm = (await request('POST', '/api/containers', { vmid: 137, name: 'ha' })).json();
+    await app.containers.wait(vm.id);
+
+    // Without a token: Supervisor components live, integrations from the saved states; HAOS has no apt.
+    let dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    assert.equal(dto.lastError, null);
+    assert.equal(dto.aptEnabled, false);
+    assert.deepEqual(dto.aptUpgradable, []);
+    assert.equal(dto.homeAssistant.detected, true);
+    assert.equal(dto.homeAssistant.coreVersion, '2026.11.2');
+    assert.equal(dto.homeAssistant.entitiesSavedAt, new Date(1795180744 * 1000).toISOString());
+    assert.equal(dto.homeAssistant.hasToken, false);
+    // Check-only by default: nothing is installed from ReleaseWatcher, "update all" leaves Home Assistant out.
+    assert.equal(dto.homeAssistant.installEnabled, false);
+    assert.ok(dto.homeAssistant.updates.every((u: { installBlocker: string | null }) => /switched off/.test(u.installBlocker ?? '')));
+    let started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { backup: false });
+    assert.equal(started.status, 409);
+    assert.match(started.json().title, /switched off/);
+    assert.deepEqual((await request('POST', `/api/containers/${vm.id}/update-all`, { backup: false })).json(), {
+      containers: 0,
+      updates: 0,
+    });
+    dto = (await request('PUT', `/api/containers/${vm.id}`, { ...dto, homeAssistantInstall: true })).json();
+    assert.equal(dto.homeAssistant.installEnabled, true);
+    assert.deepEqual(
+      dto.homeAssistant.updates.map((u: { id: string; installBlocker: string | null }) => [u.id, u.installBlocker !== null]),
+      [
+        ['app:core_mosquitto', false],
+        ['update.dahua_update', true],
+        ['update.frigate_server', true],
+      ],
+    );
+    assert.equal(dto.updatesAvailable, 3);
+    assert.deepEqual(
+      notifier.containerSent.at(-1)?.apps.map((a) => `${a.name} ${a.latestVersion}`),
+      ['Mosquitto broker 7.2.0', 'Dahua 3.1.0', 'Frigate Server 0.18.3'],
+    );
+    const status = (await request('GET', '/api/status')).json();
+    assert.equal(status.containers.homeAssistantUpdatesAvailable, 3);
+
+    // Integrations need the token; the operating system and unknown updates are refused.
+    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.dahua_update'], backup: false });
+    assert.equal(started.status, 409);
+    assert.match(started.json().title, /access token/);
+    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.nope'], backup: false });
+    assert.equal(started.status, 409);
+    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.frigate_server'], backup: false });
+    assert.match(started.json().title, /only announces/);
+
+    // The token is stored encrypted and never returned; a URL is required with it.
+    assert.equal((await request('PUT', `/api/containers/${vm.id}`, { ...dto, homeAssistantToken: 'secret-ha-token' })).status, 400);
+    const saved = await request('PUT', `/api/containers/${vm.id}`, {
+      ...dto,
+      homeAssistantUrl: 'https://ha.example.com:8123/',
+      homeAssistantToken: 'secret-ha-token',
+    });
+    assert.equal(saved.status, 200);
+    assert.doesNotMatch(saved.text, /secret-ha-token/);
+    assert.equal(saved.json().homeAssistant.url, 'https://ha.example.com:8123');
+    assert.equal(saved.json().homeAssistant.hasToken, true);
+    const raw = store.database.query<{ t: string }, []>('SELECT home_assistant_token AS t FROM containers').get()!.t;
+    assert.match(raw, /^enc:v1:/);
+    // Omitted keeps the token (the UI never sends it back).
+    assert.equal((await request('PUT', `/api/containers/${vm.id}`, saved.json())).json().homeAssistant.hasToken, true);
+
+    // With the token the integrations are read live.
+    const requests: { method: string; url: string; auth: string | null; body: string | null }[] = [];
+    let dahua = haState('update.dahua_update', 'on', '3.0.0', '3.1.0', 'Dahua');
+    let coreUp = true;
+    haFetch = async (url, init) => {
+      const headers = new Headers(init?.headers);
+      requests.push({ method: init?.method ?? 'GET', url, auth: headers.get('authorization'), body: (init?.body as string) ?? null });
+      if (!coreUp) throw new TypeError('Connection refused');
+      if (url.endsWith('/api/services/update/install')) {
+        dahua = haState('update.dahua_update', 'off', '3.1.0', '3.1.0', 'Dahua');
+        return Response.json([]);
+      }
+      if (url.endsWith('/api/states/update.dahua_update')) return Response.json(dahua);
+      return Response.json([dahua, haState('update.places_update', 'off', 'v3.0.3', 'v3.0.3')]);
+    };
+    await request('POST', `/api/containers/${vm.id}/check`);
+    await app.containers.wait(vm.id);
+    dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    assert.equal(dto.lastError, null);
+    assert.equal(dto.homeAssistant.entitiesSavedAt, null);
+    assert.equal(requests[0]!.url, 'https://ha.example.com:8123/api/states');
+    assert.equal(requests[0]!.auth, 'Bearer secret-ha-token');
+
+    // Install everything: the integration through the API, the app with the ha CLI, then a Core restart.
+    shell.on(/^qm guest exec 137 --timeout \d+ -- sh -c [^]*ha apps update core_mosquitto/, { output: guestJson('Updated\n', 0) });
+    shell.on(/^qm guest exec 137 --timeout \d+ -- sh -c [^]*ha core restart/, () => {
+      coreUp = false;
+      setTimeout(() => (coreUp = true), 20);
+      return { output: guestJson('Command completed successfully.\n', 0) };
+    });
+    requests.length = 0;
+    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { backup: false });
+    assert.equal(started.status, 202);
+    const run = await app.containers.wait(vm.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.equal(run?.kind, 'home-assistant-update');
+    const install = requests.find((r) => r.url.endsWith('/api/services/update/install'));
+    assert.equal(install?.method, 'POST');
+    assert.deepEqual(JSON.parse(install!.body!), { entity_id: 'update.dahua_update' });
+    assert.match(run?.output ?? '', /Dahua installed \(3\.1\.0\)/);
+    assert.match(run?.output ?? '', /Restarting Home Assistant Core to load the updated integrations/);
+    assert.match(run?.output ?? '', /Home Assistant is running/);
+    const order = shell.detached.map((d) => (/ha apps update/.test(d.command) ? 'app' : /ha core restart/.test(d.command) ? 'restart' : '?'));
+    assert.deepEqual(order.slice(-2), ['app', 'restart']);
+    // The token never reaches the node.
+    assert.equal(shell.commands.some((c) => c.includes('secret-ha-token')), false);
+    assert.equal(shell.detached.some((d) => d.command.includes('secret-ha-token')), false);
+  });
+
   it('rejects containers that do not exist and duplicates', async () => {
     assert.equal((await request('POST', '/api/containers', { vmid: 999 })).status, 400);
     await addContainer();
@@ -202,12 +337,12 @@ describe('containers API', () => {
     assert.equal(notifier.containerSent.length, 2);
 
     const status = (await request('GET', '/api/status')).json();
-    assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, aptPending: 1, appUpdatesAvailable: 1 });
+    assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, aptPending: 1, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
   });
 
   const getContainer = async (id: number) => {
     const { ContainerStore } = await import('../src/proxmox/store.ts');
-    return new ContainerStore(store.database).get(id)!;
+    return new ContainerStore(store.database, store.secretBox).get(id)!;
   };
 
   it('runs apt upgrade after a backup and refreshes the state', async () => {
@@ -479,7 +614,7 @@ describe('containers API', () => {
 
   it('re-attaches to an update still running on the node after a restart and restores resources', async () => {
     const container = await addContainer();
-    const containerStore = new ContainerStore(store.database);
+    const containerStore = new ContainerStore(store.database, store.secretBox);
     const run = containerStore.startRun(container.id, null, 'apt-upgrade', 'manual');
     containerStore.saveRunOutput(run.id, '» Updating…\n');
     containerStore.setRunResume(run.id, { unit: `releasewatcher-run-${run.id}-update`, step: 'update', timeoutSeconds: 600, startedContainer: false });
