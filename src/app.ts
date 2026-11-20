@@ -105,6 +105,10 @@ export interface AppDeps {
   promptIdleMs?: number;
   /** Downloads community-scripts scripts for app detection (tests pass a fake; defaults to GitHub). */
   fetchAppScript?: (slug: string) => Promise<string | null>;
+  /** `fetch` for the Home Assistant REST API (tests pass a fake; defaults to the global `fetch`). */
+  homeAssistantFetch?: (input: string, init?: RequestInit) => Promise<Response>;
+  /** Pause between polls of Home Assistant during updates (tests use 0). */
+  homeAssistantPollMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -317,7 +321,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
   await auth.bootstrap(deps.auth?.bootstrap ?? null);
   auth.ensureSetupCode();
-  const containerStore = new ContainerStore(store.database);
+  const containerStore = new ContainerStore(store.database, store.secretBox);
   const interrupted = containerStore.failInterruptedRuns();
   if (interrupted > 0) {
     log.warn({ count: interrupted }, 'Marked runs interrupted by a restart as failed');
@@ -332,6 +336,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.resourcePollMs === undefined ? {} : { resourcePollMs: deps.resourcePollMs }),
     ...(deps.promptIdleMs === undefined ? {} : { promptIdleMs: deps.promptIdleMs }),
     ...(deps.fetchAppScript === undefined ? {} : { fetchAppScript: deps.fetchAppScript }),
+    ...(deps.homeAssistantFetch === undefined ? {} : { homeAssistantFetch: deps.homeAssistantFetch }),
+    ...(deps.homeAssistantPollMs === undefined ? {} : { homeAssistantPollMs: deps.homeAssistantPollMs }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,

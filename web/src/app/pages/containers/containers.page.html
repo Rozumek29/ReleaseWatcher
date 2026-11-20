@@ -452,7 +452,104 @@
                 }
               </div>
             }
-  
+              @if (c.homeAssistant?.detected) {
+              @let ha = c.homeAssistant!;
+              <div class="item ha-item">
+                <div class="item-main">
+                  <span class="item-name"><app-icon name="home" [size]="14" /> Home Assistant</span>
+                  <span class="versions mono">Core {{ ha.coreVersion ?? '?' }} · OS {{ ha.osVersion ?? '?' }}</span>
+                  @if (ha.updates.length === 0) {
+                    <span class="badge badge-success">Up to date</span>
+                  }
+                  @if (ha.entitiesSavedAt) {
+                    <span class="muted small" title="Without an access token, integration updates come from the states Home Assistant saves every 15 minutes">
+                      integrations as of {{ ha.entitiesSavedAt | relativeTime: now() }}
+                    </span>
+                  } @else if (ha.hasToken) {
+                    <span class="muted small">integrations read live through the API</span>
+                  }
+                  @if (!ha.installEnabled && ha.updates.length > 0) {
+                    <span class="muted small">
+                      install in Home Assistant
+                      @if (ha.url) {
+                        – <a [href]="ha.url + '/config/updates'" target="_blank" rel="noopener">open updates</a>
+                      }
+                    </span>
+                  }
+                </div>
+                @if (installableHa(c).length > 1) {
+                  <div class="item-actions">
+                    @if (confirming() === 'ha-' + c.id) {
+                      <span class="confirm-text warn">Install {{ installableHa(c).length }} Home Assistant update(s)?</span>
+                      <label class="backup-check" [class.disabled]="!backupStorage()">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                        Backup first
+                        @if (backupStorage(); as storage) {
+                          <span class="muted mono">→ {{ storage }}</span>
+                        } @else {
+                          <span class="muted">(choose a storage in Settings)</span>
+                        }
+                      </label>
+                      <button type="button" class="btn btn-sm" (click)="updateHomeAssistant(c, null)">Yes</button>
+                      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                    } @else {
+                      <button type="button" class="btn btn-sm" (click)="ask('ha-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" title="Integrations and apps first, Home Assistant Core last">
+                        <app-icon name="arrowUp" [size]="14" /> Update all
+                      </button>
+                    }
+                  </div>
+                }
+                @if (ha.installEnabled && !ha.hasToken && hasBlockedEntity(c)) {
+                  <p class="muted small ha-hint">
+                    Integration updates can be installed after you add an access token.
+                    <button type="button" class="link-btn" (click)="editing.set(c)">Add a token</button>
+                  </p>
+                }
+              </div>
+              @for (u of ha.updates; track u.id) {
+                <div class="item">
+                  <div class="item-main">
+                    <span class="item-name"><app-icon name="home" [size]="14" /> {{ u.name }}</span>
+                    <span class="versions mono">{{ u.installedVersion ?? '?' }} <span class="arrow">→</span> {{ u.latestVersion }}</span>
+                    <span class="badge badge-warning">Update available</span>
+                    <span class="muted small">{{ haSourceLabel(u) }}</span>
+                    @if (u.releaseUrl) {
+                      <a class="muted small" [href]="u.releaseUrl" target="_blank" rel="noopener">Release notes</a>
+                    }
+                  </div>
+                  <div class="item-actions">
+                    @if (confirming() === 'ha-' + c.id + '-' + u.id) {
+                      <span class="confirm-text warn">Update {{ u.name }}?</span>
+                      <label class="backup-check" [class.disabled]="!backupStorage()">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                        Backup first
+                        @if (backupStorage(); as storage) {
+                          <span class="muted mono">→ {{ storage }}</span>
+                        } @else {
+                          <span class="muted">(choose a storage in Settings)</span>
+                        }
+                      </label>
+                      <button type="button" class="btn btn-sm" (click)="updateHomeAssistant(c, u)">Yes</button>
+                      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                    } @else if (!u.installBlocker) {
+                      <button
+                        type="button"
+                        class="btn btn-sm"
+                        (click)="ask('ha-' + c.id + '-' + u.id, c)"
+                        [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                        [title]="u.source === 'entity' ? 'update.install through the Home Assistant API' : 'ha CLI on the Home Assistant OS host'"
+                      >
+                        <app-icon name="arrowUp" [size]="14" /> Update
+                      </button>
+                    }
+                  </div>
+                  @if (u.installBlocker && ha.installEnabled && !waitsForToken(c, u)) {
+                    <p class="muted small ha-hint">{{ u.installBlocker }}</p>
+                  }
+                </div>
+              }
+            }
+
             @for (a of c.apps; track a.id) {
               <div class="item">
                 <div class="item-main">
@@ -507,7 +604,7 @@
                 }
               </div>
             } @empty {
-              @if (c.kind !== 'node') {
+              @if (c.kind !== 'node' && !c.homeAssistant?.detected) {
               <div class="item muted small">
                 No applications configured.
                 <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>

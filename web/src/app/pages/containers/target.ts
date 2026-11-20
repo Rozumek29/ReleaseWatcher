@@ -4,7 +4,7 @@ import { Container, RunKind } from '../../core/models';
 export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
   c.kind === 'node' ? 'Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : `CT ${c.vmid}`;
 
-/** "Check", "apt upgrade", "Application update" or "Restart". */
+/** "Check", "apt upgrade", "Application update", "Home Assistant update" or "Restart". */
 export function kindLabel(kind: RunKind): string {
   switch (kind) {
     case 'check':
@@ -15,5 +15,7 @@ export function kindLabel(kind: RunKind): string {
       return 'Application update';
     case 'restart':
       return 'Restart';
+    case 'home-assistant-update':
+      return 'Home Assistant update';
   }
 }

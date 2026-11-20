@@ -1,4 +1,5 @@
 import { compareVersions } from '../version.ts';
+import { type HomeAssistantState, type InstallContext, installableUpdates } from './home-assistant.ts';
 
 export const TARGET_KINDS = ['lxc', 'vm', 'node'] as const;
 /**
@@ -43,6 +44,14 @@ export interface Container {
   aptUpgradable: AptPackage[];
   /** Why the container (or host) should be restarted, from the last check; empty = no restart needed. */
   restartReasons: string[];
+  /** Home Assistant OS found in this virtual machine by the last check (its pending updates); null = not HAOS. */
+  homeAssistant: HomeAssistantState | null;
+  /** Base URL of Home Assistant for the REST API (live checks, integration updates); null = not configured. */
+  homeAssistantUrl: string | null;
+  /** Long-lived access token for the REST API (secret, encrypted at rest); null = read saved states without it. */
+  homeAssistantToken: string | null;
+  /** Install Home Assistant updates from ReleaseWatcher; false (default) = only check and report them. */
+  homeAssistantInstall: boolean;
   lastCheckedAt: string | null;
   lastError: string | null;
   /** Fingerprint of the pending updates already notified about (prevents repeated notifications). */
@@ -84,7 +93,7 @@ export interface ContainerApp {
   createdAt: string;
 }
 
-export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart'] as const;
+export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart', 'home-assistant-update'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 export type RunTrigger = 'manual' | 'schedule';
@@ -137,11 +146,20 @@ export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 
 }
 
 /** One update of a container started by "update all". */
-export type PendingUpdate = { kind: 'apt-upgrade' } | { kind: 'app-update'; appId: number };
+export type PendingUpdate = { kind: 'apt-upgrade' } | { kind: 'app-update'; appId: number } | { kind: 'home-assistant-update' };
+
+/** True when the Home Assistant API can be used (URL and token configured). */
+export const hasHomeAssistantApi = (c: Pick<Container, 'homeAssistantUrl' | 'homeAssistantToken'>): boolean =>
+  c.homeAssistantUrl !== null && c.homeAssistantToken !== null;
+
+/** Whether (and which) Home Assistant updates of a guest may be installed from ReleaseWatcher. */
+export const homeAssistantInstallContext = (
+  c: Pick<Container, 'homeAssistantUrl' | 'homeAssistantToken' | 'homeAssistantInstall'>,
+): InstallContext => ({ enabled: c.homeAssistantInstall, hasApi: hasHomeAssistantApi(c) });
 
 /**
  * Updates "update all" runs in a container, in order: apt first, then every application with a known newer
- * version and an update command. The Proxmox host, disabled containers and stopped containers that may not be
+ * version and an update command, then the Home Assistant updates that can be installed from here. The Proxmox host, disabled containers and stopped containers that may not be
  * started are left out (they are updated by hand).
  */
 export function pendingUpdates(container: Container, apps: readonly ContainerApp[]): PendingUpdate[] {
@@ -159,6 +177,9 @@ export function pendingUpdates(container: Container, apps: readonly ContainerApp
     if (app.updateCommand && appUpdateAvailable(app) === true) {
       updates.push({ kind: 'app-update', appId: app.id });
     }
+  }
+  if (installableUpdates(container.homeAssistant, homeAssistantInstallContext(container)).length > 0) {
+    updates.push({ kind: 'home-assistant-update' });
   }
   return updates;
 }
@@ -763,9 +784,13 @@ export class OutputCleaner {
 }
 
 /** Fingerprint of everything pending in a container; null when nothing is pending. */
-export function pendingSignature(container: Pick<Container, 'aptUpgradable'>, apps: readonly ContainerApp[]): string | null {
+export function pendingSignature(
+  container: Pick<Container, 'aptUpgradable' | 'homeAssistant'>,
+  apps: readonly ContainerApp[],
+): string | null {
   const parts = [
     ...container.aptUpgradable.map((p) => `apt:${p.name}=${p.newVersion}`),
+    ...(container.homeAssistant?.updates ?? []).map((u) => `ha:${u.id}=${u.latestVersion}`),
     ...apps.filter((a) => appUpdateAvailable(a)).map((a) => `app:${a.id}=${a.latestVersion}`),
   ].toSorted();
   return parts.length > 0 ? parts.join('|') : null;

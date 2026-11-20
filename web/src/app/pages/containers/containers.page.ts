@@ -5,7 +5,7 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, Container, ContainerApp, DiscoveredContainer, Run } from '../../core/models';
+import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
@@ -334,6 +334,45 @@ export class ContainersPage {
     return this.startRun(container, () => this.api.restartContainer(container.id));
   }
 
+  /** Installs one Home Assistant update, or every installable one (`update` null). */
+  protected updateHomeAssistant(container: Container, update: HomeAssistantUpdate | null): Promise<void> {
+    this.confirming.set(null);
+    const backup = this.backupFirst();
+    return this.startRun(container, () =>
+      this.api.updateHomeAssistant(container.id, backup, update ? [update.id] : undefined),
+    );
+  }
+
+  /** Home Assistant updates that can be installed from here. */
+  protected installableHa(container: Container): HomeAssistantUpdate[] {
+    return container.homeAssistant?.updates.filter((u) => !u.installBlocker) ?? [];
+  }
+
+  /** The update could be installed with an access token (the hint above the list explains it once). */
+  protected waitsForToken(container: Container, update: HomeAssistantUpdate): boolean {
+    return update.source === 'entity' && update.installable && !container.homeAssistant?.hasToken;
+  }
+
+  /** An integration update waits for an access token. */
+  protected hasBlockedEntity(container: Container): boolean {
+    return container.homeAssistant?.updates.some((u) => this.waitsForToken(container, u)) ?? false;
+  }
+
+  protected haSourceLabel(update: HomeAssistantUpdate): string {
+    switch (update.source) {
+      case 'core':
+      case 'os':
+      case 'supervisor':
+        return 'System';
+      case 'app':
+        return 'App';
+      case 'entity':
+        return update.platform === 'marketplace' || update.platform === 'hacs'
+          ? 'Integration (marketplace)'
+          : `Integration${update.platform ? ` (${update.platform})` : ''}`;
+    }
+  }
+
   /** A restart is suggested and possible right now (a stopped container starts fresh anyway). */
   protected needsRestart(container: Container): boolean {
     return restartPending(container);
@@ -435,7 +474,9 @@ export class ContainersPage {
       return 0;
     }
     const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;
-    return apt + container.apps.filter((a) => a.updateAvailable === true && !!a.updateCommand).length;
+    // Home Assistant updates run as one task.
+    const ha = this.installableHa(container).length > 0 ? 1 : 0;
+    return apt + ha + container.apps.filter((a) => a.updateAvailable === true && !!a.updateCommand).length;
   }
 
   /** Runs every pending update of one container, one after another (a single backup before the first one). */

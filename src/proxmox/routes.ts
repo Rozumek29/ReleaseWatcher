@@ -1,6 +1,7 @@
 import type { RepositoryStore } from '../db.ts';
 import { fullName } from '../domain.ts';
 import { errorMessage, problem, validationProblem } from '../http.ts';
+import { maskSecret } from '../settings.ts';
 import { validateCron } from '../cron.ts';
 import { type ObjectSchema, parseId, readBody, RequestValidationError, validate } from '../validation.ts';
 import {
@@ -9,6 +10,7 @@ import {
   type ContainerApp,
   DEFAULT_APP_TIMEOUT_SECONDS,
   type DiscoveredContainer,
+  homeAssistantInstallContext,
   LATEST_SOURCES,
   type LatestSource,
   MAX_APP_TIMEOUT_SECONDS,
@@ -21,8 +23,14 @@ import {
   type Run,
   targetLabel,
 } from './domain.ts';
+import { installBlocker, normalizeHomeAssistantUrl } from './home-assistant.ts';
 import type { ContainerScheduler } from './scheduler.ts';
-import { ContainerBusyError, type ContainerService, DetectionUnavailableError } from './service.ts';
+import {
+  ContainerBusyError,
+  type ContainerService,
+  DetectionUnavailableError,
+  HomeAssistantUpdateError,
+} from './service.ts';
 import { ShellNotConfiguredError } from './ssh.ts';
 import type { AppInput, ContainerStore } from './store.ts';
 import { type ContainerUpdater, UpdateAllRunningError, type UpdateRequest } from './updater.ts';
@@ -56,8 +64,20 @@ const updateContainerSchema: ObjectSchema = {
     checkCron: { type: 'string', nullable: true, maxLength: 200 },
     updateCores: { type: 'integer', nullable: true },
     updateMemoryMb: { type: 'integer', nullable: true },
+    homeAssistantUrl: { type: 'string', nullable: true, maxLength: 500 },
+    homeAssistantToken: { type: 'string', nullable: true, maxLength: 1000 },
+    homeAssistantInstall: { type: 'boolean' },
   },
   required: ['name', 'isEnabled', 'aptEnabled'],
+};
+
+/** Body of `POST /api/containers/:id/home-assistant-update`: `ids` selects updates (omitted = all installable). */
+const homeAssistantUpdateSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    backup: { type: 'boolean', nullable: true },
+    ids: { type: 'array', nullable: true, maxItems: 100, items: { type: 'string', maxLength: 300 } },
+  },
 };
 
 /** Optional body of the update endpoints: `backup` overrides the container/global default for this update. */
@@ -66,7 +86,7 @@ const updateOptionsSchema: ObjectSchema = {
   properties: { backup: { type: 'boolean', nullable: true } },
 };
 
-async function readUpdateOptions(req: Request): Promise<{ backup?: boolean | null }> {
+async function readUpdateOptions<T = { backup?: boolean | null }>(req: Request, schema = updateOptionsSchema): Promise<Partial<T>> {
   const text = await req.text();
   if (!text.trim()) {
     return {};
@@ -77,7 +97,7 @@ async function readUpdateOptions(req: Request): Promise<{ backup?: boolean | nul
   } catch {
     throw new RequestValidationError('body must be valid JSON');
   }
-  return validate(json, updateOptionsSchema, 'body') as { backup?: boolean | null };
+  return validate(json, schema, 'body') as Partial<T>;
 }
 
 const appSchema: ObjectSchema = {
@@ -118,7 +138,11 @@ async function guard(action: () => Response | Promise<Response>): Promise<Respon
     if (error instanceof ShellNotConfiguredError) {
       return problem(409, error.message);
     }
-    if (error instanceof ContainerBusyError || error instanceof UpdateAllRunningError) {
+    if (
+      error instanceof ContainerBusyError ||
+      error instanceof UpdateAllRunningError ||
+      error instanceof HomeAssistantUpdateError
+    ) {
       return problem(409, error.message);
     }
     throw error;
@@ -150,6 +174,28 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     };
   };
 
+  /** Home Assistant OS of a virtual machine (null for containers); the token only as `hasToken` + a masked hint. */
+  const homeAssistantDto = (c: Container) => {
+    if (c.kind !== 'vm') {
+      return null;
+    }
+    const context = homeAssistantInstallContext(c);
+    return {
+      /** Found by the last check (false = not Home Assistant OS, or not checked yet). */
+      detected: c.homeAssistant !== null,
+      coreVersion: c.homeAssistant?.coreVersion ?? null,
+      osVersion: c.homeAssistant?.osVersion ?? null,
+      /** When Home Assistant saved the states the integration updates were read from; null = read live (or unknown). */
+      entitiesSavedAt: c.homeAssistant?.entitiesSavedAt ?? null,
+      updates: (c.homeAssistant?.updates ?? []).map((u) => ({ ...u, installBlocker: installBlocker(u, context) })),
+      /** Updates may be installed from ReleaseWatcher (false = only checked and reported). */
+      installEnabled: c.homeAssistantInstall,
+      url: c.homeAssistantUrl,
+      hasToken: c.homeAssistantToken !== null,
+      tokenMasked: maskSecret(c.homeAssistantToken, 4),
+    };
+  };
+
   const containerDto = (c: Container, apps = containers.listApps(c.id)) => {
     const appDtos = apps.map(appDto);
     return {
@@ -173,6 +219,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       aptUpgradable: c.aptUpgradable,
       /** Why a restart is needed (last check); empty = none. */
       restartReasons: c.restartReasons,
+      homeAssistant: homeAssistantDto(c),
       lastCheckedAt: c.lastCheckedAt,
       lastError: c.lastError,
       createdAt: c.createdAt,
@@ -181,8 +228,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       /** The check/update running right now (its live log: `GET /api/runs/:id`); null while waiting in "update all". */
       activeRunId: service.activeRunId(c.id),
       apps: appDtos,
-      /** apt counts as one pending update. */
-      updatesAvailable: (c.aptUpgradable.length > 0 ? 1 : 0) + appDtos.filter((a) => a.updateAvailable).length,
+      /** apt counts as one pending update, every Home Assistant update as one. */
+      updatesAvailable:
+        (c.aptUpgradable.length > 0 ? 1 : 0) +
+        appDtos.filter((a) => a.updateAvailable).length +
+        (c.homeAssistant?.updates.length ?? 0),
     };
   };
 
@@ -426,6 +476,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           checkCron?: string | null;
           updateCores?: number | null;
           updateMemoryMb?: number | null;
+          homeAssistantUrl?: string | null;
+          homeAssistantToken?: string | null;
+          homeAssistantInstall?: boolean;
         }>(req, updateContainerSchema);
         if (!container) {
           return problem(404, 'Container not found.');
@@ -450,6 +503,21 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             `Memory must be between ${MIN_UPDATE_MEMORY_MB} and ${MAX_UPDATE_MEMORY_MB} MiB.`,
           );
         }
+        // Omitted = keep, null/empty = remove, value = set (the UI never sends the saved token back).
+        let homeAssistantUrl = body.homeAssistantUrl === undefined ? container.homeAssistantUrl : blankToNull(body.homeAssistantUrl);
+        if (homeAssistantUrl !== null) {
+          const normalized = normalizeHomeAssistantUrl(homeAssistantUrl);
+          if ('error' in normalized) {
+            return validationProblem('homeAssistantUrl', normalized.error);
+          }
+          homeAssistantUrl = normalized.url;
+        }
+        const homeAssistantToken =
+          body.homeAssistantToken === undefined ? container.homeAssistantToken : blankToNull(body.homeAssistantToken);
+        const isVm = container.kind === 'vm';
+        if (isVm && homeAssistantToken !== null && homeAssistantUrl === null) {
+          return validationProblem('homeAssistantUrl', 'Enter the Home Assistant URL the token is used with.');
+        }
         const isNode = container.kind === 'node';
         Object.assign(container, {
           name,
@@ -462,6 +530,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           // Only containers are resized for updates.
           updateCores: container.kind === 'lxc' ? updateCores : null,
           updateMemoryMb: container.kind === 'lxc' ? updateMemoryMb : null,
+          // Home Assistant OS runs in virtual machines only.
+          homeAssistantUrl: isVm ? homeAssistantUrl : null,
+          homeAssistantToken: isVm ? homeAssistantToken : null,
+          homeAssistantInstall: isVm && (body.homeAssistantInstall ?? container.homeAssistantInstall),
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];
@@ -507,6 +579,30 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
+        }),
+    },
+    // Installs Home Assistant updates in a Home Assistant OS virtual machine (every installable one, or `ids`).
+    '/api/containers/:id/home-assistant-update': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/home-assistant-update'>) =>
+        guard(async () => {
+          const options = await readUpdateOptions<{ backup: boolean | null; ids: string[] | null }>(
+            req,
+            homeAssistantUpdateSchema,
+          );
+          const container = findContainer(req.params.id);
+          if (!container) {
+            return problem(404, 'Container not found.');
+          }
+          if (!service.shell.isConfigured) {
+            throw new ShellNotConfiguredError();
+          }
+          if (updater.isQueued(container.id)) {
+            throw new UpdateAllRunningError(`Updates of ${targetLabel(container)} are already running – wait for them to finish.`);
+          }
+          const backup = resolveBackup(container, options.backup);
+          return backup instanceof Response
+            ? backup
+            : accepted(service.startHomeAssistantUpdate(container, options.ids ?? null, backup));
         }),
     },
     // Restarts a running container (`pct reboot`) or schedules a restart of the Proxmox host.
@@ -693,5 +789,6 @@ export function containerStatus(containers: ContainerStore) {
     withErrors: list.filter((c) => c.lastError).length,
     aptPending: list.filter((c) => c.aptUpgradable.length > 0).length,
     appUpdatesAvailable: apps.filter((a) => appUpdateAvailable(a)).length,
+    homeAssistantUpdatesAvailable: list.reduce((sum, c) => sum + (c.homeAssistant?.updates.length ?? 0), 0),
   };
 }

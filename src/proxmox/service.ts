@@ -49,6 +49,8 @@ import {
   type GuestTarget,
   guestCli,
   guestExec,
+  hasHomeAssistantApi,
+  homeAssistantInstallContext,
   vzdumpCommand,
   pendingSignature,
   type Run,
@@ -67,6 +69,20 @@ import {
   parseDetectOutput,
   repositoryFromScript,
 } from './detect.ts';
+import {
+  CORE_RESTART_COMMAND,
+  HA_CHECK_SCRIPT,
+  type HomeAssistantUpdate,
+  homeAssistantUpdates,
+  installableUpdates,
+  installBlocker,
+  needsCoreRestart,
+  parseHomeAssistantProbe,
+  sortForInstall,
+  supervisorUpdateCommand,
+  type UpdateEntity,
+} from './home-assistant.ts';
+import { type FetchLike, HomeAssistantApi } from './home-assistant-api.ts';
 import { type CommandResult, describeSshFailure, type NodeShell } from './ssh.ts';
 import type { ContainerStore } from './store.ts';
 
@@ -81,6 +97,11 @@ export class ContainerBusyError extends Error {
 interface TaskResult {
   ok: boolean;
   exitCode: number | null;
+}
+
+/** The requested Home Assistant updates cannot be installed (none pending, missing token, operating system). */
+export class HomeAssistantUpdateError extends Error {
+  override name = 'HomeAssistantUpdateError';
 }
 
 /** Applications cannot be detected in this target right now (the host, a stopped container). */
@@ -104,6 +125,11 @@ const NODE_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
 const RESTART_CHECK_TIMEOUT_SECONDS = 60;
+const HA_CHECK_TIMEOUT_SECONDS = 90;
+/** One Home Assistant update (an app, Core, an integration); Core updates download a large image. */
+const HA_UPDATE_TIMEOUT_MS = 30 * 60_000;
+/** How long Home Assistant Core may take to come back after an update or restart. */
+const HA_START_TIMEOUT_MS = 10 * 60_000;
 /** Restart of a container: clean shutdown, start and the wait for its network. */
 const restartTimeoutMs = (target: GuestTarget): number => (SHUTDOWN_TIMEOUT_SECONDS + readyWaitSeconds(target) + 120) * 1000;
 
@@ -260,6 +286,10 @@ export interface ContainerServiceDeps {
   promptIdleMs?: number;
   /** Downloads a community-scripts `ct/<slug>.sh` script (null = not found); defaults to {@link fetchCommunityScript}. */
   fetchAppScript?: (slug: string) => Promise<string | null>;
+  /** `fetch` for the Home Assistant REST API (tests pass a fake). */
+  homeAssistantFetch?: FetchLike;
+  /** Pause between polls of Home Assistant while an update installs or Core restarts (default 5 s). */
+  homeAssistantPollMs?: number;
 }
 
 /** Extra time to wait for a detached command after its own timeout (systemd stops it at the timeout). */
@@ -278,6 +308,7 @@ export class ContainerService {
   private readonly reconnectDelayMs: number;
   private readonly resourcePollMs: number;
   private readonly promptIdleMs: number;
+  private readonly homeAssistantPollMs: number;
   /** Running task per container ID – at most one check/update per container at a time. */
   private readonly active = new Map<number, Promise<Run>>();
   /** Most recent task per container (kept after it finished, for {@link wait}). */
@@ -293,6 +324,7 @@ export class ContainerService {
     this.reconnectDelayMs = deps.reconnectDelayMs ?? 5000;
     this.resourcePollMs = deps.resourcePollMs ?? 2000;
     this.promptIdleMs = deps.promptIdleMs ?? 45_000;
+    this.homeAssistantPollMs = deps.homeAssistantPollMs ?? 5000;
   }
 
   get shell(): NodeShell {
@@ -468,6 +500,156 @@ export class ContainerService {
   }
 
   /**
+   * Installs Home Assistant updates found by the last check: `ids` selects them (null = every update that can be
+   * installed from here). Integrations (update entities) go through the REST API; apps, the Supervisor and Core
+   * through the `ha` CLI on the HAOS host – Core last, as it restarts Home Assistant. Custom integrations need a
+   * restart of Core afterwards, which is done unless Core itself was updated. Stops at the first failure.
+   * @param backupStorage back up to this storage first (null = no backup)
+   */
+  startHomeAssistantUpdate(container: Container, ids: readonly string[] | null, backupStorage: string | null): Run {
+    const state = container.homeAssistant;
+    if (container.kind !== 'vm' || !state) {
+      throw new HomeAssistantUpdateError(`${targetLabel(container)} does not run Home Assistant OS (as of its last check).`);
+    }
+    const context = homeAssistantInstallContext(container);
+    if (!context.enabled) {
+      throw new HomeAssistantUpdateError(
+        `Installing Home Assistant updates from ReleaseWatcher is switched off for ${targetLabel(container)} – install them in Home Assistant or switch it on in the settings of the virtual machine.`,
+      );
+    }
+    let selected: HomeAssistantUpdate[];
+    if (ids === null) {
+      selected = installableUpdates(state, context);
+    } else {
+      selected = [];
+      for (const id of new Set(ids)) {
+        const update = state.updates.find((u) => u.id === id);
+        if (!update) {
+          throw new HomeAssistantUpdateError(`No pending update "${id}" – check ${targetLabel(container)} again.`);
+        }
+        const blocker = installBlocker(update, context);
+        if (blocker) {
+          throw new HomeAssistantUpdateError(`${update.name}: ${blocker}`);
+        }
+        selected.push(update);
+      }
+    }
+    if (selected.length === 0) {
+      throw new HomeAssistantUpdateError('No Home Assistant update can be installed from ReleaseWatcher right now.');
+    }
+    const updates = sortForInstall(selected);
+    return this.start(container, null, 'home-assistant-update', 'manual', (log) =>
+      this.whileRunning(container, log, async (startedContainer) => {
+        await this.backupFirst(container, backupStorage, log, 'update of Home Assistant', startedContainer);
+        const result = await this.installHomeAssistantUpdates(container, updates, log, startedContainer);
+        return this.finishUpdate(container, log, result);
+      }),
+    );
+  }
+
+  /** Installs the updates one after another (see {@link startHomeAssistantUpdate}); returns the first failure. */
+  private async installHomeAssistantUpdates(
+    container: Container,
+    updates: readonly HomeAssistantUpdate[],
+    log: RunLog,
+    startedContainer: boolean,
+  ): Promise<CommandResult> {
+    const failed = (output: string): CommandResult => ({ exitCode: 1, output, timedOut: false });
+    let restartCore = false;
+    let coreRestarted = false;
+    for (const update of updates) {
+      log.note(`Updating ${update.name}: ${update.installedVersion ?? '?'} → ${update.latestVersion}`);
+      if (update.source === 'entity') {
+        const error = await this.installEntity(container, update, log);
+        if (error) return failed(error);
+        restartCore ||= needsCoreRestart(update);
+        continue;
+      }
+      const result = await this.execInGuest(log, container, supervisorUpdateCommand(update), {
+        timeoutMs: HA_UPDATE_TIMEOUT_MS,
+        startedContainer,
+      });
+      if (result.exitCode !== 0) return result;
+      if (update.source === 'core') coreRestarted = true;
+    }
+    if (restartCore && !coreRestarted) {
+      log.note('Restarting Home Assistant Core to load the updated integrations');
+      const result = await this.execInGuest(log, container, CORE_RESTART_COMMAND, {
+        timeoutMs: HA_START_TIMEOUT_MS,
+        startedContainer,
+      });
+      if (result.exitCode !== 0) return result;
+      coreRestarted = true;
+    }
+    if (coreRestarted) {
+      await this.waitForHomeAssistant(container, log);
+    }
+    return { exitCode: 0, output: '', timedOut: false };
+  }
+
+  /** Installs an update entity through the REST API and waits until it is no longer pending; returns an error or null. */
+  private async installEntity(container: Container, update: HomeAssistantUpdate, log: RunLog): Promise<string | null> {
+    const api = this.homeAssistantApi(container);
+    if (!api) {
+      return 'The Home Assistant URL or access token is missing.';
+    }
+    const deadline = Date.now() + HA_UPDATE_TIMEOUT_MS;
+    try {
+      await api.install(update.id, HA_UPDATE_TIMEOUT_MS);
+      for (;;) {
+        const state = await api.updateState(update.id);
+        if (!state.pending && !state.inProgress) {
+          log.note(`${update.name} installed (${state.installed ?? update.latestVersion})`);
+          return null;
+        }
+        if (!state.inProgress) {
+          return `Home Assistant still reports an update of ${update.name} (installed ${state.installed ?? '?'}) – see its log.`;
+        }
+        if (Date.now() >= deadline) {
+          return `The update of ${update.name} did not finish in time.`;
+        }
+        await Bun.sleep(this.homeAssistantPollMs);
+      }
+    } catch (error) {
+      return `Updating ${update.name} failed: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+
+  /** Waits until the Home Assistant API answers again after Core restarted (only when the API is configured). */
+  private async waitForHomeAssistant(container: Container, log: RunLog): Promise<void> {
+    const api = this.homeAssistantApi(container);
+    if (!api) {
+      return;
+    }
+    log.note('Waiting for Home Assistant to start…');
+    const deadline = Date.now() + HA_START_TIMEOUT_MS;
+    for (;;) {
+      try {
+        await api.pendingEntities();
+        log.note('Home Assistant is running');
+        return;
+      } catch {
+        if (Date.now() >= deadline) {
+          log.note('Home Assistant did not answer in time – the next check shows its state');
+          return;
+        }
+        await Bun.sleep(this.homeAssistantPollMs);
+      }
+    }
+  }
+
+  /** REST API client of the Home Assistant in a guest; null without URL and token. */
+  private homeAssistantApi(container: Container): HomeAssistantApi | null {
+    if (!container.homeAssistantUrl || !container.homeAssistantToken) {
+      return null;
+    }
+    return new HomeAssistantApi(
+      { url: container.homeAssistantUrl, token: container.homeAssistantToken },
+      this.deps.homeAssistantFetch,
+    );
+  }
+
+  /**
    * Restarts a guest with `pct reboot` / `qm reboot` – detached, so it completes even when ReleaseWatcher runs in this
    * very guest ({@link recover} re-attaches afterwards) – and checks it again. For the Proxmox host the restart is only
    * scheduled ({@link NODE_RESTART_DELAY_SECONDS} s later), so the run can finish before the node goes down.
@@ -625,7 +807,7 @@ export class ContainerService {
       isVm: container.kind === 'vm',
       containerName: container.name,
       kind: run.kind,
-      appName: app?.name ?? null,
+      appName: app?.name ?? (run.kind === 'home-assistant-update' ? 'Home Assistant' : null),
       succeeded: run.status === 'succeeded',
       detail: lastNote(run.output, run.status === 'succeeded'),
     });
@@ -1022,6 +1204,9 @@ export class ContainerService {
       steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
+    if (container.kind === 'vm') {
+      steps.push({ id: 'ha', script: HA_CHECK_SCRIPT, timeoutSeconds: HA_CHECK_TIMEOUT_SECONDS });
+    }
     for (const app of apps) {
       if (app.versionCommand) {
         steps.push({ id: `v${app.id}`, script: app.versionCommand, timeoutSeconds: CHECK_TIMEOUT_SECONDS });
@@ -1061,7 +1246,8 @@ export class ContainerService {
       errors.push(guestAgentError(batch.guestError));
       log.note(guestAgentError(batch.guestError));
     } else {
-      if (container.aptEnabled) {
+      const isHomeAssistant = container.kind === 'vm' && (await this.applyHomeAssistant(container, batch.steps, errors, log));
+      if (container.aptEnabled && !isHomeAssistant) {
         const apt = batch.steps.get('apt');
         if (apt?.exitCode === 0) {
           container.aptUpgradable = parseAptUpgradable(apt.output);
@@ -1105,6 +1291,70 @@ export class ContainerService {
     }
     containers.save(container);
     return errors.length;
+  }
+
+  /**
+   * Reads the Home Assistant part of a virtual machine check into `container.homeAssistant`; returns true when the
+   * guest runs Home Assistant OS. On first detection apt is switched off (HAOS has no apt). Update entities come from
+   * the REST API when it is configured, otherwise (or when it fails) from the states Home Assistant saved.
+   */
+  private async applyHomeAssistant(
+    container: Container,
+    results: ReadonlyMap<string, StepResult>,
+    errors: string[],
+    log: RunLog,
+  ): Promise<boolean> {
+    const step = results.get('ha');
+    if (step?.exitCode !== 0) {
+      if (container.homeAssistant) {
+        errors.push(`Home Assistant: ${describeStep(step)}`);
+        log.note(`Home Assistant check failed: ${describeStep(step)}`);
+        return true;
+      }
+      return false;
+    }
+    const probe = parseHomeAssistantProbe(step.output);
+    if (!probe) {
+      container.homeAssistant = null;
+      return false;
+    }
+    if (!container.homeAssistant && container.aptEnabled) {
+      container.aptEnabled = false;
+      container.aptUpgradable = [];
+      log.note('Home Assistant OS found – apt checks switched off (it has no apt)');
+    }
+    let problems = [...probe.errors];
+    let entities: UpdateEntity[] | null = probe.savedEntities;
+    let savedAt = probe.savedAt;
+    let live = false;
+    const api = this.homeAssistantApi(container);
+    if (api) {
+      try {
+        entities = await api.pendingEntities();
+        savedAt = null;
+        live = true;
+        // The saved states are not needed when the live ones were read.
+        problems = problems.filter((p) => !p.startsWith('saved entity states'));
+      } catch (error) {
+        problems.push(`API: ${error instanceof Error ? error.message : String(error)} Showing the states saved by Home Assistant.`);
+      }
+    }
+    // Neither source could be read: keep the integration updates found before.
+    const previous = container.homeAssistant?.updates.filter((u) => u.source === 'entity').map(toEntity) ?? [];
+    const updates = homeAssistantUpdates(probe.supervisorUpdates, entities ?? previous, probe.platforms);
+    container.homeAssistant = { coreVersion: probe.coreVersion, osVersion: probe.osVersion, updates, entitiesSavedAt: savedAt };
+    log.note(
+      `Home Assistant OS ${probe.osVersion ?? '?'}, Core ${probe.coreVersion ?? '?'}: ${updates.length} update(s)` +
+        (live ? ' (integrations read live through the API)' : savedAt ? ` (integrations as saved by Home Assistant at ${savedAt})` : ''),
+    );
+    for (const update of updates) {
+      log.write(`   ${update.name} ${update.installedVersion ?? '?'} → ${update.latestVersion}\n`);
+    }
+    for (const problem of problems) {
+      errors.push(`Home Assistant: ${problem}`);
+      log.note(`Home Assistant: ${problem}`);
+    }
+    return true;
   }
 
   private applyAppResults(app: ContainerApp, results: ReadonlyMap<string, StepResult>, log: RunLog): void {
@@ -1175,9 +1425,16 @@ export class ContainerService {
       isVm: container.kind === 'vm',
       containerName: container.name,
       aptPackages: container.aptUpgradable,
-      apps: apps
-        .filter((a) => appUpdateAvailable(a))
-        .map((a) => ({ name: a.name, installedVersion: a.installedVersion, latestVersion: a.latestVersion })),
+      apps: [
+        ...apps
+          .filter((a) => appUpdateAvailable(a))
+          .map((a) => ({ name: a.name, installedVersion: a.installedVersion, latestVersion: a.latestVersion })),
+        ...(container.homeAssistant?.updates ?? []).map((u) => ({
+          name: u.name,
+          installedVersion: u.installedVersion,
+          latestVersion: u.latestVersion,
+        })),
+      ],
     });
     if (result.queued) {
       log.note('Notification queued for the summary of this check run');
@@ -1186,6 +1443,16 @@ export class ContainerService {
     }
   }
 }
+
+/** A saved update entity in the shape read from Home Assistant (kept when the entities cannot be read this time). */
+const toEntity = (u: HomeAssistantUpdate): UpdateEntity => ({
+  id: u.id,
+  name: u.name,
+  installed: u.installedVersion,
+  latest: u.latestVersion,
+  url: u.releaseUrl,
+  installable: u.installable !== false,
+});
 
 /** Explains that the QEMU guest agent could not run commands in a virtual machine. */
 function guestAgentError(detail: string): string {

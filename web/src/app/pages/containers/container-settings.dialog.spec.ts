@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { Container } from '../../core/models';
 import { settle } from '../../testing';
 import { ContainerSettingsDialog } from './container-settings.dialog';
-import { container } from './fixtures';
+import { container, homeAssistant } from './fixtures';
 
 const type = (el: HTMLElement, selector: string, value: string) => {
   const input = el.querySelector<HTMLInputElement | HTMLSelectElement>(selector)!;
@@ -66,6 +66,50 @@ describe('ContainerSettingsDialog', () => {
     request.flush(container({ checkCron: '30 4 * * *' }));
     await settle(fixture);
     expect(saved[0]?.checkCron).toBe('30 4 * * *');
+  });
+
+  it('saves the Home Assistant URL and token of a virtual machine without sending the saved token back', async () => {
+    const vm = container({
+      kind: 'vm',
+      vmid: 111,
+      name: 'ha',
+      aptEnabled: false,
+      homeAssistant: homeAssistant({ url: 'http://ha:8123', hasToken: true, tokenMasked: 'eyJh…abcd' }),
+    });
+    const { fixture, el } = await open(vm);
+    expect(el.querySelector<HTMLInputElement>('#ct-ha-url')!.value).toBe('http://ha:8123');
+    const token = el.querySelector<HTMLInputElement>('#ct-ha-token')!;
+    expect(token.type).toBe('password');
+    expect(token.placeholder).toBe('eyJh…abcd');
+    expect(el.textContent).toContain('Leave empty to keep the current one.');
+
+    // Empty token field: the saved token is kept (omitted).
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    let request = http.expectOne('/api/containers/1');
+    expect(request.request.body.homeAssistantUrl).toBe('http://ha:8123');
+    expect(request.request.body.homeAssistantInstall).toBe(true);
+    expect('homeAssistantToken' in request.request.body).toBe(false);
+    request.flush(vm);
+    await settle(fixture);
+
+    // A new token is sent; "Remove" sends null; installing can be switched off (check only).
+    el.querySelector<HTMLButtonElement>('[role=switch][aria-label="Install Home Assistant updates from ReleaseWatcher"]')!.click();
+    type(el, '#ct-ha-token', 'new-token');
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    request = http.expectOne('/api/containers/1');
+    expect(request.request.body.homeAssistantToken).toBe('new-token');
+    expect(request.request.body.homeAssistantInstall).toBe(false);
+    request.flush(vm);
+    await settle(fixture);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.input-with-action button')].find((b) => b.textContent?.trim() === 'Remove')!.click();
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    request = http.expectOne('/api/containers/1');
+    expect(request.request.body.homeAssistantToken).toBeNull();
+    request.flush(vm);
+    await settle(fixture);
   });
 
   it('saves resources for updates and warns while they are raised', async () => {
