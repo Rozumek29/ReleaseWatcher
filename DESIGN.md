@@ -94,6 +94,13 @@ Full endpoint list: `README.md` → *API*. Rules for new endpoints:
   Secrets follow the same rule, so the UI never has to send a saved secret back.
 - **Secrets** in responses: `hasX` / `xConfigured` booleans and `maskSecret()` hints only (see `AGENTS.md`).
 - Keep `web/src/app/core/models.ts` + `api.service.ts` in sync with the server mappers in the same PR.
+- **Server-side memoization:** values derived only from the database (advisory summaries, the bodies of
+  `/api/repositories` and `/api/advisories`) are cached with `cachedByRevision()` (`src/revision-cache.ts`), keyed by
+  `store.revision()` (SQLite `total_changes()` – every store shares one connection), so they are rebuilt only after a
+  write. Don't use it for values that depend on anything else (time, settings, in-memory task state).
+- **Queries:** read only the columns an endpoint needs (`listStatusFields()`, `listNames()`, `listAdvisoryImpacts()`,
+  `listAppVersions()`, `statusCounts()`) – full entities decrypt secrets and parse JSON. Let SQLite count and filter;
+  keep version comparisons in TypeScript. Series of writes go into one transaction; an upsert skips unchanged rows.
 - **Caching:** every `/api/*` response is `Cache-Control: no-store` (added by the route guard via `noStore()`);
   don't add ETags or caching to API responses. The UI is served by `StaticUi` (`src/static-ui.ts`): loaded into
   memory at startup, zstd-compressed (no gzip/brotli – browsers without zstd get the plain file), an `ETag` per
