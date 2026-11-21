@@ -46,6 +46,47 @@ describe('ReleaseChecker', () => {
     assert.equal(store.get(repo.id)?.lastSeenTag, 'v2');
   });
 
+  it('reads the installed version and the releases at the same time', async () => {
+    let releasesRequested = false;
+    const getRecentReleases = source.getRecentReleases.bind(source);
+    source.getRecentReleases = (...args) => {
+      releasesRequested = true;
+      return getRecentReleases(...args);
+    };
+    let requestedWhileReadingVersion = false;
+    const parallel = new ReleaseChecker({
+      store,
+      source,
+      dispatcher: new NotificationDispatcher([notifier], silentLog),
+      log: silentLog,
+      fetchInstalledVersion: async () => {
+        await Bun.sleep(1);
+        requestedWhileReadingVersion = releasesRequested;
+        return { version: '1.0.0', preview: '1.0.0' };
+      },
+    });
+    const repo = store.add('acme', 'widget', false);
+    repo.installedVersionUrl = 'https://widget.lan/version';
+    source.releases = [release('v1', 1)];
+
+    await parallel.check(repo);
+
+    assert.equal(requestedWhileReadingVersion, true);
+    assert.equal(store.get(repo.id)?.installedVersion, '1.0.0');
+    assert.equal(store.get(repo.id)?.lastSeenTag, 'v1');
+  });
+
+  it('keeps the installed version when reading the releases fails', async () => {
+    const repo = store.add('acme', 'widget', false);
+    repo.installedVersionUrl = 'https://widget.lan/version';
+    source.getRecentReleases = () => Promise.reject(new Error('GitHub is down'));
+
+    const result = await checker.check(repo);
+
+    assert.equal(result.error, 'GitHub is down');
+    assert.equal(store.get(repo.id)?.installedVersion, '1.0.0');
+  });
+
   it('does not notify on 304 Not Modified', async () => {
     const repo = store.add('acme', 'widget', false);
     repo.lastCheckedAt = new Date().toISOString();

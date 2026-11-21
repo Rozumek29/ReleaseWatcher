@@ -141,6 +141,18 @@ describe('HTTP API', () => {
     assert.deepEqual(all[0].repository.installedVersions, ['0.4.0', '1.2.0']);
     assert.deepEqual((await inject('/api/status')).json().advisories, { total: 2, affecting: 2 });
 
+    // The lists are cached per database revision: a changed app version shows up right away.
+    const widget = containers.listApps(container.id).find((a) => a.name === 'Widget')!;
+    containers.saveApp({ ...widget, installedVersion: '0.6.0' });
+    const refreshed = await inject('/api/advisories');
+    assert.match(refreshed.headers.get('content-type') ?? '', /^application\/json/);
+    assert.deepEqual(
+      refreshed.json().map((a: { id: string; affectsInstalled: boolean | null }) => [a.id, a.affectsInstalled]),
+      [['GHSA-new1-0000-0000', true], ['GHSA-old1-0000-0000', false]],
+    );
+    assert.equal((await inject('/api/repositories')).json()[0].advisories.affecting, 1);
+    assert.deepEqual((await inject('/api/status')).json().advisories, { total: 2, affecting: 1 });
+
     // New advisories are notified with the affected container version.
     source.advisories = [...source.advisories, advisory('GHSA-fresh-0000-0000', 3, '>= 1.0.0, < 1.3.0')];
     await inject({ method: 'POST', url: `/api/repositories/${created.id}/check` });

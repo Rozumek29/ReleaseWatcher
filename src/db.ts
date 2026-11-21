@@ -443,6 +443,24 @@ export class RepositoryStore {
       );
   }
 
+  /**
+   * Number of rows changed through this connection so far. Every store shares the connection, so a cached value
+   * derived from the database stays valid while this number does not change.
+   */
+  revision(): number {
+    return this.db.query<{ n: number }, []>('SELECT total_changes() AS n').get()!.n;
+  }
+
+  /** Id, owner, name and installed version of all repositories, sorted like {@link list} – without reading secrets. */
+  listNames(): Pick<WatchedRepository, 'id' | 'owner' | 'name' | 'installedVersion'>[] {
+    return this.db
+      .query<Pick<Row, 'id' | 'owner' | 'name' | 'installed_version'>, []>(
+        'SELECT id, owner, name, installed_version FROM watched_repositories ORDER BY name COLLATE NOCASE, owner COLLATE NOCASE',
+      )
+      .all()
+      .map((r) => ({ id: r.id, owner: r.owner, name: r.name, installedVersion: r.installed_version }));
+  }
+
   /** Stored security advisories of one repository (unsorted). */
   listAdvisories(repositoryId: number): SecurityAdvisory[] {
     return this.db
@@ -451,18 +469,72 @@ export class RepositoryStore {
       .map(toAdvisory);
   }
 
-  /** Security advisories of all repositories, by repository id. */
-  listAllAdvisories(): Map<number, SecurityAdvisory[]> {
-    const result = new Map<number, SecurityAdvisory[]>();
-    for (const row of this.db.query<AdvisoryRow, []>('SELECT * FROM repository_advisories').all()) {
-      const list = result.get(row.repository_id) ?? [];
-      list.push(toAdvisory(row));
-      result.set(row.repository_id, list);
+  /** Ids and aliases of the stored advisories of a repository (of one source, or all) – for duplicate checks. */
+  listAdvisoryKeys(repositoryId: number, source?: AdvisorySource): Pick<SecurityAdvisory, 'id' | 'aliases' | 'cveId'>[] {
+    const rows =
+      source === undefined
+        ? this.db
+            .query<Pick<AdvisoryRow, 'advisory_id' | 'aliases' | 'cve_id'>, [number]>(
+              'SELECT advisory_id, aliases, cve_id FROM repository_advisories WHERE repository_id = ?',
+            )
+            .all(repositoryId)
+        : this.db
+            .query<Pick<AdvisoryRow, 'advisory_id' | 'aliases' | 'cve_id'>, [number, string]>(
+              'SELECT advisory_id, aliases, cve_id FROM repository_advisories WHERE repository_id = ? AND source = ?',
+            )
+            .all(repositoryId, source);
+    return rows.map((r) => ({ id: r.advisory_id, aliases: parseStringArray(r.aliases), cveId: r.cve_id }));
+  }
+
+  /** Severity and affected ranges of the advisories of all repositories (what summaries need), by repository id. */
+  listAdvisoryImpacts(): Map<number, Pick<SecurityAdvisory, 'severity' | 'vulnerabilities'>[]> {
+    const result = new Map<number, Pick<SecurityAdvisory, 'severity' | 'vulnerabilities'>[]>();
+    const rows = this.db
+      .query<Pick<AdvisoryRow, 'repository_id' | 'severity' | 'vulnerabilities'>, []>(
+        'SELECT repository_id, severity, vulnerabilities FROM repository_advisories',
+      )
+      .all();
+    for (const row of rows) {
+      const impact = { severity: normalizeSeverity(row.severity), vulnerabilities: parseVulnerabilities(row.vulnerabilities) };
+      const list = result.get(row.repository_id);
+      if (list) {
+        list.push(impact);
+      } else {
+        result.set(row.repository_id, [impact]);
+      }
     }
     return result;
   }
 
-  /** Inserts or updates one advisory (keeps the date it was first seen). */
+  /** Security advisories of all repositories, by repository id. */
+  listAllAdvisories(): Map<number, SecurityAdvisory[]> {
+    const result = new Map<number, SecurityAdvisory[]>();
+    for (const row of this.db.query<AdvisoryRow, []>('SELECT * FROM repository_advisories').all()) {
+      const list = result.get(row.repository_id);
+      if (list) {
+        list.push(toAdvisory(row));
+      } else {
+        result.set(row.repository_id, [toAdvisory(row)]);
+      }
+    }
+    return result;
+  }
+
+  /** Inserts or updates advisories in one transaction (see {@link saveAdvisory}). */
+  saveAdvisories(repositoryId: number, advisories: readonly SecurityAdvisory[], now: Date): void {
+    if (advisories.length > 0) {
+      this.db.transaction(() => {
+        for (const advisory of advisories) {
+          this.saveAdvisory(repositoryId, advisory, now);
+        }
+      })();
+    }
+  }
+
+  /**
+   * Inserts or updates one advisory (keeps the date it was first seen). An unchanged advisory is not written again:
+   * sources without an ETag (OSV.dev) return the same list on every check.
+   */
   saveAdvisory(repositoryId: number, advisory: SecurityAdvisory, now: Date): void {
     this.db
       .query(
@@ -473,7 +545,11 @@ export class RepositoryStore {
          ON CONFLICT (repository_id, advisory_id) DO UPDATE SET
            source = excluded.source, aliases = excluded.aliases, cve_id = excluded.cve_id, summary = excluded.summary, severity = excluded.severity,
            cvss_score = excluded.cvss_score, html_url = excluded.html_url, published_at = excluded.published_at,
-           updated_at = excluded.updated_at, vulnerabilities = excluded.vulnerabilities`,
+           updated_at = excluded.updated_at, vulnerabilities = excluded.vulnerabilities
+         WHERE source IS NOT excluded.source OR aliases IS NOT excluded.aliases OR cve_id IS NOT excluded.cve_id
+           OR summary IS NOT excluded.summary OR severity IS NOT excluded.severity OR cvss_score IS NOT excluded.cvss_score
+           OR html_url IS NOT excluded.html_url OR published_at IS NOT excluded.published_at
+           OR updated_at IS NOT excluded.updated_at OR vulnerabilities IS NOT excluded.vulnerabilities`,
       )
       .run(
         repositoryId,
@@ -494,11 +570,12 @@ export class RepositoryStore {
 
   /** Removes advisories of `source` that are no longer published (withdrawn or deleted), or all of it without `keepIds`. */
   removeAdvisoriesExcept(repositoryId: number, source: AdvisorySource, keepIds: readonly string[] = []): void {
-    const keep = new Set(keepIds);
-    const stale = this.listAdvisories(repositoryId).filter((a) => a.source === source && !keep.has(a.id));
-    for (const advisory of stale) {
-      this.db.query('DELETE FROM repository_advisories WHERE repository_id = ? AND advisory_id = ?').run(repositoryId, advisory.id);
-    }
+    this.db
+      .query(
+        `DELETE FROM repository_advisories
+         WHERE repository_id = ? AND source = ? AND advisory_id NOT IN (SELECT value FROM json_each(?))`,
+      )
+      .run(repositoryId, source, JSON.stringify(keepIds));
   }
 
   delete(id: number): boolean {

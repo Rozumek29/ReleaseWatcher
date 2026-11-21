@@ -4,6 +4,7 @@ import {
   advisoryKeys,
   installedVersions,
   sourceKey,
+  type AdvisoryImpact,
   type AdvisorySource,
   type SecurityAdvisory,
 } from './advisories.ts';
@@ -36,6 +37,13 @@ export interface AdvisorySourceSettings {
 }
 
 const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
+
+/** Waits for a promise without throwing, so requests started together can be awaited one after another. */
+const settle = <T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> =>
+  promise.then(
+    (value) => ({ ok: true as const, value }),
+    (error: unknown) => ({ ok: false as const, error }),
+  );
 
 /** Checks watched repositories for new releases, dispatches notifications and updates the baseline. */
 export class ReleaseChecker {
@@ -163,6 +171,12 @@ export class ReleaseChecker {
     const baselines = new Set<string>();
     let notified = 0;
 
+    const osv = this.osv;
+    const osvPackage = repo.osvEcosystem && repo.osvPackage ? { ecosystem: repo.osvEcosystem, name: repo.osvPackage } : null;
+    // OSV.dev is asked while GitHub is read; its result is filtered once GitHub's advisories are stored.
+    const osvQuery =
+      enabled.osv && osv && osvPackage ? settle(osv.queryPackage(osvPackage.ecosystem, osvPackage.name)) : null;
+
     const githubKey = sourceKey('github');
     if (enabled.github && this.source.getSecurityAdvisories) {
       try {
@@ -183,20 +197,16 @@ export class ReleaseChecker {
       repo.advisoriesEtag = null;
     }
 
-    const osvPackage = repo.osvEcosystem && repo.osvPackage ? { ecosystem: repo.osvEcosystem, name: repo.osvPackage } : null;
-    if (enabled.osv && this.osv && osvPackage) {
+    if (osvQuery && osvPackage) {
       const osvKey = sourceKey('osv', osvPackage);
       try {
+        const fetched = await osvQuery;
+        if (!fetched.ok) {
+          throw fetched.error;
+        }
         // Vulnerabilities GitHub already reported (same GHSA/CVE) are not listed twice.
-        const github = new Set(
-          this.store
-            .listAdvisories(repo.id)
-            .filter((a) => a.source === 'github')
-            .flatMap(advisoryKeys),
-        );
-        const advisories = (await this.osv.queryPackage(osvPackage.ecosystem, osvPackage.name)).filter(
-          (a) => !advisoryKeys(a).some((key) => github.has(key)),
-        );
+        const github = new Set(this.store.listAdvisoryKeys(repo.id, 'github').flatMap(advisoryKeys));
+        const advisories = fetched.value.filter((a) => !advisoryKeys(a).some((key) => github.has(key)));
         notified += await this.storeAdvisories(repo, 'osv', osvKey, advisories, notified);
         baselines.add(osvKey);
       } catch (error) {
@@ -230,34 +240,41 @@ export class ReleaseChecker {
     alreadyNotified: number,
   ): Promise<number> {
     const isBaseline = !repo.advisoryBaselines.includes(key);
-    const known = new Set(this.store.listAdvisories(repo.id).map((a) => a.id));
-    let notified = 0;
+    const known = new Set(this.store.listAdvisoryKeys(repo.id).map((a) => a.id));
     const versions = installedVersions(repo.installedVersion, this.linkedVersions(repo.id));
+    const news: { advisory: SecurityAdvisory; impact: AdvisoryImpact }[] = [];
+    const quiet: SecurityAdvisory[] = [];
     // Oldest first, so notifications arrive in publication order.
     for (const advisory of advisories.toSorted((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt))) {
-      const { affects: affectsInstalled, affectedVersions } = advisoryImpact(advisory, versions);
-      const shownVersions = affectsInstalled === true ? affectedVersions : versions;
+      const impact = advisoryImpact(advisory, versions);
       // Not news when the running version is known to be outside the vulnerable ranges.
       if (
         !known.has(advisory.id) &&
         !isBaseline &&
-        affectsInstalled !== false &&
-        alreadyNotified + notified < MAX_NOTIFICATIONS_PER_CHECK
+        impact.affects !== false &&
+        alreadyNotified + news.length < MAX_NOTIFICATIONS_PER_CHECK
       ) {
-        await this.dispatcher.dispatchVulnerability({
-          owner: repo.owner,
-          repository: repo.name,
-          advisory,
-          installedVersion: shownVersions.length > 0 ? shownVersions.join(', ') : null,
-          affectsInstalled,
-        });
-        notified++;
+        news.push({ advisory, impact });
+      } else {
+        quiet.push(advisory);
       }
-      // Saved per advisory, so a crash mid-way does not cause duplicate notifications.
+    }
+    // Advisories without a notification are stored at once (one transaction); the others each right after their
+    // notification went out, so a crash mid-way neither repeats nor loses one.
+    this.store.saveAdvisories(repo.id, quiet, this.now());
+    this.store.removeAdvisoriesExcept(repo.id, source, advisories.map((a) => a.id));
+    for (const { advisory, impact } of news) {
+      const shownVersions = impact.affects === true ? impact.affectedVersions : versions;
+      await this.dispatcher.dispatchVulnerability({
+        owner: repo.owner,
+        repository: repo.name,
+        advisory,
+        installedVersion: shownVersions.length > 0 ? shownVersions.join(', ') : null,
+        affectsInstalled: impact.affects,
+      });
       this.store.saveAdvisory(repo.id, advisory, this.now());
     }
-    this.store.removeAdvisoriesExcept(repo.id, source, advisories.map((a) => a.id));
-    return notified;
+    return news.length;
   }
 
   /**
@@ -266,9 +283,16 @@ export class ReleaseChecker {
    */
   async check(repo: WatchedRepository, options: { forceAdvisories?: boolean } = {}): Promise<CheckResult> {
     let notifiedCount = 0;
-    await this.refreshInstalledVersion(repo);
+    // The installed version and the releases are read at the same time; both are needed before comparing them.
+    const [, releases] = await Promise.all([
+      this.refreshInstalledVersion(repo),
+      settle(this.source.getRecentReleases(repo.owner, repo.name, repo.etag, repo.githubToken)),
+    ]);
     try {
-      const fetched = await this.source.getRecentReleases(repo.owner, repo.name, repo.etag, repo.githubToken);
+      if (!releases.ok) {
+        throw releases.error;
+      }
+      const fetched = releases.value;
 
       if (!fetched.notModified) {
         const { newReleases, newest } = selectNewReleases(repo, fetched.releases);

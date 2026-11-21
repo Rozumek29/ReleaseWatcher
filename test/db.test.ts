@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
 import { SecretBox, parseKey } from '../src/secret-box.ts';
+import { advisory } from './helpers.ts';
 
 const box = () => new SecretBox(parseKey(Buffer.alloc(32, 3).toString('base64')));
 
@@ -55,5 +56,58 @@ describe('RepositoryStore seeding', () => {
     assert.equal(store.created, true);
     assert.deepEqual(store.list(), []);
     store.close();
+  });
+});
+
+describe('RepositoryStore advisories', () => {
+  let store: RepositoryStore;
+
+  beforeEach(() => {
+    store = new RepositoryStore(':memory:');
+  });
+
+  afterEach(() => store.close());
+
+  it('advances the revision on writes but not when an unchanged advisory is saved again', () => {
+    const repo = store.add('acme', 'widget', false);
+    const now = new Date(Date.UTC(2026, 0, 2));
+    const before = store.revision();
+    store.saveAdvisories(repo.id, [advisory('GHSA-a', 1), advisory('GHSA-b', 2)], now);
+    const saved = store.revision();
+    assert.ok(saved > before);
+
+    store.saveAdvisories(repo.id, [advisory('GHSA-a', 1), advisory('GHSA-b', 2)], new Date(Date.UTC(2026, 0, 5)));
+    assert.equal(store.revision(), saved);
+
+    store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 3.0.0'), now);
+    assert.ok(store.revision() > saved);
+    assert.equal(store.listAdvisories(repo.id).find((a) => a.id === 'GHSA-a')?.vulnerabilities[0]?.vulnerableRange, '< 3.0.0');
+  });
+
+  it('removes only stale advisories of one source', () => {
+    const repo = store.add('acme', 'widget', false);
+    const now = new Date();
+    store.saveAdvisories(
+      repo.id,
+      [advisory('GHSA-a', 1), advisory('GHSA-b', 2), advisory('GO-1', 3, '< 2.0.0', { source: 'osv', aliases: ['CVE-1'] })],
+      now,
+    );
+
+    store.removeAdvisoriesExcept(repo.id, 'github', ['GHSA-b']);
+    assert.deepEqual(store.listAdvisories(repo.id).map((a) => a.id).sort(), ['GHSA-b', 'GO-1']);
+    assert.deepEqual(store.listAdvisoryKeys(repo.id, 'osv'), [{ id: 'GO-1', aliases: ['CVE-1'], cveId: null }]);
+
+    store.removeAdvisoriesExcept(repo.id, 'osv');
+    assert.deepEqual(store.listAdvisoryKeys(repo.id).map((a) => a.id), ['GHSA-b']);
+  });
+
+  it('lists names and installed versions sorted like the full list', () => {
+    const b = store.add('acme', 'beta', false);
+    store.add('acme', 'Alpha', false);
+    b.installedVersion = '1.2.0';
+    b.githubToken = 'ghp_secret';
+    store.save(b);
+    assert.deepEqual(store.listNames().map((r) => [r.name, r.installedVersion]), [['Alpha', null], ['beta', '1.2.0']]);
+    assert.deepEqual(Object.keys(store.listNames()[0]!).sort(), ['id', 'installedVersion', 'name', 'owner']);
   });
 });

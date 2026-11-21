@@ -781,14 +781,13 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
 /** Summary for `/api/status`. */
 export function containerStatus(containers: ContainerStore) {
-  const list = containers.list();
-  const apps = containers.listApps();
+  const counts = containers.statusCounts();
   return {
-    total: list.length,
-    enabled: list.filter((c) => c.isEnabled).length,
-    withErrors: list.filter((c) => c.lastError).length,
-    aptPending: list.filter((c) => c.aptUpgradable.length > 0).length,
-    appUpdatesAvailable: apps.filter((a) => appUpdateAvailable(a)).length,
-    homeAssistantUpdatesAvailable: list.reduce((sum, c) => sum + (c.homeAssistant?.updates.length ?? 0), 0),
+    total: counts.total,
+    enabled: counts.enabled,
+    withErrors: counts.withErrors,
+    aptPending: counts.aptPending,
+    appUpdatesAvailable: containers.listAppVersions().filter((a) => appUpdateAvailable(a)).length,
+    homeAssistantUpdatesAvailable: counts.homeAssistantUpdates,
   };
 }

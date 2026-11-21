@@ -256,7 +256,10 @@ export interface AdvisorySummary {
   highestSeverity: AdvisorySeverity | null;
 }
 
-export function summarizeAdvisories(advisories: readonly SecurityAdvisory[], versions: readonly string[]): AdvisorySummary {
+export function summarizeAdvisories(
+  advisories: readonly Pick<SecurityAdvisory, 'severity' | 'vulnerabilities'>[],
+  versions: readonly string[],
+): AdvisorySummary {
   const affecting = advisories.filter((a) => advisoryImpact(a, versions).affects === true);
   const relevant = affecting.length > 0 ? affecting : advisories;
   const highestSeverity = relevant.reduce<AdvisorySeverity | null>(

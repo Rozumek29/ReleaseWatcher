@@ -280,6 +280,39 @@ export class ContainerStore {
     return rows.map(toApp);
   }
 
+  /** Linked repository and versions of every application – without commands and other settings. */
+  listAppVersions(): Pick<ContainerApp, 'repositoryId' | 'installedVersion' | 'latestVersion'>[] {
+    return this.db
+      .query<Pick<AppRow, 'repository_id' | 'installed_version' | 'latest_version'>, []>(
+        'SELECT repository_id, installed_version, latest_version FROM container_apps',
+      )
+      .all()
+      .map((r) => ({ repositoryId: r.repository_id, installedVersion: r.installed_version, latestVersion: r.latest_version }));
+  }
+
+  /** Installed versions of the applications linked to a repository. */
+  linkedAppVersions(repositoryId: number): (string | null)[] {
+    return this.db
+      .query<Pick<AppRow, 'installed_version'>, [number]>('SELECT installed_version FROM container_apps WHERE repository_id = ?')
+      .all(repositoryId)
+      .map((r) => r.installed_version);
+  }
+
+  /** Counts for the status summary, computed by SQLite (no rows are read, no secrets decrypted). */
+  statusCounts(): { total: number; enabled: number; withErrors: number; aptPending: number; homeAssistantUpdates: number } {
+    return this.db
+      .query<{ total: number; enabled: number; withErrors: number; aptPending: number; homeAssistantUpdates: number }, []>(
+        `SELECT count(*) AS total,
+                coalesce(sum(is_enabled = 1), 0) AS enabled,
+                coalesce(sum(last_error IS NOT NULL AND last_error <> ''), 0) AS withErrors,
+                coalesce(sum(CASE WHEN json_valid(apt_upgradable) THEN json_array_length(apt_upgradable) > 0 ELSE 0 END), 0) AS aptPending,
+                coalesce(sum(CASE WHEN json_valid(home_assistant) AND json_type(home_assistant, '$.updates') = 'array'
+                                  THEN json_array_length(home_assistant, '$.updates') ELSE 0 END), 0) AS homeAssistantUpdates
+         FROM containers`,
+      )
+      .get()!;
+  }
+
   getApp(containerId: number, appId: number): ContainerApp | null {
     const row = this.db
       .query<AppRow, [number, number]>('SELECT * FROM container_apps WHERE id = ? AND container_id = ?')
