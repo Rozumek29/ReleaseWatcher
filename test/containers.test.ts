@@ -93,6 +93,7 @@ describe('containers API', () => {
       'idx_container_runs_container',
       'idx_container_runs_running',
       'idx_containers_enabled',
+      'idx_repository_advisories_page',
       'idx_sessions_expires',
       'idx_watched_repositories_enabled',
     ]);

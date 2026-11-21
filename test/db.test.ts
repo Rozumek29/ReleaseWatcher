@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
 import { RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
 import { SecretBox, parseKey } from '../src/secret-box.ts';
+import { AdvisoryImpacts } from '../src/advisory-impacts.ts';
 import { advisory } from './helpers.ts';
 
 const box = () => new SecretBox(parseKey(Buffer.alloc(32, 3).toString('base64')));
@@ -101,13 +102,32 @@ describe('RepositoryStore advisories', () => {
     assert.deepEqual(store.listAdvisoryKeys(repo.id).map((a) => a.id), ['GHSA-b']);
   });
 
-  it('lists names and installed versions sorted like the full list', () => {
-    const b = store.add('acme', 'beta', false);
-    store.add('acme', 'Alpha', false);
-    b.installedVersion = '1.2.0';
-    b.githubToken = 'ghp_secret';
-    store.save(b);
-    assert.deepEqual(store.listNames().map((r) => [r.name, r.installedVersion]), [['Alpha', null], ['beta', '1.2.0']]);
-    assert.deepEqual(Object.keys(store.listNames()[0]!).sort(), ['id', 'installedVersion', 'name', 'owner']);
+  it('keeps computed impacts until the vulnerable ranges or the installed versions change', () => {
+    const repo = store.add('acme', 'widget', false);
+    repo.installedVersion = '1.0.0';
+    store.save(repo);
+    const impacts = new AdvisoryImpacts(store, () => new Map());
+    const affects = () => store.pageAdvisories({}, null, 10).rows.map((r) => [r.advisory.id, r.affects, r.affectedVersions]);
+    store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 2.0.0'), new Date());
+    assert.deepEqual(store.listAdvisoriesForImpact([]).map((a) => a.advisoryId), ['GHSA-a']);
+
+    impacts.refresh();
+    assert.deepEqual(affects(), [['GHSA-a', true, ['1.0.0']]]);
+    const revision = store.revision();
+    impacts.refresh();
+    assert.equal(store.revision(), revision, 'nothing changed – nothing written');
+
+    store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 2.0.0', { summary: 'Reworded' }), new Date());
+    assert.deepEqual(store.listAdvisoriesForImpact([]), []);
+    store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 0.5.0'), new Date());
+    assert.equal(store.listAdvisoriesForImpact([]).length, 1);
+    impacts.refresh();
+    assert.deepEqual(affects(), [['GHSA-a', false, []]]);
+
+    repo.installedVersion = '0.1.0';
+    store.save(repo);
+    impacts.refresh();
+    assert.deepEqual(affects(), [['GHSA-a', true, ['0.1.0']]]);
+    assert.deepEqual(store.advisorySummaries().get(repo.id), { total: 1, affecting: 1, highestSeverity: 'high' });
   });
 });

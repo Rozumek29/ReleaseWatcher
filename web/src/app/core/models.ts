@@ -242,6 +242,44 @@ export interface SettingsPatch {
 }
 
 /** A security advisory together with its repository (Vulnerabilities page). */
+/** Counts of the Vulnerabilities page over all advisories (independent of the filters). */
+export interface AdvisoryOverview {
+  total: number;
+  affecting: number;
+  unknown: number;
+  unaffected: number;
+  /** Critical advisories affecting an installed version. */
+  critical: number;
+  /** Repositories with an advisory affecting an installed version. */
+  repositories: number;
+  /** Advisories affecting an installed version without a released fix. */
+  noFix: number;
+  /** Sources present in the stored advisories. */
+  sources: AdvisorySource[];
+}
+
+/** Filters and position of `GET /api/advisories`; "all" or a missing value = no filter. */
+export interface AdvisoryQuery {
+  impact?: 'all' | 'affecting' | 'unknown' | 'unaffected';
+  severity?: AdvisorySeverity | 'all';
+  source?: AdvisorySource | 'all';
+  q?: string;
+  /** `nextCursor` of the previous page (keyset pagination). */
+  cursor?: string;
+  limit?: number;
+}
+
+/** One page of advisories: affecting an installed version first, then most severe, then newest. */
+export interface AdvisoryPage {
+  items: RepositoryAdvisory[];
+  /** Cursor of the next page, or null on the last one. */
+  nextCursor: string | null;
+  /** Advisories matching the filters – first page only (null with a cursor). */
+  total: number | null;
+  /** First page only (null with a cursor). */
+  overview: AdvisoryOverview | null;
+}
+
 export interface RepositoryAdvisory extends SecurityAdvisory {
   repository: {
     id: number;

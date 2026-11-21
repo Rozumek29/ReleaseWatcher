@@ -94,13 +94,20 @@ Full endpoint list: `README.md` → *API*. Rules for new endpoints:
   Secrets follow the same rule, so the UI never has to send a saved secret back.
 - **Secrets** in responses: `hasX` / `xConfigured` booleans and `maskSecret()` hints only (see `AGENTS.md`).
 - Keep `web/src/app/core/models.ts` + `api.service.ts` in sync with the server mappers in the same PR.
-- **Server-side memoization:** values derived only from the database (advisory summaries, the bodies of
-  `/api/repositories` and `/api/advisories`) are cached with `cachedByRevision()` (`src/revision-cache.ts`), keyed by
-  `store.revision()` (SQLite `total_changes()` – every store shares one connection), so they are rebuilt only after a
-  write. Don't use it for values that depend on anything else (time, settings, in-memory task state).
-- **Queries:** read only the columns an endpoint needs (`listStatusFields()`, `listNames()`, `listAdvisoryImpacts()`,
-  `listAppVersions()`, `statusCounts()`) – full entities decrypt secrets and parse JSON. Let SQLite count and filter;
-  keep version comparisons in TypeScript. Series of writes go into one transaction; an upsert skips unchanged rows.
+- **Server-side memoization:** values derived only from the database (the body of `/api/repositories`) can be cached
+  with `cachedByRevision()` (`src/revision-cache.ts`), keyed by `store.revision()` (SQLite `total_changes()` – every
+  store shares one connection), so they are rebuilt only after a write. Don't use it for values that depend on anything
+  else (time, settings, in-memory task state).
+- **Queries:** read only the columns an endpoint needs (`listStatusFields()`, `listAppVersions()`, `statusCounts()`,
+  `advisoryTotals()`) – full entities decrypt secrets and parse JSON. Let SQLite count, filter and sort; keep version
+  comparisons in TypeScript and store their results when SQLite has to sort or filter by them (`AdvisoryImpacts` keeps
+  `repository_advisories.impact` current, recomputing only what changed). Series of writes go into one transaction; an
+  upsert skips unchanged rows.
+- **Long lists are paged on the server with a cursor (keyset), never `OFFSET`:** sort by stored columns ending in a
+  unique key, cover the order with an index, and pass the last row's key as an opaque `cursor`
+  (`WHERE (k1, k2, …) < (?, ?, …) ORDER BY k1 DESC, k2 DESC, … LIMIT n + 1`). Response `{ items, nextCursor, … }`;
+  counts needed only once come with the first page. See `GET /api/advisories` (`pageAdvisories()`) and the
+  Vulnerabilities page (`appInView` loads the next page).
 - **Caching:** every `/api/*` response is `Cache-Control: no-store` (added by the route guard via `noStore()`);
   don't add ETags or caching to API responses. The UI is served by `StaticUi` (`src/static-ui.ts`): loaded into
   memory at startup, zstd-compressed (no gzip/brotli – browsers without zstd get the plain file), an `ETag` per
@@ -190,8 +197,9 @@ Shared components in `web/src/app/shared/`:
 - `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
 - `appInView` directive – emits `(inView)` when the element nears the viewport (`IntersectionObserver`); used for
-  infinite scrolling of long client-side lists: render a slice (`limit` signal, reset when filters change) and put
-  `appInView` on a *Show N more* button below the list, so it also works by click and without the observer.
+  infinite scrolling: put `appInView` on a *Show N more* button below the list, so it also works by click and without the
+  observer. It loads the next server page (`nextCursor`) for lists paged by the server, or renders a longer slice
+  (`limit` signal, reset when filters change) of a short client-side list.
 - `appBackdropClose` directive on a `<dialog>` – light dismiss: sets `closedby="any"` (the browser closes the dialog and
   fires `close`); where that is unsupported (Safari), `(backdropClose)` fires when press and release both happen on the backdrop.
 

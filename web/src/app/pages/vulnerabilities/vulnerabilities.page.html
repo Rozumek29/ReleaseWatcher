@@ -15,7 +15,7 @@
   </div>
 </header>
 
-@if (!loading() && advisories().length > 0) {
+@if (!loading() && hasAny()) {
   <section class="stats" aria-label="Summary">
     <div class="card stat" [class.alert]="stats().affecting > 0">
       <span class="stat-value">{{ stats().affecting }}</span>
@@ -72,7 +72,7 @@
     <div class="search">
       <app-icon name="search" [size]="16" />
       <label for="search" class="visually-hidden">Search</label>
-      <input id="search" class="input" type="search" placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+      <input id="search" class="input" type="search" placeholder="Search" [value]="searchText()" (input)="searchText.set($any($event.target).value)" />
     </div>
   </div>
 </div>
@@ -83,7 +83,7 @@
       <div class="card advisory skeleton"></div>
     }
   </div>
-} @else if (advisories().length === 0) {
+} @else if (!hasAny()) {
   <div class="card empty">
     <span class="empty-icon"><app-icon name="shield" [size]="22" /></span>
     <h2>No known vulnerabilities</h2>
@@ -92,14 +92,14 @@
       check, at most every 6 hours.
     </p>
   </div>
-} @else if (visible().length === 0) {
+} @else if (advisories().length === 0) {
   <div class="card empty">
     <h2>Nothing matches</h2>
     <p>Try a different search or filter.</p>
   </div>
 } @else {
   <ul class="list">
-    @for (a of shown(); track a.repository.id + a.id; let i = $index) {
+    @for (a of advisories(); track a.repository.id + a.id; let i = $index) {
       <li class="card advisory enter" [style.--i]="i % pageSize < 12 ? i % pageSize : 12" [attr.data-severity]="a.severity" [class.affects]="a.affectsInstalled === true">
         <div class="advisory-main">
           <div class="badges">
@@ -148,10 +148,14 @@
     }
   </ul>
   <div class="list-foot">
-    <span class="muted">Showing {{ shown().length }} of {{ visible().length }}</span>
-    @if (remaining() > 0) {
-      <button type="button" class="btn btn-secondary btn-sm" appInView (inView)="showMore()" (click)="showMore()">
-        Show {{ remaining() < pageSize ? remaining() : pageSize }} more
+    <span class="muted">Showing {{ advisories().length }} of {{ total() }}</span>
+    @if (hasMore()) {
+      <button type="button" class="btn btn-secondary btn-sm" [disabled]="loadingMore()" appInView (inView)="showMore()" (click)="showMore()">
+        @if (loadingMore()) {
+          <app-icon name="refresh" [size]="14" class="spin" /> Loading…
+        } @else {
+          Show {{ remaining() > 0 && remaining() < pageSize ? remaining() : pageSize }} more
+        }
       </button>
     }
   </div>

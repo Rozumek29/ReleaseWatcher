@@ -83,6 +83,19 @@ const SEVERITY_RANK: Record<AdvisorySeverity, number> = { critical: 4, high: 3, 
 /** Positive when `a` is more severe than `b`. */
 export const compareSeverity = (a: AdvisorySeverity, b: AdvisorySeverity): number => SEVERITY_RANK[a] - SEVERITY_RANK[b];
 
+/** Sort key of a severity (stored as `severity_rank`): critical 4 … unknown 0. */
+export const severityRank = (severity: AdvisorySeverity): number => SEVERITY_RANK[severity];
+
+/** Severity of a stored rank (inverse of {@link severityRank}). */
+export const severityOfRank = (rank: number | null): AdvisorySeverity | null =>
+  rank === null ? null : ((Object.keys(SEVERITY_RANK) as AdvisorySeverity[]).find((s) => SEVERITY_RANK[s] === rank) ?? 'unknown');
+
+/** Sort key of "affects an installed version" (stored as `impact`): yes 2, unknown 1, no 0. */
+export const impactRank = (affects: boolean | null): number => (affects === true ? 2 : affects === null ? 1 : 0);
+
+/** Inverse of {@link impactRank}. */
+export const impactOfRank = (rank: number): boolean | null => (rank === 2 ? true : rank === 0 ? false : null);
+
 const CONSTRAINT_PATTERN = /^(>=|<=|>|<|=|==)?\s*(.+)$/;
 const CONSTRAINT_TOKENS = /(>=|<=|==|>|<|=)?\s*([^\s<>=,]+)/g;
 

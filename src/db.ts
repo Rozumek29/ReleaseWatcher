@@ -1,5 +1,15 @@
-import { Database } from 'bun:sqlite';
-import { normalizeSeverity, type AdvisorySource, type AdvisoryVulnerability, type SecurityAdvisory } from './advisories.ts';
+import { Database, type SQLQueryBindings } from 'bun:sqlite';
+import {
+  impactOfRank,
+  normalizeSeverity,
+  severityOfRank,
+  severityRank,
+  type AdvisorySeverity,
+  type AdvisorySource,
+  type AdvisorySummary,
+  type AdvisoryVulnerability,
+  type SecurityAdvisory,
+} from './advisories.ts';
 import type { WatchedRepository } from './domain.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -126,6 +136,82 @@ function parseHeaders(json: string | null): { name: string; value: string }[] {
   } catch {
     return [];
   }
+}
+
+interface PageRow extends AdvisoryRow {
+  impact: number | null;
+  severity_rank: number;
+  affected_versions: string;
+  owner: string;
+  name: string;
+  installed_version: string | null;
+}
+
+/** Filters of the Vulnerabilities page; omitted = no filter. */
+export interface AdvisoryFilter {
+  /** Impact rank: 2 affects an installed version, 1 unknown, 0 not affected. */
+  impact?: number;
+  severity?: AdvisorySeverity;
+  source?: AdvisorySource;
+  /** Text in the summary, the ids/aliases or the repository name (case-insensitive). */
+  query?: string;
+}
+
+/** Sort key of the last advisory of a page. */
+export interface AdvisoryCursor {
+  impact: number;
+  severityRank: number;
+  publishedAt: string;
+  repositoryId: number;
+  advisoryId: string;
+}
+
+export interface AdvisoryPageRow {
+  advisory: SecurityAdvisory;
+  repository: { id: number; owner: string; name: string; installedVersion: string | null };
+  affects: boolean | null;
+  affectedVersions: string[];
+  cursor: AdvisoryCursor;
+}
+
+export interface AdvisoryOverview {
+  total: number;
+  affecting: number;
+  unknown: number;
+  unaffected: number;
+  /** Critical advisories affecting an installed version. */
+  critical: number;
+  /** Repositories with an advisory affecting an installed version. */
+  repositories: number;
+  /** Advisories affecting an installed version without a released fix. */
+  noFix: number;
+  sources: AdvisorySource[];
+}
+
+/** WHERE conditions (on `repository_advisories a JOIN watched_repositories r`) for a filter. */
+function advisoryWhere(filter: AdvisoryFilter): { where: string[]; params: SQLQueryBindings[] } {
+  const where: string[] = [];
+  const params: SQLQueryBindings[] = [];
+  if (filter.impact !== undefined) {
+    where.push('a.impact = ?');
+    params.push(filter.impact);
+  }
+  if (filter.severity !== undefined) {
+    where.push('a.severity_rank = ?');
+    params.push(severityRank(filter.severity));
+  }
+  if (filter.source !== undefined) {
+    where.push('a.source = ?');
+    params.push(filter.source);
+  }
+  const query = filter.query?.trim();
+  if (query) {
+    const pattern = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+    const like = (column: string) => `${column} LIKE ? ESCAPE '\\'`;
+    where.push(`(${['a.summary', 'a.advisory_id', 'a.cve_id', 'a.aliases', "(r.owner || '/' || r.name)"].map(like).join(' OR ')})`);
+    params.push(pattern, pattern, pattern, pattern, pattern);
+  }
+  return { where, params };
 }
 
 /** Schema migrations, applied in order. Append new entries – never edit existing ones. */
@@ -294,6 +380,15 @@ const MIGRATIONS: readonly string[] = [
      first_seen_at   TEXT    NOT NULL,
      PRIMARY KEY (repository_id, advisory_id)
    );`,
+  // Vulnerabilities page: sort keys stored for keyset pagination. `impact` (2 affects an installed version, 1 unknown,
+  // 0 not affected) is computed from the installed versions by `AdvisoryImpacts`; NULL = not computed yet.
+  `ALTER TABLE repository_advisories ADD COLUMN severity_rank INTEGER NOT NULL DEFAULT 0;
+   ALTER TABLE repository_advisories ADD COLUMN impact INTEGER;
+   ALTER TABLE repository_advisories ADD COLUMN affected_versions TEXT NOT NULL DEFAULT '[]';
+   UPDATE repository_advisories SET severity_rank = CASE lower(severity)
+     WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'moderate' THEN 2 WHEN 'low' THEN 1 ELSE 0 END;
+   CREATE INDEX idx_repository_advisories_page
+     ON repository_advisories (impact DESC, severity_rank DESC, published_at DESC, repository_id DESC, advisory_id DESC);`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -451,16 +546,6 @@ export class RepositoryStore {
     return this.db.query<{ n: number }, []>('SELECT total_changes() AS n').get()!.n;
   }
 
-  /** Id, owner, name and installed version of all repositories, sorted like {@link list} – without reading secrets. */
-  listNames(): Pick<WatchedRepository, 'id' | 'owner' | 'name' | 'installedVersion'>[] {
-    return this.db
-      .query<Pick<Row, 'id' | 'owner' | 'name' | 'installed_version'>, []>(
-        'SELECT id, owner, name, installed_version FROM watched_repositories ORDER BY name COLLATE NOCASE, owner COLLATE NOCASE',
-      )
-      .all()
-      .map((r) => ({ id: r.id, owner: r.owner, name: r.name, installedVersion: r.installed_version }));
-  }
-
   /** Stored security advisories of one repository (unsorted). */
   listAdvisories(repositoryId: number): SecurityAdvisory[] {
     return this.db
@@ -486,40 +571,6 @@ export class RepositoryStore {
     return rows.map((r) => ({ id: r.advisory_id, aliases: parseStringArray(r.aliases), cveId: r.cve_id }));
   }
 
-  /** Severity and affected ranges of the advisories of all repositories (what summaries need), by repository id. */
-  listAdvisoryImpacts(): Map<number, Pick<SecurityAdvisory, 'severity' | 'vulnerabilities'>[]> {
-    const result = new Map<number, Pick<SecurityAdvisory, 'severity' | 'vulnerabilities'>[]>();
-    const rows = this.db
-      .query<Pick<AdvisoryRow, 'repository_id' | 'severity' | 'vulnerabilities'>, []>(
-        'SELECT repository_id, severity, vulnerabilities FROM repository_advisories',
-      )
-      .all();
-    for (const row of rows) {
-      const impact = { severity: normalizeSeverity(row.severity), vulnerabilities: parseVulnerabilities(row.vulnerabilities) };
-      const list = result.get(row.repository_id);
-      if (list) {
-        list.push(impact);
-      } else {
-        result.set(row.repository_id, [impact]);
-      }
-    }
-    return result;
-  }
-
-  /** Security advisories of all repositories, by repository id. */
-  listAllAdvisories(): Map<number, SecurityAdvisory[]> {
-    const result = new Map<number, SecurityAdvisory[]>();
-    for (const row of this.db.query<AdvisoryRow, []>('SELECT * FROM repository_advisories').all()) {
-      const list = result.get(row.repository_id);
-      if (list) {
-        list.push(toAdvisory(row));
-      } else {
-        result.set(row.repository_id, [toAdvisory(row)]);
-      }
-    }
-    return result;
-  }
-
   /** Inserts or updates advisories in one transaction (see {@link saveAdvisory}). */
   saveAdvisories(repositoryId: number, advisories: readonly SecurityAdvisory[], now: Date): void {
     if (advisories.length > 0) {
@@ -540,12 +591,14 @@ export class RepositoryStore {
       .query(
         `INSERT INTO repository_advisories
            (repository_id, advisory_id, source, aliases, cve_id, summary, severity, cvss_score, html_url, published_at,
-            updated_at, vulnerabilities, first_seen_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            updated_at, vulnerabilities, first_seen_at, severity_rank)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (repository_id, advisory_id) DO UPDATE SET
            source = excluded.source, aliases = excluded.aliases, cve_id = excluded.cve_id, summary = excluded.summary, severity = excluded.severity,
            cvss_score = excluded.cvss_score, html_url = excluded.html_url, published_at = excluded.published_at,
-           updated_at = excluded.updated_at, vulnerabilities = excluded.vulnerabilities
+           updated_at = excluded.updated_at, vulnerabilities = excluded.vulnerabilities, severity_rank = excluded.severity_rank,
+           -- The impact depends only on the vulnerable ranges: computed again when they change.
+           impact = CASE WHEN vulnerabilities IS excluded.vulnerabilities THEN impact END
          WHERE source IS NOT excluded.source OR aliases IS NOT excluded.aliases OR cve_id IS NOT excluded.cve_id
            OR summary IS NOT excluded.summary OR severity IS NOT excluded.severity OR cvss_score IS NOT excluded.cvss_score
            OR html_url IS NOT excluded.html_url OR published_at IS NOT excluded.published_at
@@ -565,7 +618,139 @@ export class RepositoryStore {
         advisory.updatedAt,
         JSON.stringify(advisory.vulnerabilities),
         now.toISOString(),
+        severityRank(advisory.severity),
       );
+  }
+
+  /** Advisories whose impact must be computed: not computed yet, or of a repository whose installed versions changed. */
+  listAdvisoriesForImpact(
+    repositoryIds: readonly number[],
+  ): { repositoryId: number; advisoryId: string; vulnerabilities: AdvisoryVulnerability[] }[] {
+    return this.db
+      .query<Pick<AdvisoryRow, 'repository_id' | 'advisory_id' | 'vulnerabilities'>, [string]>(
+        `SELECT repository_id, advisory_id, vulnerabilities FROM repository_advisories
+         WHERE impact IS NULL OR repository_id IN (SELECT value FROM json_each(?))`,
+      )
+      .all(JSON.stringify(repositoryIds))
+      .map((r) => ({ repositoryId: r.repository_id, advisoryId: r.advisory_id, vulnerabilities: parseVulnerabilities(r.vulnerabilities) }));
+  }
+
+  /** Stores computed impacts in one transaction; unchanged rows are not written. */
+  saveAdvisoryImpacts(
+    impacts: readonly { repositoryId: number; advisoryId: string; impact: number; affectedVersions: readonly string[] }[],
+  ): void {
+    if (impacts.length === 0) {
+      return;
+    }
+    const update = this.db.query(
+      `UPDATE repository_advisories SET impact = ?1, affected_versions = ?2
+       WHERE repository_id = ?3 AND advisory_id = ?4 AND (impact IS NOT ?1 OR affected_versions IS NOT ?2)`,
+    );
+    this.db.transaction(() => {
+      for (const i of impacts) {
+        update.run(i.impact, JSON.stringify(i.affectedVersions), i.repositoryId, i.advisoryId);
+      }
+    })();
+  }
+
+  /** Advisory summary per repository (all, or one), aggregated by SQLite from the stored impacts. */
+  advisorySummaries(repositoryId?: number): Map<number, AdvisorySummary> {
+    type SummaryRow = { repository_id: number; total: number; affecting: number; affecting_rank: number | null; top_rank: number | null };
+    const select = `SELECT repository_id, count(*) AS total, coalesce(sum(impact = 2), 0) AS affecting,
+                           max(CASE WHEN impact = 2 THEN severity_rank END) AS affecting_rank, max(severity_rank) AS top_rank
+                    FROM repository_advisories`;
+    const rows =
+      repositoryId === undefined
+        ? this.db.query<SummaryRow, []>(`${select} GROUP BY repository_id`).all()
+        : this.db.query<SummaryRow, [number]>(`${select} WHERE repository_id = ? GROUP BY repository_id`).all(repositoryId);
+    return new Map(
+      rows.map((r) => [
+        r.repository_id,
+        { total: r.total, affecting: r.affecting, highestSeverity: severityOfRank(r.affecting > 0 ? r.affecting_rank : r.top_rank) },
+      ]),
+    );
+  }
+
+  /** Number of all advisories and of those affecting an installed version (status summary). */
+  advisoryTotals(): { total: number; affecting: number } {
+    return this.db
+      .query<{ total: number; affecting: number }, []>(
+        'SELECT count(*) AS total, coalesce(sum(impact = 2), 0) AS affecting FROM repository_advisories',
+      )
+      .get()!;
+  }
+
+  /** Counts for the Vulnerabilities page (over all advisories, independent of filters) and the sources present. */
+  advisoryOverview(): AdvisoryOverview {
+    const row = this.db
+      .query<Omit<AdvisoryOverview, 'sources'>, []>(
+        `SELECT count(*) AS total,
+                coalesce(sum(impact = 2), 0) AS affecting,
+                coalesce(sum(impact IS NULL OR impact = 1), 0) AS unknown,
+                coalesce(sum(impact = 0), 0) AS unaffected,
+                coalesce(sum(impact = 2 AND severity_rank = 4), 0) AS critical,
+                count(DISTINCT CASE WHEN impact = 2 THEN repository_id END) AS repositories,
+                coalesce(sum(impact = 2 AND EXISTS (
+                  SELECT 1 FROM json_each(vulnerabilities) WHERE coalesce(json_extract(value, '$.patchedVersions'), '') = ''
+                )), 0) AS noFix
+         FROM repository_advisories`,
+      )
+      .get()!;
+    const sources = this.db
+      .query<{ source: string }, []>('SELECT DISTINCT source FROM repository_advisories ORDER BY source')
+      .all()
+      .map((r): AdvisorySource => (r.source === 'osv' ? 'osv' : 'github'));
+    return { ...row, sources };
+  }
+
+  /**
+   * One page of the advisories of all repositories: affecting an installed version first, then most severe, then
+   * newest. Keyset pagination – `after` is the cursor of the last row of the previous page, so rows added or removed
+   * meanwhile never shift the following pages. Returns up to `limit` rows and whether more follow.
+   */
+  pageAdvisories(filter: AdvisoryFilter, after: AdvisoryCursor | null, limit: number): { rows: AdvisoryPageRow[]; hasMore: boolean } {
+    const { where, params } = advisoryWhere(filter);
+    if (after) {
+      where.push('(a.impact, a.severity_rank, a.published_at, a.repository_id, a.advisory_id) < (?, ?, ?, ?, ?)');
+      params.push(after.impact, after.severityRank, after.publishedAt, after.repositoryId, after.advisoryId);
+    }
+    params.push(limit + 1);
+    const rows = this.db
+      .query<PageRow, SQLQueryBindings[]>(
+        `SELECT a.*, r.owner, r.name, r.installed_version
+         FROM repository_advisories a JOIN watched_repositories r ON r.id = a.repository_id
+         ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY a.impact DESC, a.severity_rank DESC, a.published_at DESC, a.repository_id DESC, a.advisory_id DESC
+         LIMIT ?`,
+      )
+      .all(...params);
+    return {
+      hasMore: rows.length > limit,
+      rows: rows.slice(0, limit).map((r) => ({
+        advisory: toAdvisory(r),
+        repository: { id: r.repository_id, owner: r.owner, name: r.name, installedVersion: r.installed_version },
+        affects: impactOfRank(r.impact ?? 1),
+        affectedVersions: parseStringArray(r.affected_versions),
+        cursor: {
+          impact: r.impact ?? 1,
+          severityRank: r.severity_rank,
+          publishedAt: r.published_at,
+          repositoryId: r.repository_id,
+          advisoryId: r.advisory_id,
+        },
+      })),
+    };
+  }
+
+  /** Number of advisories matching `filter`. */
+  countAdvisories(filter: AdvisoryFilter): number {
+    const { where, params } = advisoryWhere(filter);
+    return this.db
+      .query<{ n: number }, SQLQueryBindings[]>(
+        `SELECT count(*) AS n FROM repository_advisories a JOIN watched_repositories r ON r.id = a.repository_id
+         ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}`,
+      )
+      .get(...params)!.n;
   }
 
   /** Removes advisories of `source` that are no longer published (withdrawn or deleted), or all of it without `keepIds`. */

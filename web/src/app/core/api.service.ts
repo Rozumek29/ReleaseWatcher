@@ -1,8 +1,10 @@
-import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 import {
   AddRepositoryRequest,
+  AdvisoryPage,
+  AdvisoryQuery,
   AppSettings,
   AppStatus,
   BackupStorage,
@@ -16,7 +18,6 @@ import {
   InstalledVersionTestResult,
   Notifier,
   RateLimit,
-  RepositoryAdvisory,
   Run,
   RunPage,
   RunSummary,
@@ -49,8 +50,15 @@ export class ApiService {
     return this.http.delete<void>(`${this.baseUrl}/repositories/${id}`);
   }
 
-  getAllAdvisories(): Observable<RepositoryAdvisory[]> {
-    return this.http.get<RepositoryAdvisory[]>(`${this.baseUrl}/advisories`);
+  /** One page of the advisories of all repositories (filters applied by the server). */
+  getAdvisoryPage(query: AdvisoryQuery = {}): Observable<AdvisoryPage> {
+    let params = new HttpParams();
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== '' && value !== 'all') {
+        params = params.set(key, String(value));
+      }
+    }
+    return this.http.get<AdvisoryPage>(`${this.baseUrl}/advisories`, { params });
   }
 
   getAdvisories(id: number): Observable<SecurityAdvisory[]> {

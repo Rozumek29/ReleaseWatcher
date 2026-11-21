@@ -5,15 +5,17 @@ import {
   installedVersions,
   OSV_ECOSYSTEMS,
   sortAdvisories,
-  summarizeAdvisories,
+  type AdvisorySeverity,
+  type AdvisorySource,
   type AdvisorySummary,
   type SecurityAdvisory,
 } from './advisories.ts';
+import { AdvisoryImpacts } from './advisory-impacts.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
 import { ReleaseChecker } from './checker.ts';
-import type { RepositoryStore } from './db.ts';
+import type { AdvisoryCursor, AdvisoryFilter, RepositoryStore } from './db.ts';
 import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import { errorMessage, noStore, problem, validationProblem } from './http.ts';
@@ -156,10 +158,8 @@ export interface App {
   close(): Promise<void>;
 }
 
-/** Public shape of a security advisory, with its impact on the installed versions. */
-export const advisoryDto = (a: SecurityAdvisory, versions: readonly string[]) => {
-  const impact = advisoryImpact(a, versions);
-  return {
+/** Public fields of a security advisory (without its impact on the installed versions). */
+const advisoryFields = (a: SecurityAdvisory) => ({
   id: a.id,
   source: a.source,
   aliases: a.aliases,
@@ -175,11 +175,95 @@ export const advisoryDto = (a: SecurityAdvisory, versions: readonly string[]) =>
     vulnerableRange: v.vulnerableRange,
     patchedVersions: v.patchedVersions,
   })),
-  /** True when an installed version is affected, false when all are known to be safe, otherwise null. */
-  affectsInstalled: impact.affects,
-  affectedVersions: impact.affectedVersions,
+});
+
+/** Public shape of a security advisory, with its impact on the installed versions. */
+export const advisoryDto = (a: SecurityAdvisory, versions: readonly string[]) => {
+  const impact = advisoryImpact(a, versions);
+  return {
+    ...advisoryFields(a),
+    /** True when an installed version is affected, false when all are known to be safe, otherwise null. */
+    affectsInstalled: impact.affects,
+    affectedVersions: impact.affectedVersions,
   };
 };
+
+const IMPACT_FILTERS: Record<string, number> = { affecting: 2, unknown: 1, unaffected: 0 };
+const SEVERITIES: readonly AdvisorySeverity[] = ['critical', 'high', 'medium', 'low', 'unknown'];
+const ADVISORY_SOURCES: readonly AdvisorySource[] = ['github', 'osv'];
+export const ADVISORY_PAGE_SIZE = 50;
+const MAX_ADVISORY_PAGE_SIZE = 200;
+
+/** Filters of `GET /api/advisories` from the query string; "all" or a missing parameter = no filter. */
+function advisoryFilterFrom(params: URLSearchParams): AdvisoryFilter {
+  const filter: AdvisoryFilter = {};
+  const impact = params.get('impact');
+  if (impact && impact !== 'all') {
+    const rank = IMPACT_FILTERS[impact];
+    if (rank === undefined) {
+      throw new RequestValidationError('impact must be all, affecting, unknown or unaffected.');
+    }
+    filter.impact = rank;
+  }
+  const severity = params.get('severity');
+  if (severity && severity !== 'all') {
+    if (!SEVERITIES.includes(severity as AdvisorySeverity)) {
+      throw new RequestValidationError(`severity must be all, ${SEVERITIES.join(', ')}.`);
+    }
+    filter.severity = severity as AdvisorySeverity;
+  }
+  const source = params.get('source');
+  if (source && source !== 'all') {
+    if (!ADVISORY_SOURCES.includes(source as AdvisorySource)) {
+      throw new RequestValidationError('source must be all, github or osv.');
+    }
+    filter.source = source as AdvisorySource;
+  }
+  const query = params.get('q')?.trim();
+  if (query) {
+    if (query.length > 200) {
+      throw new RequestValidationError('q must be at most 200 characters.');
+    }
+    filter.query = query;
+  }
+  return filter;
+}
+
+function pageLimitFrom(value: string | null): number {
+  if (value === null) {
+    return ADVISORY_PAGE_SIZE;
+  }
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_ADVISORY_PAGE_SIZE) {
+    throw new RequestValidationError(`limit must be a whole number from 1 to ${MAX_ADVISORY_PAGE_SIZE}.`);
+  }
+  return limit;
+}
+
+/** Opaque cursor: the sort key of the last advisory of a page, as base64url JSON. */
+const encodeAdvisoryCursor = (c: AdvisoryCursor): string =>
+  Buffer.from(JSON.stringify([c.impact, c.severityRank, c.publishedAt, c.repositoryId, c.advisoryId])).toString('base64url');
+
+function decodeAdvisoryCursor(value: string): AdvisoryCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, 'base64url').toString('utf8')) as unknown;
+    if (Array.isArray(parsed) && parsed.length === 5) {
+      const [impact, severityRank, publishedAt, repositoryId, advisoryId] = parsed as unknown[];
+      if (
+        Number.isInteger(impact) &&
+        Number.isInteger(severityRank) &&
+        typeof publishedAt === 'string' &&
+        Number.isInteger(repositoryId) &&
+        typeof advisoryId === 'string'
+      ) {
+        return { impact: impact as number, severityRank: severityRank as number, publishedAt, repositoryId: repositoryId as number, advisoryId };
+      }
+    }
+  } catch {
+    // Reported below.
+  }
+  throw new RequestValidationError('cursor is not valid – load the list from the first page again.');
+}
 
 /** Public shape of a watched repository (internal fields like the ETag are not exposed). */
 export const toDto = (
@@ -341,20 +425,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     return byRepository;
   };
-  /**
-   * Values derived only from the database are computed again only after a write (`store.revision()`): the status is
-   * polled every 30 s, and comparing every advisory with the installed versions is the expensive part.
-   */
-  const revision = () => deps.store.revision();
-  const advisorySummaries = cachedByRevision(revision, () => {
-    const linked = linkedAppVersions();
-    const impacts = deps.store.listAdvisoryImpacts();
-    const summaries = new Map<number, AdvisorySummary>();
-    for (const repo of deps.store.listStatusFields()) {
-      summaries.set(repo.id, summarizeAdvisories(impacts.get(repo.id) ?? [], installedVersions(repo.installedVersion, linked.get(repo.id))));
-    }
-    return { linked, summaries };
-  });
+  /** Stored impacts of the advisories on the installed versions; `refresh()` before reading summaries or pages. */
+  const impacts = new AdvisoryImpacts(deps.store, linkedAppVersions);
   const checker = new ReleaseChecker({
     store: deps.store,
     source: deps.source,
@@ -507,50 +579,61 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       },
       containers: containerStatus(containerStore),
       advisories: (() => {
-        let total = 0;
-        let affecting = 0;
-        for (const summary of advisorySummaries().summaries.values()) {
-          total += summary.total;
-          affecting += summary.affecting;
-        }
-        return { total, affecting };
+        impacts.refresh();
+        return store.advisoryTotals();
       })(),
     };
   };
 
   const findRepository = (rawId: string) => store.get(parseId(rawId));
   const repositoryDto = (repo: WatchedRepository) => {
-    const linked = containerStore.linkedAppVersions(repo.id);
-    return toDto(repo, summarizeAdvisories(store.listAdvisories(repo.id), installedVersions(repo.installedVersion, linked)), linked);
+    impacts.refresh();
+    return toDto(repo, store.advisorySummaries(repo.id).get(repo.id), containerStore.linkedAppVersions(repo.id));
   };
-  const repositoryVersions = (repo: Pick<WatchedRepository, 'id' | 'installedVersion'>, linked = linkedAppVersions()) =>
-    installedVersions(repo.installedVersion, linked.get(repo.id));
-  /** Response bodies of the repository and vulnerability lists, serialized once per database revision. */
-  const repositoriesJson = cachedByRevision(revision, () => {
-    const { summaries, linked } = advisorySummaries();
-    return JSON.stringify(store.list().map((r) => toDto(r, summaries.get(r.id), linked.get(r.id))));
-  });
-  const advisoriesJson = cachedByRevision(revision, () => {
-    const all = store.listAllAdvisories();
-    const { linked } = advisorySummaries();
-    return JSON.stringify(
-      store.listNames().flatMap((repo) => {
-        const versions = repositoryVersions(repo, linked);
-        return sortAdvisories(all.get(repo.id) ?? []).map((a) => ({
-          ...advisoryDto(a, versions),
-          repository: {
-            id: repo.id,
-            fullName: fullName(repo),
-            owner: repo.owner,
-            url: `https://github.com/${fullName(repo)}`,
-            avatarUrl: ownerAvatarUrl(repo.owner),
-            installedVersion: repo.installedVersion,
-            installedVersions: versions,
-          },
-        }));
-      }),
-    );
-  });
+  /**
+   * Body of the repository list, serialized again only after a database write (`store.revision()`): building it
+   * decrypts the tokens of every repository. `impacts.refresh()` runs first, as it may write.
+   */
+  const repositoriesJson = cachedByRevision(
+    () => store.revision(),
+    () => {
+      const summaries = store.advisorySummaries();
+      const linked = linkedAppVersions();
+      return JSON.stringify(store.list().map((r) => toDto(r, summaries.get(r.id), linked.get(r.id))));
+    },
+  );
+  /** `GET /api/advisories`: one page (keyset pagination) plus, on the first page, the counts of the page header. */
+  const listAdvisories = (req: Request) => {
+    const params = new URL(req.url).searchParams;
+    const filter = advisoryFilterFrom(params);
+    const cursor = params.get('cursor');
+    const after = cursor ? decodeAdvisoryCursor(cursor) : null;
+    const limit = pageLimitFrom(params.get('limit'));
+    impacts.refresh();
+    const page = store.pageAdvisories(filter, after, limit);
+    const linked = linkedAppVersions();
+    const last = page.rows.at(-1);
+    return Response.json({
+      items: page.rows.map((row) => ({
+        ...advisoryFields(row.advisory),
+        affectsInstalled: row.affects,
+        affectedVersions: row.affectedVersions,
+        repository: {
+          id: row.repository.id,
+          fullName: fullName(row.repository),
+          owner: row.repository.owner,
+          url: `https://github.com/${fullName(row.repository)}`,
+          avatarUrl: ownerAvatarUrl(row.repository.owner),
+          installedVersion: row.repository.installedVersion,
+          installedVersions: installedVersions(row.repository.installedVersion, linked.get(row.repository.id)),
+        },
+      })),
+      nextCursor: page.hasMore && last ? encodeAdvisoryCursor(last.cursor) : null,
+      // Counts are only needed with the first page; following pages skip the extra queries.
+      total: after ? null : store.countAdvisories(filter),
+      overview: after ? null : store.advisoryOverview(),
+    });
+  };
   const jsonBody = (body: string) => new Response(body, { headers: { 'content-type': 'application/json;charset=utf-8' } });
 
   const addRepository = async (req: Request) => {
@@ -809,7 +892,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         }),
 
         '/api/repositories': {
-          GET: () => jsonBody(repositoriesJson()),
+          GET: () => {
+            impacts.refresh();
+            return jsonBody(repositoriesJson());
+          },
           POST: addRepository,
         },
         '/api/repositories/:id': {
@@ -833,7 +919,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         },
         // Security advisories of all repositories (Vulnerabilities page), newest first.
         '/api/advisories': {
-          GET: () => jsonBody(advisoriesJson()),
+          GET: listAdvisories,
         },
         // Security advisories of the repository, newest first.
         '/api/repositories/:id/advisories': {
@@ -842,7 +928,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             if (!repo) {
               return problem(404, 'Repository not found.');
             }
-            return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, repositoryVersions(repo))));
+            const versions = installedVersions(repo.installedVersion, containerStore.linkedAppVersions(repo.id));
+            return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, versions)));
           },
         },
 

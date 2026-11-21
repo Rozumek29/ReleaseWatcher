@@ -92,8 +92,21 @@ describe('HTTP API', () => {
     assert.equal(checked.repository.advisories.affecting, 2);
     assert.equal((await inject('/api/repositories')).json()[0].advisories.total, 3);
 
-    const all = (await inject('/api/advisories')).json();
+    const page = (await inject('/api/advisories')).json();
+    const all = page.items;
     assert.equal(all.length, 3);
+    assert.equal(page.total, 3);
+    assert.equal(page.nextCursor, null);
+    assert.deepEqual(page.overview, {
+      total: 3,
+      affecting: 2,
+      unknown: 0,
+      unaffected: 1,
+      critical: 1,
+      repositories: 1,
+      noFix: 0,
+      sources: ['github'],
+    });
     assert.deepEqual(all[0].repository, {
       id: created.id,
       fullName: 'acme/widget',
@@ -105,6 +118,68 @@ describe('HTTP API', () => {
     });
     assert.deepEqual(all[0].affectedVersions, ['0.9.0']);
     assert.deepEqual((await inject('/api/status')).json().advisories, { total: 3, affecting: 2 });
+  });
+
+  it('pages advisories with a cursor, sorted by impact, severity and date', async () => {
+    const severities = ['low', 'critical', 'medium', 'high'] as const;
+    source.advisories = Array.from({ length: 12 }, (_, i) =>
+      // Even ones affect 0.9.0 (< 1.0.0), odd ones do not (< 0.5.0).
+      advisory(`GHSA-${String(i).padStart(4, '0')}-0000-0000`, i + 1, i % 2 === 0 ? '< 1.0.0' : '< 0.5.0', {
+        severity: severities[i % 4]!,
+        summary: i === 7 ? 'Prototype pollution in parser' : 'Something',
+      }),
+    );
+    const created = (await add('acme/widget')).json();
+    await inject({ method: 'PUT', url: `/api/repositories/${created.id}`, payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://widget.lan/version' } });
+
+    type Item = { id: string; affectsInstalled: boolean | null; severity: string; publishedAt: string };
+    const rank = { critical: 4, high: 3, medium: 2, low: 1, unknown: 0 } as Record<string, number>;
+    const seen: Item[] = [];
+    let cursor: string | null = null;
+    let first = true;
+    do {
+      const response = await inject(`/api/advisories?limit=5${cursor ? `&cursor=${cursor}` : ''}`);
+      const page = response.json();
+      if (first) {
+        assert.equal(page.total, 12);
+        assert.equal(page.overview.affecting, 6);
+        // A new advisory between two pages must not shift or repeat rows of the following pages.
+        store.saveAdvisory(created.id, advisory('GHSA-zzzz-0000-0000', 30, '< 1.0.0', { severity: 'critical' }), new Date());
+        first = false;
+      } else {
+        assert.equal(page.total, null);
+        assert.equal(page.overview, null);
+      }
+      seen.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+
+    assert.deepEqual(seen.map((a) => a.id).sort(), source.advisories.map((a) => a.id).sort());
+    const sorted = seen.toSorted(
+      (a, b) =>
+        Number(b.affectsInstalled === true) - Number(a.affectsInstalled === true) ||
+        rank[b.severity]! - rank[a.severity]! ||
+        Date.parse(b.publishedAt) - Date.parse(a.publishedAt),
+    );
+    assert.deepEqual(seen.map((a) => a.id), sorted.map((a) => a.id));
+
+    // Filters and search run in SQLite; the counts above the list ignore them.
+    const affectingCritical = (await inject('/api/advisories?impact=affecting&severity=critical')).json();
+    // Even ones are low/medium, so only the advisory added meanwhile is critical and affects 0.9.0.
+    assert.deepEqual(affectingCritical.items.map((a: Item) => a.id), ['GHSA-zzzz-0000-0000']);
+    assert.equal(affectingCritical.total, 1);
+    assert.equal(affectingCritical.overview.total, 13);
+    assert.equal(affectingCritical.overview.critical, 1);
+    const unaffected = (await inject('/api/advisories?impact=unaffected&source=github')).json();
+    assert.equal(unaffected.total, 6);
+    assert.deepEqual((await inject('/api/advisories?q=POLLUTION')).json().items.map((a: Item) => a.id), ['GHSA-0007-0000-0000']);
+    assert.equal((await inject('/api/advisories?q=acme/wid')).json().total, 13);
+    assert.equal((await inject('/api/advisories?q=100%25')).json().total, 0);
+    assert.equal((await inject('/api/advisories?source=osv')).json().total, 0);
+
+    for (const query of ['impact=maybe', 'severity=huge', 'source=nvd', 'limit=0', 'limit=500', 'limit=abc', 'cursor=bm9wZQ']) {
+      assert.equal((await inject(`/api/advisories?${query}`)).statusCode, 400, query);
+    }
   });
 
   it('compares advisories with the versions of linked container apps', async () => {
@@ -133,7 +208,7 @@ describe('HTTP API', () => {
     assert.deepEqual(repo.installedVersions, ['0.4.0', '1.2.0']);
     assert.equal(repo.advisories.affecting, 2);
 
-    const all = (await inject('/api/advisories')).json();
+    const all = (await inject('/api/advisories')).json().items;
     assert.deepEqual(
       all.map((a: { id: string; affectsInstalled: boolean | null; affectedVersions: string[] }) => [a.id, a.affectsInstalled, a.affectedVersions]),
       [['GHSA-new1-0000-0000', true, ['0.4.0']], ['GHSA-old1-0000-0000', true, ['0.4.0']]],
@@ -147,7 +222,7 @@ describe('HTTP API', () => {
     const refreshed = await inject('/api/advisories');
     assert.match(refreshed.headers.get('content-type') ?? '', /^application\/json/);
     assert.deepEqual(
-      refreshed.json().map((a: { id: string; affectsInstalled: boolean | null }) => [a.id, a.affectsInstalled]),
+      refreshed.json().items.map((a: { id: string; affectsInstalled: boolean | null }) => [a.id, a.affectsInstalled]),
       [['GHSA-new1-0000-0000', true], ['GHSA-old1-0000-0000', false]],
     );
     assert.equal((await inject('/api/repositories')).json()[0].advisories.affecting, 1);
