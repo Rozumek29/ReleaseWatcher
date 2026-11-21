@@ -304,7 +304,8 @@ keeps the configuration, the account and the data.
 
 | Option | Description |
 | --- | --- |
-| `--node <host>`, `--user`, `--port`, `--identity <key file>` | SSH access to the node; default to **Settings → Proxmox node** of your local instance |
+| `--node <host>`, `--user`, `--port` | the node to connect to; default to **Settings → Proxmox node** of your local instance |
+| `--identity <key file>` | SSH key for the node; default: your normal ssh setup (`~/.ssh`, agent, `~/.ssh/config`). On Windows the system OpenSSH client is used, so keys in the Windows ssh-agent work |
 | `--db` | also copy your local database when the container has none yet |
 | `--force-db` | replace an existing database in the container |
 

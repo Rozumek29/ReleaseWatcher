@@ -8,7 +8,7 @@
 //   --node <host>      Proxmox node; default: the host saved in the local database (Settings → Proxmox node)
 //   --user <name>      SSH user on the node (default: root, or the one saved in the local database)
 //   --port <port>      SSH port (default: 22, or the saved one)
-//   --identity <file>  SSH private key; default: the key saved in the local database, else your normal ssh setup
+//   --identity <file>  SSH private key; default: your normal ssh setup (~/.ssh, agent, ~/.ssh/config)
 //   --db               copy the local database (repositories, containers, settings) – only when the container has
 //                      none yet; add --force-db to replace an existing one
 //   --skip-build       reuse dist/releasewatcher-linux-x64
@@ -19,7 +19,6 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { writePrivateKeyFile } from '../src/proxmox/ssh.ts';
 import { compile } from './compile.ts';
 
 const root = resolve(import.meta.dir, '..');
@@ -117,25 +116,29 @@ try {
     uploads.push('releasewatcher.db');
   }
 
-  // 3. SSH options: the key saved in the local database, an explicit one, or the user's normal ssh setup
-  const sshOptions = ['-p', port, '-o', 'StrictHostKeyChecking=accept-new'];
+  // 3. SSH options: an explicit key or the user's normal ssh setup
+  // BatchMode: a rejected key would otherwise fall back to a password prompt that never shows under Bun.spawnSync
+  // on Windows, and the deploy would hang silently instead of failing.
+  const sshOptions = ['-p', port, '-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10'];
   if (values.identity) {
     sshOptions.push('-i', resolve(values.identity), '-o', 'IdentitiesOnly=yes');
-  } else if (saved['proxmoxSshKey']) {
-    const keyFile = join(staging, 'id');
-    writePrivateKeyFile(keyFile, saved['proxmoxSshKey']);
-    sshOptions.push('-i', keyFile, '-o', 'IdentitiesOnly=yes');
   }
+  // On Windows use the system OpenSSH client: it talks to the Windows ssh-agent service, while the ssh from Git
+  // for Windows (first on PATH in Git Bash) cannot see those keys and fails with "Permission denied".
+  const windowsOpenSsh = join(process.env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'OpenSSH');
+  const useWindowsSsh = process.platform === 'win32' && existsSync(join(windowsOpenSsh, 'ssh.exe'));
+  const ssh = useWindowsSsh ? join(windowsOpenSsh, 'ssh.exe') : 'ssh';
+  const scp = useWindowsSsh ? join(windowsOpenSsh, 'scp.exe') : 'scp';
   const target = `${user}@${node}`;
   const remoteDir = `/tmp/releasewatcher-deploy-${process.pid}`;
   const run = (cmd: string[], cwd = staging) => Bun.spawnSync(cmd, { cwd, stdin: 'inherit', stdout: 'inherit', stderr: 'inherit' });
 
   // 4. Upload to the node (relative paths: scp would read "C:\…" as a host name)
   step(`Uploading to ${target}`);
-  if (run(['ssh', ...sshOptions, target, `mkdir -p ${remoteDir}`]).exitCode !== 0) {
+  if (run([ssh, ...sshOptions, target, `mkdir -p ${remoteDir}`]).exitCode !== 0) {
     fail(`Cannot connect to ${target} over SSH.`);
   }
-  if (run(['scp', '-q', ...sshOptions.map((o) => (o === '-p' ? '-P' : o)), ...uploads, `${target}:${remoteDir}/`]).exitCode !== 0) {
+  if (run([scp, '-q', ...sshOptions.map((o) => (o === '-p' ? '-P' : o)), ...uploads, `${target}:${remoteDir}/`]).exitCode !== 0) {
     fail('Upload to the node failed.');
   }
 
@@ -152,7 +155,7 @@ try {
     `${sudo}pct exec ${vmid} -- env FORCE_DB=${values['force-db'] ? 1 : 0} sh /root/releasewatcher-deploy/install.sh /root/releasewatcher-deploy`,
     `${sudo}pct exec ${vmid} -- rm -rf /root/releasewatcher-deploy`,
   ].join('\n');
-  if (run(['ssh', ...sshOptions, target, remote]).exitCode !== 0) {
+  if (run([ssh, ...sshOptions, target, remote]).exitCode !== 0) {
     fail(`Installation in CT ${vmid} failed – see the output above.`);
   }
 } finally {
