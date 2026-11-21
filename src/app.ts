@@ -914,7 +914,18 @@ export async function buildApp(deps: AppDeps): Promise<App> {
               return problem(404, 'Repository not found.');
             }
             const result = await checker.check(repo, { forceAdvisories: true });
-            return Response.json({ repository: repositoryDto(repo), notifiedCount: result.notifiedCount + result.advisoryCount });
+            // A new release changes the latest version of linked container apps: check those containers in the background.
+            const containerIds = result.newReleaseCount > 0 && shell.isConfigured ? containerStore.enabledIdsLinkedTo(repo.id) : [];
+            if (containerIds.length > 0) {
+              scheduler.checkMany(containerIds).catch((error: unknown) =>
+                log.error({ err: error, repo: fullName(repo) }, 'Checking linked containers failed'),
+              );
+            }
+            return Response.json({
+              repository: repositoryDto(repo),
+              notifiedCount: result.notifiedCount + result.advisoryCount,
+              containerChecks: containerIds.length,
+            });
           },
         },
         // Security advisories of all repositories (Vulnerabilities page), newest first.

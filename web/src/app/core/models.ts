@@ -105,6 +105,8 @@ export interface InstalledVersionTestResult {
 export interface CheckResult {
   repository: WatchedRepository;
   notifiedCount: number;
+  /** Linked containers whose check was started because the check found a new release. */
+  containerChecks: number;
 }
 
 export interface Notifier {

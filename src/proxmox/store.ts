@@ -298,6 +298,17 @@ export class ContainerStore {
       .map((r) => r.installed_version);
   }
 
+  /** Ids of the enabled containers with an application linked to a repository. */
+  enabledIdsLinkedTo(repositoryId: number): number[] {
+    return this.db
+      .query<{ id: number }, [number]>(
+        `SELECT DISTINCT c.id FROM containers c JOIN container_apps a ON a.container_id = c.id
+          WHERE a.repository_id = ? AND c.is_enabled = 1 ORDER BY c.vmid`,
+      )
+      .all(repositoryId)
+      .map((r) => r.id);
+  }
+
   /** Counts for the status summary, computed by SQLite (no rows are read, no secrets decrypted). */
   statusCounts(): { total: number; enabled: number; withErrors: number; aptPending: number; homeAssistantUpdates: number } {
     return this.db

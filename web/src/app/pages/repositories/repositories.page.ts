@@ -166,10 +166,14 @@ export class RepositoriesPage {
     await this.withBusy(repo.id, async () => {
       const result = await firstValueFrom(this.api.checkNow(repo.id));
       this.replace(result.repository);
+      const containers =
+        result.containerChecks > 0 ? ` Checking ${result.containerChecks} linked container(s).` : '';
       if (result.repository.lastError) {
         this.toast.error(result.repository.lastError);
       } else if (result.notifiedCount > 0) {
-        this.toast.success(`${repo.fullName}: sent ${result.notifiedCount} notification(s).`);
+        this.toast.success(`${repo.fullName}: sent ${result.notifiedCount} notification(s).${containers}`);
+      } else if (containers) {
+        this.toast.success(`${repo.fullName}: new release found.${containers}`);
       } else {
         this.toast.info(`${repo.fullName}: no new releases.`);
       }

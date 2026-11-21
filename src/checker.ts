@@ -24,6 +24,8 @@ export type InstalledVersionFetcher = (
 ) => Promise<InstalledVersionResult>;
 
 export interface CheckResult {
+  /** Releases newer than the baseline found by this check (notified or not – e.g. already installed). */
+  newReleaseCount: number;
   /** Notifications about new releases. */
   notifiedCount: number;
   /** Notifications about new security advisories. */
@@ -283,6 +285,7 @@ export class ReleaseChecker {
    */
   async check(repo: WatchedRepository, options: { forceAdvisories?: boolean } = {}): Promise<CheckResult> {
     let notifiedCount = 0;
+    let newReleaseCount = 0;
     // The installed version and the releases are read at the same time; both are needed before comparing them.
     const [, releases] = await Promise.all([
       this.refreshInstalledVersion(repo),
@@ -296,6 +299,7 @@ export class ReleaseChecker {
 
       if (!fetched.notModified) {
         const { newReleases, newest } = selectNewReleases(repo, fetched.releases);
+        newReleaseCount = newReleases.length;
 
         for (const release of newReleases) {
           // Already running this version (or newer)? Then the release is not news.
@@ -337,6 +341,6 @@ export class ReleaseChecker {
       options.forceAdvisories || repo.advisoriesCheckedAt === null ? await this.refreshAdvisories(repo) : 0;
 
     this.store.save(repo);
-    return { notifiedCount, advisoryCount, error: repo.lastError };
+    return { newReleaseCount, notifiedCount, advisoryCount, error: repo.lastError };
   }
 }

@@ -295,6 +295,43 @@ describe('containers API', () => {
     assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);
   });
 
+  it('checks the linked containers when a manual repository check finds a new release', async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repo = (await request('GET', '/api/repositories')).json()[0];
+    await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      versionCommand: 'cat /opt/vw_version.txt',
+      latestSource: 'github',
+      repositoryId: repo.id,
+    });
+    // A disabled container with a linked app is left alone.
+    const other = (await request('POST', '/api/containers', { vmid: 102 })).json();
+    await app.containers.wait(other.id);
+    await request('POST', `/api/containers/${other.id}/apps`, {
+      name: 'Widget',
+      versionCommand: 'cat /opt/widget_version',
+      latestSource: 'github',
+      repositoryId: repo.id,
+    });
+    await request('PUT', `/api/containers/${other.id}`, { name: 'old', isEnabled: false, aptEnabled: true });
+
+    // Nothing new → no container check.
+    const unchanged = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
+    assert.equal(unchanged.containerChecks, 0);
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion, null);
+
+    source.releases = [release('v1.32.0', 1), release('v1.33.0', 2)];
+    const checked = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
+    assert.equal(checked.containerChecks, 1);
+    await app.scheduler.idle();
+
+    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.apps[0].latestVersion, 'v1.33.0');
+    assert.equal(dto.apps[0].updateAvailable, true);
+    assert.equal((await request('GET', `/api/containers/${other.id}`)).json().apps[0].latestVersion, null);
+  });
+
   it('checks apt and application versions and notifies once', async () => {
     const container = await addContainer();
     assert.equal(container.name, 'vaultwarden');
