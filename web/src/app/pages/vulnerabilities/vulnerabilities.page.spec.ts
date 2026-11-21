@@ -61,6 +61,13 @@ describe('VulnerabilitiesPage', () => {
       advisory('GHSA-crit', { severity: 'critical', cvssScore: 9.8, affectsInstalled: true, affectedVersions: ['1.30.0'], repository: vault, vulnerabilities: [{ packageName: null, vulnerableRange: '< 1.31.0', patchedVersions: null }] }),
     ]);
     const summaries = () => [...el.querySelectorAll('.advisory .summary')].map((s) => s.textContent);
+    const tabs = () => [...el.querySelectorAll<HTMLButtonElement>('.tab')];
+    // Starts on the advisories affecting an installed version.
+    expect(tabs().find((t) => t.getAttribute('aria-selected') === 'true')?.textContent).toContain('Affects installed');
+    expect(summaries()).toEqual(['Problem GHSA-crit']);
+
+    tabs()[0]!.click();
+    await settle(fixture);
     expect(summaries()).toEqual(['Problem GHSA-crit', 'Problem GHSA-unknown', 'Problem GHSA-low']);
 
     const first = el.querySelector<HTMLElement>('.advisory')!;
@@ -92,15 +99,19 @@ describe('VulnerabilitiesPage', () => {
 
   it('names the affected versions of linked container apps', async () => {
     const containers = { ...vault, installedVersion: null, installedVersions: ['1.29.0', '1.32.0'] };
-    const { el } = await render([
+    const { el, fixture } = await render([
       advisory('GHSA-crit', { severity: 'critical', affectsInstalled: true, affectedVersions: ['1.29.0'], repository: containers }),
       advisory('GHSA-low', { severity: 'low', affectsInstalled: false, repository: containers }),
       advisory('GHSA-unknown'),
     ]);
     const rows = [...el.querySelectorAll<HTMLElement>('.advisory')].map((r) => r.textContent);
+    expect(rows).toHaveLength(1);
     expect(rows[0]).toContain('Affects 1.29.0');
-    expect(rows[1]).toContain('Installed version unknown');
-    expect(rows[2]).toContain('1.29.0, 1.32.0 not affected');
+    el.querySelector<HTMLButtonElement>('.tab')!.click();
+    await settle(fixture);
+    const all = [...el.querySelectorAll<HTMLElement>('.advisory')].map((r) => r.textContent);
+    expect(all[1]).toContain('Installed version unknown');
+    expect(all[2]).toContain('1.29.0, 1.32.0 not affected');
   });
 
   it('shows an empty state without advisories', async () => {
@@ -116,6 +127,8 @@ describe('VulnerabilitiesPage', () => {
     const { el, fixture } = await render(many);
     const rows = () => el.querySelectorAll('.advisory').length;
     const more = () => el.querySelector<HTMLButtonElement>('.list-foot button');
+    // Nothing affects an installed version, so the list starts on all advisories.
+    expect(el.querySelector('.tab[aria-selected="true"]')?.textContent).toContain('All');
     expect(rows()).toBe(50);
     expect(el.querySelector('.list-foot')?.textContent).toContain('Showing 50 of 120');
     expect(el.querySelector('.tab-count')?.textContent).toBe('120');

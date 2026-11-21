@@ -31,7 +31,9 @@ export class VulnerabilitiesPage {
   protected readonly advisories = signal<RepositoryAdvisory[]>([]);
   protected readonly loading = signal(true);
   protected readonly query = signal('');
-  protected readonly impact = signal<Impact>('all');
+  /** Starts on the advisories affecting an installed version (falls back to all on the first load when there are none). */
+  protected readonly impact = signal<Impact>('affecting');
+  private firstLoad = true;
   protected readonly severity = signal<AdvisorySeverity | 'all'>('all');
   protected readonly source = signal<AdvisorySource | 'all'>('all');
   protected readonly sourceLabels = SOURCE_LABELS;
@@ -121,7 +123,12 @@ export class VulnerabilitiesPage {
 
   protected async load(): Promise<void> {
     try {
-      this.advisories.set(await firstValueFrom(this.api.getAllAdvisories()));
+      const advisories = await firstValueFrom(this.api.getAllAdvisories());
+      this.advisories.set(advisories);
+      if (this.firstLoad && !advisories.some((a) => a.affectsInstalled === true)) {
+        this.impact.set('all');
+      }
+      this.firstLoad = false;
     } catch (error) {
       this.toast.error(error);
     } finally {

@@ -144,7 +144,8 @@ reads them). **Settings → General → Vulnerability sources** switches each so
   an upper bound (e.g. `>= 0.104.0`) is capped by the patched version (`0.135.0` → `>= 0.104.0, < 0.135.0`), so newer
   versions are not flagged. The **Vulnerabilities**
   page lists all of them – affecting the installed version first – with severity, CVSS score, ids, vulnerable and
-  patched versions, filters (impact, severity, source) and search; the sidebar counts those affecting an installed
+  patched versions, filters (impact, severity, source) and search. It opens on *Affects installed* (or *All* when
+  nothing affects an installed version); the sidebar counts those affecting an installed
   version. Each repository also shows a badge (red *N vulnerabilities affect installed* / grey *N advisories*) that
   opens its list, and the *Vulnerable* filter tab.
 - As with releases, the first read of each source (and of a newly set OSV.dev package) only stores a baseline.
