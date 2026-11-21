@@ -28,11 +28,13 @@ export const routes: Routes = [
     loadComponent: () => import('./pages/vulnerabilities/vulnerabilities.page').then((m) => m.VulnerabilitiesPage),
   },
   {
-    path: 'containers',
-    title: 'Containers · ReleaseWatcher',
+    path: 'machines',
+    title: 'Machines · ReleaseWatcher',
     canActivate: [authGuard],
     loadComponent: () => import('./pages/containers/containers.page').then((m) => m.ContainersPage),
   },
+  // The page was called Containers before servers and several Proxmox nodes (old links and notifications).
+  { path: 'containers', redirectTo: 'machines' },
   {
     path: 'settings',
     title: 'Settings · ReleaseWatcher',

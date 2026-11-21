@@ -153,6 +153,27 @@ describe('ContainersPage', () => {
     await settle(fixture);
   });
 
+  it('groups the list by host when there are several', async () => {
+    const { el } = await create([
+      container({ id: 1, vmid: 101, name: 'vaultwarden', hostId: 2, hostName: 'pve2', apps: [] }),
+      container({ id: 2, vmid: 100, name: 'nextcloud', hostId: 1, hostName: 'pve1', apps: [] }),
+      container({ id: 3, kind: 'node', vmid: 0, name: 'pve1', hostId: 1, hostName: 'pve1', apps: [] }),
+      container({ id: 4, kind: 'server', vmid: 0, name: 'Hetzner VPS', hostId: 3, hostName: 'Hetzner VPS', apps: [] }),
+    ]);
+    const headings = [...el.querySelectorAll('.ct-group')].map((g) =>
+      [...g.querySelectorAll('span')].map((s) => s.textContent?.trim()).join(' '),
+    );
+    expect(headings).toEqual(['pve1 Proxmox node 2', 'pve2 Proxmox node 1', 'Servers 1']);
+    const names = [...el.querySelectorAll('.ct-item .ct-name')].map((n) => n.textContent);
+    expect(names).toEqual(['pve1', 'nextcloud', 'vaultwarden', 'Hetzner VPS']);
+  });
+
+  it('keeps a flat list for a single node', async () => {
+    const { el } = await create([container({ id: 1 }), container({ id: 2, vmid: 102, name: 'jellyfin' })]);
+    expect(el.querySelector('.ct-group')).toBeNull();
+    expect(el.querySelector('h1')?.textContent).toBe('Machines');
+  });
+
   it('works with servers only – without a Proxmox node', async () => {
     const server = container({
       id: 7,

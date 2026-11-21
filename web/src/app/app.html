@@ -37,7 +37,7 @@
               <span class="count">{{ a.total }}</span>
             }
           }
-          @if (item.path === '/containers' && statusService.status()?.containers; as c) {
+          @if (item.path === '/machines' && statusService.status()?.containers; as c) {
             @if (c.total > 0) {
               <span class="count">{{ c.total }}</span>
             }
@@ -76,7 +76,7 @@
         }
         @if (s.containers; as c) {
           @if (c.aptPending + c.appUpdatesAvailable > 0) {
-            <a class="poller-meta update-link containers-link" routerLink="/containers">
+            <a class="poller-meta update-link containers-link" routerLink="/machines">
               {{ c.aptPending + c.appUpdatesAvailable }} container update(s) waiting
             </a>
           }

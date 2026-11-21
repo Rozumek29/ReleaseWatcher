@@ -39,7 +39,7 @@ export class App {
 
   protected readonly nav: NavItem[] = [
     { path: '/repositories', label: 'Repositories', icon: 'repo' },
-    { path: '/containers', label: 'Containers', icon: 'box' },
+    { path: '/machines', label: 'Machines', icon: 'box' },
     { path: '/vulnerabilities', label: 'Vulnerabilities', icon: 'shield' },
     { path: '/settings', label: 'Settings', icon: 'settings' },
   ];

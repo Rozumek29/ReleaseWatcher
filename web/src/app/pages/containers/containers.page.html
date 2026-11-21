@@ -1,6 +1,6 @@
 <header class="page-header">
   <div>
-    <h1>Containers</h1>
+    <h1>Machines</h1>
     <p>Proxmox guests and servers: pending apt packages and application updates.</p>
   </div>
   <div class="header-actions">
@@ -204,8 +204,18 @@
   } @else {
     <div class="browser" [class.show-detail]="showDetail()">
       <div class="ct-list-wrap">
-        <ul class="ct-list" aria-label="Containers" (keydown)="onListKeydown($event)">
+        <ul class="ct-list" aria-label="Machines" (keydown)="onListKeydown($event)">
           @for (c of visible(); track c.id; let i = $index) {
+            @if (groupHeadings().get(i); as g) {
+              <li class="ct-group" role="presentation">
+                <app-icon [name]="g.kind === 'proxmox' ? 'box' : 'server'" [size]="13" />
+                <span class="ct-group-name">{{ g.label }}</span>
+                @if (g.kind === 'proxmox') {
+                  <span>Proxmox node</span>
+                }
+                <span class="tab-count">{{ g.count }}</span>
+              </li>
+            }
             @let state = stateOf(c);
             <li class="enter" [style.--i]="i" [class.picking]="picked() !== null">
               @if (picked(); as picked) {

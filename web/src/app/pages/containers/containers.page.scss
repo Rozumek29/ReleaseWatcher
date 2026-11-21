@@ -396,6 +396,32 @@
   list-style: none;
 }
 
+/* Heading of a host's group in the list (several nodes, or a node and servers). */
+.ct-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 8px 4px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+
+  &:first-child {
+    padding-top: 2px;
+  }
+}
+
+.ct-group-name {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ct-group .tab-count {
+  margin-left: auto;
+}
+
 .ct-item {
   display: flex;
   align-items: center;

@@ -26,7 +26,7 @@ export interface EmailOptions {
   to: readonly string[];
   /** Release notes longer than this are cut. */
   maxBodyLength: number;
-  /** Public address of ReleaseWatcher (`PUBLIC_URL`); container mails link to its Containers page. */
+  /** Public address of ReleaseWatcher (`PUBLIC_URL`); container mails link to its Machines page. */
   publicUrl?: string | null;
   /** Replaces the SMTP client (tests). */
   send?: typeof sendMail;
@@ -103,13 +103,13 @@ export function buildEmail(
   const [only] = sections;
   const single = events.length === 1 && only;
   const subject = single ? only.subject : `ReleaseWatcher: ${digestSummary(events)}`;
-  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/machines` : null;
   const showContainersLink = containersUrl !== null && events.some((e) => e.type === 'container-updates' || e.type === 'update-result');
 
   const text = [
     ...(single ? [] : [`${digestSummary(events)}\n`]),
     sections.map((s) => s.text).join('\n\n----------\n\n'),
-    ...(showContainersLink ? [`\nContainers: ${containersUrl}`] : []),
+    ...(showContainersLink ? [`\nMachines: ${containersUrl}`] : []),
     '\n-- \nSent by ReleaseWatcher',
   ].join('\n');
 
@@ -119,7 +119,7 @@ export function buildEmail(
 <div style="max-width:640px;margin:0 auto">
 ${single ? '' : `<h1 style="margin:0 0 16px;font-size:20px;font-weight:650">${escapeHtml(digestSummary(events))}</h1>`}
 ${sections.map((s) => `<div style="margin:0 0 16px;padding:18px 20px;background:#ffffff;border:1px solid #e3e5e8;border-radius:12px">${s.html}</div>`).join('\n')}
-${showContainersLink ? `<p style="margin:0 0 16px"><a href="${escapeHtml(containersUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open containers</a></p>` : ''}
+${showContainersLink ? `<p style="margin:0 0 16px"><a href="${escapeHtml(containersUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open machines</a></p>` : ''}
 <p style="margin:16px 0 0;color:#6a737d;font-size:12px">Sent by ReleaseWatcher</p>
 </div></body></html>`;
 

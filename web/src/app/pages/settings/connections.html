@@ -42,7 +42,7 @@
             </div>
             <div class="row-actions">
               @if (confirming() === 'delete-host-' + h.id) {
-                <span class="confirm-text">Remove {{ h.name }}?</span>
+                <span class="confirm-text">Remove {{ h.name }}?{{ h.type === 'server' ? ' It is no longer watched.' : '' }}</span>
                 <button type="button" class="btn btn-sm" (click)="deleteHost(h)">Yes</button>
                 <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
               } @else if (confirming() === 'forget-host-' + h.id) {
@@ -68,8 +68,8 @@
                   type="button"
                   class="btn btn-sm btn-danger-ghost"
                   (click)="confirming.set('delete-host-' + h.id)"
-                  [disabled]="isBusy('host-' + h.id) || h.targetCount > 0"
-                  [title]="h.targetCount > 0 ? 'Remove its machines on the Containers page first' : 'Remove host'"
+                  [disabled]="isBusy('host-' + h.id) || (h.type === 'proxmox' && h.targetCount > 0)"
+                  [title]="h.type === 'proxmox' && h.targetCount > 0 ? 'Remove its machines on the Machines page first' : 'Remove host'"
                 >
                   Remove
                 </button>

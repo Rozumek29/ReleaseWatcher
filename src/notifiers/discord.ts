@@ -25,7 +25,7 @@ export interface DiscordOptions {
   /** Optional text above the embed, e.g. "@here" or "<@&ROLE_ID>". */
   mention: string | null;
   maxBodyLength: number;
-  /** Public address of ReleaseWatcher (`PUBLIC_URL`); container notifications link to its Containers page. */
+  /** Public address of ReleaseWatcher (`PUBLIC_URL`); container notifications link to its Machines page. */
   publicUrl?: string | null;
   fetch?: typeof fetch;
 }
@@ -187,7 +187,7 @@ export function buildContainerPayload(
   options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'maxBodyLength' | 'publicUrl'>,
 ) {
   // PUBLIC_URL is normalised to an origin (no trailing slash) by the config.
-  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/machines` : null;
   const lines: string[] = [];
   for (const app of notification.apps) {
     lines.push(`**${app.name}**: ${app.installedVersion ?? '?'} → ${app.latestVersion ?? '?'}`);
@@ -219,7 +219,7 @@ export function buildContainerPayload(
     ],
     // A link button below the embed (message components); see `withComponentsUrl()`.
     ...(containersUrl
-      ? { components: [{ type: ACTION_ROW, components: [{ type: BUTTON, style: LINK_STYLE, label: 'Open containers', url: containersUrl }] }] }
+      ? { components: [{ type: ACTION_ROW, components: [{ type: BUTTON, style: LINK_STYLE, label: 'Open machines', url: containersUrl }] }] }
       : {}),
   };
 }
@@ -234,7 +234,7 @@ export function buildUpdateResultPayload(
   notification: UpdateResultNotification,
   options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'publicUrl'>,
 ) {
-  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/machines` : null;
   return {
     ...messageHeader(options),
     embeds: [
@@ -254,7 +254,7 @@ export function buildDigestPayload(
   events: readonly NotificationEvent[],
   options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'publicUrl'>,
 ) {
-  const containersUrl = options.publicUrl ? `${options.publicUrl}/containers` : null;
+  const containersUrl = options.publicUrl ? `${options.publicUrl}/machines` : null;
   const releases: string[] = [];
   const vulnerabilities: string[] = [];
   const containers: string[] = [];
