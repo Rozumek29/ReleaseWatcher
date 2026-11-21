@@ -74,13 +74,43 @@ const SEVERITY_RANK: Record<AdvisorySeverity, number> = { critical: 4, high: 3, 
 export const compareSeverity = (a: AdvisorySeverity, b: AdvisorySeverity): number => SEVERITY_RANK[a] - SEVERITY_RANK[b];
 
 const CONSTRAINT_PATTERN = /^(>=|<=|>|<|=|==)?\s*(.+)$/;
+const CONSTRAINT_TOKENS = /(>=|<=|==|>|<|=)?\s*([^\s<>=,]+)/g;
+
+/**
+ * Brings the range notations found in advisories into the GitHub syntax (`, ` = and, ` || ` = or, explicit
+ * operators): ">= 2.0.0 && <= 2.1.3" (&&), ">= 1.0 < 2.0" (no separator), "1.23.0 - 1.23.15" (hyphen range),
+ * "2.0.0-beta.0, 2.0.0-beta.1" (list of versions) and "*" (all versions).
+ */
+export function normalizeRange(range: string): string {
+  return range
+    .split('||')
+    .map((alternative) => {
+      const text = alternative.replaceAll('&&', ',').trim();
+      if (text === '*') {
+        return '>= 0';
+      }
+      const hyphen = text.match(/^(\S+)\s+-\s+(\S+)$/);
+      if (hyphen) {
+        return `>= ${hyphen[1]}, <= ${hyphen[2]}`;
+      }
+      const parts = text.split(',').map((part) => part.trim()).filter(Boolean);
+      if (parts.length > 1 && parts.every((part) => !/^[<>=]/.test(part))) {
+        return parts.map((part) => `= ${part}`).join(' || ');
+      }
+      return parts
+        .flatMap((part) => [...part.matchAll(CONSTRAINT_TOKENS)].map((m) => `${m[1] === '==' ? '=' : (m[1] ?? '=')} ${m[2]}`))
+        .join(', ');
+    })
+    .filter(Boolean)
+    .join(' || ');
+}
 
 /**
  * Checks a version against a GitHub range such as "< 1.2.3", ">= 1.0, < 1.5" or "= 2.0.0". Comma-separated parts
  * must all match; "||" separates alternatives. Returns null when the version or the range can't be compared.
  */
 export function versionInRange(version: string, range: string): boolean | null {
-  const alternatives = range.split('||').map((part) => part.trim()).filter(Boolean);
+  const alternatives = normalizeRange(range).split('||').map((part) => part.trim()).filter(Boolean);
   if (alternatives.length === 0) {
     return null;
   }
@@ -143,7 +173,7 @@ export function effectiveRange(vulnerableRange: string, patchedVersions: string 
   if (!bound) {
     return vulnerableRange;
   }
-  return vulnerableRange
+  return normalizeRange(vulnerableRange)
     .split('||')
     .map((alternative) => (alternative.includes('<') ? alternative.trim() : [alternative.trim(), bound].filter(Boolean).join(', ')))
     .join(' || ');

@@ -6,6 +6,7 @@ import {
   advisoryAffects,
   advisoryImpact,
   effectiveRange,
+  normalizeRange,
   installedVersions,
   normalizeSeverity,
   sortAdvisories,
@@ -52,6 +53,38 @@ describe('advisoryAffects', () => {
     });
     assert.equal(advisoryAffects(mixed, '1.2.0'), null);
     assert.equal(advisoryAffects(mixed, '0.5.0'), true);
+  });
+});
+
+describe('range notations (louislam/uptime-kuma advisories)', () => {
+  it('normalizes them to the GitHub syntax', () => {
+    assert.equal(normalizeRange('>= 2.0.0 && <= 2.1.3 '), '>= 2.0.0, <= 2.1.3');
+    assert.equal(normalizeRange('<=2.5.3'), '<= 2.5.3');
+    assert.equal(normalizeRange('>= 1.0.0 < 2.0.0'), '>= 1.0.0, < 2.0.0');
+    assert.equal(normalizeRange('1.23.0 - 1.23.15'), '>= 1.23.0, <= 1.23.15');
+    assert.equal(normalizeRange('2.0.0-beta.0, 2.0.0-beta.1'), '= 2.0.0-beta.0 || = 2.0.0-beta.1');
+    assert.equal(normalizeRange('*'), '>= 0');
+    assert.equal(normalizeRange('>= 1.0.0, < 1.5.0 || == 2.0.0'), '>= 1.0.0, < 1.5.0 || = 2.0.0');
+  });
+
+  it('compares versions with them', () => {
+    assert.equal(versionInRange('2.5.12', '>= 2.0.0 && <= 2.1.3'), false);
+    assert.equal(versionInRange('2.1.0', '>= 2.0.0 && <= 2.1.3'), true);
+    assert.equal(versionInRange('2.5.12', '<=2.5.3'), false);
+    assert.equal(versionInRange('1.23.10', '1.23.0 - 1.23.15'), true);
+    assert.equal(versionInRange('1.23.16', '1.23.0 - 1.23.15'), false);
+    assert.equal(versionInRange('2.0.0-beta.1', '2.0.0-beta.0, 2.0.0-beta.1'), true);
+    assert.equal(versionInRange('2.0.0', '2.0.0-beta.0, 2.0.0-beta.1'), false);
+    assert.equal(versionInRange('2.5.12', '*'), true);
+    assert.equal(versionInRange('1.23.3', '<= v1.23.2'), false);
+  });
+
+  it('does not flag 2.5.12 for GHSA-c7hf-c5p5-5g6h', () => {
+    const a = advisory('GHSA-c7hf-c5p5-5g6h', 1, null, {
+      vulnerabilities: [{ packageName: 'uptime-kuma', vulnerableRange: '>= 2.0.0 && <= 2.1.3 ', patchedVersions: '2.2.0' }],
+    });
+    assert.equal(advisoryAffects(a, '2.5.12'), false);
+    assert.equal(advisoryAffects(a, '2.1.3'), true);
   });
 });
 

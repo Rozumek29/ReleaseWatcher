@@ -142,7 +142,8 @@ reads them). **Settings → General → Vulnerability sources** switches each so
   repository (*latest version from* a watched GitHub repository). A vulnerability affects the installation when any of
   these versions is in range; without any version its impact is shown as *Installed version unknown*. A range without
   an upper bound (e.g. `>= 0.104.0`) is capped by the patched version (`0.135.0` → `>= 0.104.0, < 0.135.0`), so newer
-  versions are not flagged. The **Vulnerabilities**
+  versions are not flagged. Other notations used in advisories are understood too: `>= 2.0.0 && <= 2.1.3`,
+  `1.23.0 - 1.23.15`, lists of versions (`2.0.0-beta.0, 2.0.0-beta.1`) and `*` (all versions). The **Vulnerabilities**
   page lists all of them – affecting the installed version first – with severity, CVSS score, ids, vulnerable and
   patched versions, filters (impact, severity, source) and search. It opens on *Affects installed* (or *All* when
   nothing affects an installed version); the sidebar counts those affecting an installed
