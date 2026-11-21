@@ -953,6 +953,30 @@ describe('containers API', () => {
     assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, false);
   });
 
+  it('updates only the containers chosen with ids', async () => {
+    const container = await addContainerWithUpdates();
+    shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
+    shell.on(/\nupdate'$/, { output: 'Updated.\n' });
+    shell.commands.length = 0;
+
+    assert.equal((await request('POST', '/api/containers/update-all', { ids: ['x'] })).status, 400);
+    assert.deepEqual((await request('POST', '/api/containers/update-all', { backup: false, ids: [] })).json(), {
+      containers: 0,
+      updates: 0,
+    });
+    assert.deepEqual((await request('POST', '/api/containers/update-all', { ids: [container.id + 1] })).json(), {
+      containers: 0,
+      updates: 0,
+    });
+    assert.equal(shell.commands.some((c) => c.includes('apt-get -y')), false);
+
+    const response = await request('POST', '/api/containers/update-all', { backup: false, ids: [container.id] });
+    assert.equal(response.status, 202);
+    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
+    await app.updater.idle();
+    assert.ok(shell.commands.some((c) => c.includes('apt-get -y')));
+  });
+
   it('skips the remaining updates of a container after a failure and honours backup: false', async () => {
     const container = await addContainerWithUpdates();
     await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });

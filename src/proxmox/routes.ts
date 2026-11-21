@@ -80,6 +80,15 @@ const homeAssistantUpdateSchema: ObjectSchema = {
   },
 };
 
+/** Body of `POST /api/containers/update-all`: `ids` selects containers (omitted = every container with updates). */
+const updateAllSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    backup: { type: 'boolean', nullable: true },
+    ids: { type: 'array', nullable: true, maxItems: 1000, items: { type: 'integer', minimum: 1 } },
+  },
+};
+
 /** Optional body of the update endpoints: `backup` overrides the container/global default for this update. */
 const updateOptionsSchema: ObjectSchema = {
   type: 'object',
@@ -444,15 +453,19 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return Response.json({ queued: containers.listEnabled().length }, { status: 202 });
         }),
     },
-    // Updates every container with pending updates (apt, then applications), one after another. The host is left out.
+    // Updates every container with pending updates (or those in `ids`: apt, then applications), one after another.
+    // The host is left out.
     '/api/containers/update-all': {
       POST: (req: Request) =>
         guard(async () => {
-          const options = await readUpdateOptions(req);
+          const options = await readUpdateOptions<{ backup: boolean | null; ids: number[] | null }>(req, updateAllSchema);
           if (!service.shell.isConfigured) {
             throw new ShellNotConfiguredError();
           }
-          const plan = updater.plan().filter(({ container }) => !updater.isQueued(container.id));
+          const ids = options.ids ? new Set(options.ids) : null;
+          const plan = updater
+            .plan()
+            .filter(({ container }) => (ids === null || ids.has(container.id)) && !updater.isQueued(container.id));
           if (plan.length === 0 && updater.isRunning) {
             throw new UpdateAllRunningError();
           }

@@ -256,28 +256,48 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.restart-line')).toBeNull();
   });
 
-  it('updates all containers with pending updates after a confirmation, leaving out the host', async () => {
+  it('updates the containers ticked after the first click on "Update", leaving out the host', async () => {
     const node = container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [] });
     const disabled = container({ id: 3, vmid: 103, name: 'off', isEnabled: false });
-    const { fixture, el } = await create([container(), node, disabled]);
-    const updateAll = () =>
-      [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) =>
-        b.textContent?.includes('Update all'),
-      )!;
+    const second = container({ id: 4, vmid: 104, name: 'second', aptUpgradable: [], updatesAvailable: 1 });
+    const { fixture, el } = await create([container(), node, disabled, second]);
+    const headerButton = (text: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.trim().startsWith(text))!;
+    const checkboxes = () => [...el.querySelectorAll<HTMLInputElement>('.ct-list .pick input')];
 
-    updateAll().click();
+    expect(checkboxes()).toHaveLength(0);
+    headerButton('Update').click();
     await settle(fixture);
     http.expectNone('/api/containers/update-all');
-    expect(el.querySelector('.header-actions')?.textContent).toContain('Update 1 container(s) one after another?');
+    // Only containers with pending updates get a checkbox, all of them ticked.
+    expect(checkboxes()).toHaveLength(2);
+    expect(checkboxes().every((c) => c.checked)).toBe(true);
+    expect(el.querySelector('.header-actions')?.textContent).toContain('2 of 2 container(s) selected');
     const backup = el.querySelector<HTMLInputElement>('.header-actions .backup-check input')!;
     expect(backup.checked).toBe(true);
 
-    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    checkboxes()[1]!.click();
+    await settle(fixture);
+    expect(el.querySelector('.header-actions')?.textContent).toContain('1 of 2 container(s) selected');
+    headerButton('Select all').click();
+    await settle(fixture);
+    headerButton('Select none').click();
+    await settle(fixture);
+    expect(headerButton('Update 0').disabled).toBe(true);
+    // Tick the first container again (found by name, whatever the sort order).
+    [...el.querySelectorAll<HTMLElement>('.ct-list li')]
+      .find((li) => li.textContent?.includes('vaultwarden'))!
+      .querySelector<HTMLInputElement>('.pick input')!
+      .click();
+    await settle(fixture);
+
+    headerButton('Update 1').click();
     const request = http.expectOne('/api/containers/update-all');
     expect(request.request.method).toBe('POST');
-    expect(request.request.body).toEqual({ backup: true });
+    expect(request.request.body).toEqual({ backup: true, ids: [1] });
     request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
     await settle(fixture);
+    expect(checkboxes()).toHaveLength(0);
 
     http.expectOne('/api/containers').flush([container({ aptUpgradable: [], apps: [], updatesAvailable: 0 }), node]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
@@ -285,7 +305,21 @@ describe('ContainersPage', () => {
     http.expectOne('/api/status').flush({});
     await settle(fixture);
     // Only the host has pending updates now – it is updated by hand.
-    expect(updateAll().disabled).toBe(true);
+    expect(headerButton('Update').disabled).toBe(true);
+  });
+
+  it('leaves the container choice for "Update" with Cancel', async () => {
+    const { fixture, el } = await create([container()]);
+    const headerButton = (text: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.trim().startsWith(text))!;
+    headerButton('Update').click();
+    await settle(fixture);
+    expect(el.querySelectorAll('.ct-list .pick input')).toHaveLength(1);
+    headerButton('Cancel').click();
+    await settle(fixture);
+    expect(el.querySelectorAll('.ct-list .pick input')).toHaveLength(0);
+    expect(headerButton('Check all')).toBeTruthy();
+    http.expectNone('/api/containers/update-all');
   });
 
   it('updates everything in one container after a confirmation', async () => {

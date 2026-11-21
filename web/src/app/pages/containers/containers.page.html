@@ -4,8 +4,13 @@
     <p>LXC containers on your Proxmox node: pending apt packages and application updates.</p>
   </div>
   <div class="header-actions">
-    @if (confirming() === 'update-all') {
-      <span class="confirm-text warn">Update {{ updatable().length }} container(s) one after another?</span>
+    @if (picked() !== null) {
+      <span class="confirm-text warn" aria-live="polite">
+        {{ pickedUpdatable().length }} of {{ updatable().length }} container(s) selected
+      </span>
+      <button type="button" class="btn btn-sm btn-ghost" (click)="togglePickAll()">
+        {{ pickedUpdatable().length === updatable().length ? 'Select none' : 'Select all' }}
+      </button>
       <label class="backup-check" [class.disabled]="!backupStorage()" title="Backs up the containers set to back up before updates">
         <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
         Backup first
@@ -15,8 +20,16 @@
           <span class="muted">(choose a storage in Settings)</span>
         }
       </label>
-      <button type="button" class="btn btn-sm" (click)="updateAll()">Yes</button>
-      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+      <button type="button" class="btn btn-sm btn-ghost" (click)="picked.set(null)">Cancel</button>
+      <button
+        type="button"
+        class="btn btn-sm"
+        (click)="updateAll()"
+        [disabled]="pickedUpdatable().length === 0"
+        title="Updates the selected containers one after another: apt, then applications"
+      >
+        <app-icon name="arrowUp" [size]="14" /> Update {{ pickedUpdatable().length }}
+      </button>
     } @else {
       <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
         <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
@@ -25,12 +38,12 @@
       <button
         type="button"
         class="btn btn-secondary"
-        (click)="askUpdateAll()"
+        (click)="startPicking()"
         [disabled]="updatingAll() || !configured() || updatable().length === 0"
-        [title]="updatable().length === 0 ? 'No container has pending updates' : 'apt upgrade and application updates of every container (not the Proxmox host)'"
+        [title]="updatable().length === 0 ? 'No container has pending updates' : 'Choose containers for apt upgrade and application updates (not the Proxmox host)'"
       >
         <app-icon [name]="updatingAll() ? 'refresh' : 'arrowUp'" [size]="16" [class.spin]="updatingAll()" />
-        {{ updatingAll() ? 'Updating…' : 'Update all' }}
+        {{ updatingAll() ? 'Updating…' : 'Update' }}
       </button>
       <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
         <app-icon name="plus" [size]="16" />
@@ -179,7 +192,21 @@
         <ul class="ct-list" aria-label="Containers" (keydown)="onListKeydown($event)">
           @for (c of visible(); track c.id; let i = $index) {
             @let state = stateOf(c);
-            <li class="enter" [style.--i]="i">
+            <li class="enter" [style.--i]="i" [class.picking]="picked() !== null">
+              @if (picked(); as picked) {
+                @if (pendingCount(c) > 0) {
+                  <label class="pick" [title]="'Update ' + label(c)">
+                    <input
+                      type="checkbox"
+                      [checked]="picked.has(c.id)"
+                      (change)="togglePicked(c, $any($event.target).checked)"
+                    />
+                    <span class="visually-hidden">Update {{ label(c) }}</span>
+                  </label>
+                } @else {
+                  <span class="pick" aria-hidden="true"></span>
+                }
+              }
               <button
                 type="button"
                 class="ct-item"

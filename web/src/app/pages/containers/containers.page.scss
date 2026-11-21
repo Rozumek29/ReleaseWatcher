@@ -423,6 +423,36 @@
   }
 }
 
+// Choosing containers for "Update": a checkbox left of each row.
+.picking {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+
+  .ct-item {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.pick {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+
+  input {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+  }
+}
+
 .dot {
   flex-shrink: 0;
   width: 8px;

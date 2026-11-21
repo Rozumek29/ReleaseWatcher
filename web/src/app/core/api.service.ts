@@ -164,10 +164,11 @@ export class ApiService {
    * Updates every container with pending updates, one after another (not the Proxmox host).
    * `backup: false` skips backups; `true` backs up the containers set to back up before updates.
    */
-  updateAllContainers(backup: boolean): Observable<{ containers: number; updates: number }> {
+  /** Updates the containers in `ids` (omitted = every container with pending updates) one after another. */
+  updateAllContainers(backup: boolean, ids?: number[]): Observable<{ containers: number; updates: number }> {
     return this.http.post<{ containers: number; updates: number }>(
       `${this.baseUrl}/containers/update-all`,
-      { backup },
+      ids ? { backup, ids } : { backup },
     );
   }
 

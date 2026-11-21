@@ -94,6 +94,13 @@ export class ContainersPage {
   protected readonly updatable = computed(() =>
     this.containers().filter((c) => this.pendingCount(c) > 0),
   );
+  /** Containers ticked for "Update" (null = not choosing; the first click on "Update" ticks every updatable one). */
+  protected readonly picked = signal<ReadonlySet<number> | null>(null);
+  /** Ticked containers that still have pending updates – what the second click on "Update" updates. */
+  protected readonly pickedUpdatable = computed(() => {
+    const picked = this.picked();
+    return picked ? this.updatable().filter((c) => picked.has(c.id)) : [];
+  });
 
   // Browsing many containers: filter tabs, search, sort and the selected container shown in the detail pane.
   protected readonly preferences = inject(PreferencesService);
@@ -290,20 +297,47 @@ export class ContainersPage {
     }
   }
 
-  /** Opens the "Update all" confirmation; "Backup first" is on when a container backs up by default. */
-  protected askUpdateAll(): void {
+  /**
+   * First click on "Update": shows checkboxes in the list with every container that has updates ticked;
+   * "Backup first" is on when a container backs up by default.
+   */
+  protected startPicking(): void {
+    this.confirming.set(null);
     this.backupFirst.set(
       this.backupStorage() !== null && this.updatable().some((c) => c.effectiveBackupBeforeUpdate),
     );
-    this.confirming.set('update-all');
+    this.picked.set(new Set(this.updatable().map((c) => c.id)));
   }
 
+  protected togglePicked(container: Container, checked: boolean): void {
+    this.picked.update((picked) => {
+      const next = new Set(picked);
+      if (checked) {
+        next.add(container.id);
+      } else {
+        next.delete(container.id);
+      }
+      return next;
+    });
+  }
+
+  /** Ticks every container with updates, or none when all of them are ticked. */
+  protected togglePickAll(): void {
+    const all = this.updatable();
+    this.picked.set(new Set(this.pickedUpdatable().length === all.length ? [] : all.map((c) => c.id)));
+  }
+
+  /** Second click on "Update": updates the ticked containers one after another. */
   protected async updateAll(): Promise<void> {
-    this.confirming.set(null);
+    const ids = this.pickedUpdatable().map((c) => c.id);
+    this.picked.set(null);
+    if (ids.length === 0) {
+      return;
+    }
     this.updatingAll.set(true);
     try {
       const { containers, updates } = await firstValueFrom(
-        this.api.updateAllContainers(this.backupFirst() && this.backupStorage() !== null),
+        this.api.updateAllContainers(this.backupFirst() && this.backupStorage() !== null, ids),
       );
       this.toast.info(
         containers > 0

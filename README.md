@@ -236,7 +236,8 @@ dedicated to it.
 
 - **Updates are manual only.** The console output is shown live and kept in the run history (last 50 runs per
   container). Only one task runs in a container at a time.
-- **Update all** (Containers page) updates every enabled container with pending updates, one after another: apt
+- **Update** (Containers page) first shows checkboxes in the list, with every container that has pending updates
+  ticked; a second click updates the ticked containers one after another: apt
   first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
   update skips the rest of that container. A container with several pending updates has its own **Update all (n)**.
 - **Backups before updates:** choose a backup storage (e.g. Proxmox Backup Server or `local`) and a default in
@@ -550,7 +551,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"? }` – `null` = global default / remove, omitted = keep (the token is returned only as `homeAssistant.hasToken` + `tokenMasked`) |
 | `DELETE` | `/api/containers/:id` | Remove a container (`409` while a task runs) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (`202`) |
-| `POST` | `/api/containers/update-all` | Update every enabled container with pending updates, one after another; `{ "backup"? }` → `202` with `{ containers, updates }` |
+| `POST` | `/api/containers/update-all` | Update every enabled container with pending updates (or only those in `ids`), one after another; `{ "backup"?, "ids"? }` → `202` with `{ containers, updates }` |
 | `POST` | `/api/containers/:id/update-all` | Run all pending updates of one container; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/check` | Start a check → `202` with the run |
 | `POST` | `/api/containers/:id/restart` | Restart a running container (`pct reboot`) or schedule a reboot of the host → `202` (`409` while updates run, for a stopped container, or – for the host – while any task runs) |
