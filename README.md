@@ -185,6 +185,21 @@ dedicated to it.
 </details>
 
 <details>
+<summary><b>Servers (VPS and other Linux machines)</b></summary>
+
+A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Containers page or
+Settings → Connections) takes its address, port, user and SSH key; it is watched right away:
+
+- Commands run directly on the server (`sh -lc` over SSH; a user other than `root` needs passwordless `sudo`).
+- apt is checked with `apt list --upgradable` and upgraded with `apt-get upgrade` (not `dist-upgrade`), without a
+  backup. Applications work like in containers (version, latest version, update command, detection).
+- **Restart server** schedules `systemctl reboot`, waits until the server answers over SSH again and checks it. It
+  waits for running checks and updates of that server first.
+- Removing the server on the Containers page also removes its host (and the other way round); its SSH key stays.
+
+</details>
+
+<details>
 <summary><b>Containers, checks and applications</b></summary>
 
 - **Add containers** found on the node (`pct list`) one by one or with **Add all**. Commands run inside a container
@@ -570,14 +585,14 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PUT` | `/api/ssh-keys/:id` | Rename `{ name }` |
 | `DELETE` | `/api/ssh-keys/:id` | Remove a key (`409` while a host uses it) |
 | `GET` | `/api/hosts` | Hosts (`type`: `proxmox` / `server`) with address, port, user, key, `configured`, `targetCount` |
-| `POST` | `/api/hosts` | Add a host `{ type, name?, address, port?, user?, sshKeyId? }` |
-| `GET` / `PUT` / `DELETE` | `/api/hosts/:id` | One host; partial update (omitted = keep); delete (`409` while it has watched machines) |
+| `POST` | `/api/hosts` | Add a host `{ type, name?, address, port?, user?, sshKeyId? }`; a `server` gets its target right away |
+| `GET` / `PUT` / `DELETE` | `/api/hosts/:id` | One host; partial update (omitted = keep); delete (a server's target goes with it; a Proxmox node: `409` while it has watched machines) |
 | `POST` | `/api/hosts/:id/test` | Connect and return `pveversion` (Proxmox) or `uname -a` |
 | `POST` | `/api/hosts/:id/forget-host-key` | Remove the pinned SSH host key (after a reinstall) |
 | `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups |
-| `GET` | `/api/containers` | Added containers with applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
+| `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |

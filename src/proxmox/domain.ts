@@ -1,10 +1,11 @@
 import { compareVersions } from '../version.ts';
 import { type HomeAssistantState, type InstallContext, installableUpdates } from './home-assistant.ts';
 
-export const TARGET_KINDS = ['lxc', 'vm', 'node'] as const;
+export const TARGET_KINDS = ['lxc', 'vm', 'node', 'server'] as const;
 /**
  * `lxc` = a container managed through `pct exec`; `vm` = a virtual machine reached through the QEMU guest agent
- * (`qm guest exec`); `node` = the Proxmox host itself (apt only).
+ * (`qm guest exec`); `node` = the Proxmox host itself (apt only); `server` = a plain Linux machine reached over SSH
+ * (apt and applications, commands run directly).
  */
 export type TargetKind = (typeof TARGET_KINDS)[number];
 export const GUEST_KINDS = ['lxc', 'vm'] as const satisfies readonly TargetKind[];
@@ -70,6 +71,16 @@ export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities
     apps: false,
     homeAssistant: false,
     updateAll: false,
+    restart: 'machine',
+  },
+  server: {
+    backup: null,
+    power: false,
+    aptOptional: true,
+    updateResources: false,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
     restart: 'machine',
   },
 };
@@ -271,6 +282,12 @@ export const pctExec = (vmid: number, script: string): string =>
  */
 export const qmGuestExec = (vmid: number, script: string, timeoutSeconds: number): string =>
   `qm guest exec ${vmid} --timeout ${Math.max(1, Math.round(timeoutSeconds))} -- sh -c ${shQuote(`exec 2>&1\n${QUIET_PROFILE}\n${script}`)}`;
+
+/**
+ * Command that runs `script` directly on the machine the SSH connection goes to (a server), with the same login
+ * environment as {@link pctExec}.
+ */
+export const machineExec = (script: string): string => `sh -c ${shQuote(`${QUIET_PROFILE}\n${script}`)}`;
 
 /** Command run on the node that executes `script` inside a container or virtual machine. */
 export const guestExec = (target: { kind: GuestKind; vmid: number }, script: string, timeoutSeconds: number): string =>
@@ -738,7 +755,11 @@ export const NODE_RESTART_CHECK_SCRIPT = `${REBOOT_REQUIRED_FILE_CHECK}\n${KERNE
 
 /** The restart check script for a target. */
 export const restartCheckScript = (kind: TargetKind): string =>
-  kind === 'node' ? NODE_RESTART_CHECK_SCRIPT : kind === 'vm' ? VM_RESTART_CHECK_SCRIPT : RESTART_CHECK_SCRIPT;
+  kind === 'node'
+    ? NODE_RESTART_CHECK_SCRIPT
+    : kind === 'vm' || kind === 'server'
+      ? VM_RESTART_CHECK_SCRIPT
+      : RESTART_CHECK_SCRIPT;
 
 /** Process names listed in a restart reason before the rest is summarised as "and N more". */
 const MAX_STALE_NAMES = 8;
@@ -771,14 +792,18 @@ export function parseRestartCheck(output: string): string[] {
 }
 
 /** Human-readable name of a check/update target in logs and notifications. */
-export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
-  c.kind === 'node' ? 'the Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : `CT ${c.vmid}`;
+export const targetLabel = (c: Pick<Container, 'kind' | 'vmid' | 'name'>): string =>
+  c.kind === 'node' ? 'the Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : c.kind === 'server' ? c.name : `CT ${c.vmid}`;
 
-/** {@link targetLabel} at the start of a sentence ("The Proxmox host", "CT 101"). */
-export const targetTitle = (c: Pick<Container, 'kind' | 'vmid'>): string => {
+/** {@link targetLabel} at the start of a sentence ("The Proxmox host", "CT 101"); a server keeps its own name. */
+export const targetTitle = (c: Pick<Container, 'kind' | 'vmid' | 'name'>): string => {
   const label = targetLabel(c);
-  return label.charAt(0).toUpperCase() + label.slice(1);
+  return c.kind === 'server' ? label : label.charAt(0).toUpperCase() + label.slice(1);
 };
+
+/** apt upgrade run directly on a machine: `dist-upgrade` on a Proxmox node (required there), `upgrade` elsewhere. */
+export const machineAptUpgradeScript = (kind: TargetKind): string =>
+  kind === 'node' ? NODE_APT_UPGRADE_SCRIPT : APT_UPGRADE_SCRIPT;
 
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',

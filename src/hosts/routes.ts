@@ -29,6 +29,13 @@ export interface HostRoutesDeps {
   log: Pick<Logger, 'info' | 'warn'>;
   /** Called after a host was added (e.g. the first Proxmox node takes over containers saved without a host). */
   onHostAdded?: (host: Host) => void;
+  /** Called after a host was edited, with its previous state. */
+  onHostUpdated?: (host: Host, previous: Host) => void;
+  /**
+   * Called before a host is deleted: removes what belongs only to it (a server's own target) and returns null, or
+   * returns why it cannot be deleted right now (→ 409).
+   */
+  beforeDeleteHost?: (host: Host) => string | null;
 }
 
 const TEST_TIMEOUT_MS = 30_000;
@@ -232,12 +239,15 @@ export function hostRoutes(deps: HostRoutesDeps) {
         const errors = { ...validateHost(updated), ...keyError(updated.sshKeyId) };
         if (Object.keys(errors).length > 0) return fieldProblem(errors);
         hosts.saveHost(updated);
+        deps.onHostUpdated?.(updated, host);
         return Response.json(hostDto(updated));
       },
       DELETE: (req: Bun.BunRequest<'/api/hosts/:id'>) => {
         const id = parseId(req.params.id);
         const host = hosts.getHost(id);
         if (!host) return problem(404, 'Host not found.');
+        const blocked = deps.beforeDeleteHost?.(host) ?? null;
+        if (blocked) return problem(409, blocked);
         const targets = hosts.targetCounts().get(id) ?? 0;
         if (targets > 0) {
           return problem(409, `${host.name} still has ${targets} watched machine(s) – remove them on the Containers page first.`);

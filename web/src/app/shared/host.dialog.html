@@ -61,7 +61,7 @@
           <label for="host-key">SSH key</label>
           <select id="host-key" class="input" name="sshKeyId" [(ngModel)]="sshKeyId" [class.invalid]="errors()['sshKeyId']">
             <option [ngValue]="null">– none yet –</option>
-            @for (k of keys(); track k.id) {
+            @for (k of keys() ?? []; track k.id) {
               <option [ngValue]="k.id">{{ k.name }}</option>
             }
           </select>
@@ -69,7 +69,12 @@
             <span class="error">{{ e }}</span>
           }
           <span class="hint">
-            Add or generate keys under SSH keys below. The host must accept its public key
+            @if (keys()?.length === 0) {
+              <strong>No SSH keys yet</strong> – add or generate one under Settings → Connections → SSH keys first.
+            } @else {
+              Keys are managed under Settings → Connections → SSH keys.
+            }
+            The host must accept its public key
             (<code>~/.ssh/authorized_keys</code> of the user). A user other than <code>root</code> needs passwordless
             <code>sudo</code>.
           </span>

@@ -1,0 +1,179 @@
+import assert from 'node:assert/strict';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
+import { buildApp, type App } from '../src/app.ts';
+import { loadConfig } from '../src/config.ts';
+import { RepositoryStore } from '../src/db.ts';
+import { silentLogger } from '../src/log.ts';
+import { targetName } from '../src/notifiers/notifier.ts';
+import { APT_LIST_MARKER, appUpdateScript, capabilities, machineAptUpgradeScript, machineExec } from '../src/proxmox/domain.ts';
+import { SettingsService } from '../src/settings.ts';
+import { addProxmoxHost, FakeKeyTool, FakeShell, FakeSource, RecordingNotifier, TEST_PRIVATE_KEY } from './helpers.ts';
+
+const APT_OUTPUT = `${APT_LIST_MARKER}\nListing...\nnginx/stable 1.26.1 amd64 [upgradable from: 1.26.0]\n`;
+
+describe('servers', () => {
+  let app: App;
+  let store: RepositoryStore;
+  let shell: FakeShell;
+  let notifier: RecordingNotifier;
+  let baseUrl: URL;
+
+  const request = async (method: string, url: string, payload?: unknown) => {
+    const response = await fetch(new URL(url, baseUrl), {
+      method,
+      headers: payload === undefined ? {} : { 'content-type': 'application/json' },
+      ...(payload === undefined ? {} : { body: JSON.stringify(payload) }),
+    });
+    const text = await response.text();
+    return { status: response.status, json: () => JSON.parse(text), text };
+  };
+
+  beforeEach(async () => {
+    shell = new FakeShell().on(/apt list --upgradable/, { output: APT_OUTPUT }).on(/^true$/, { output: '' });
+    notifier = new RecordingNotifier();
+    store = new RepositoryStore(':memory:');
+    app = await buildApp({
+      store,
+      settings: new SettingsService(store, loadConfig({})),
+      source: new FakeSource(),
+      notifiers: [notifier],
+      log: silentLogger,
+      shell,
+      keyTool: new FakeKeyTool(),
+      reconnectDelayMs: 0,
+      machineRestartWaitMs: 0,
+      machinePollMs: 0,
+      auth: { requireAuth: false },
+    });
+    baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
+  });
+
+  afterEach(() => app.close());
+
+  const addKey = async () => (await request('POST', '/api/ssh-keys', { name: 'VPS key', privateKey: TEST_PRIVATE_KEY })).json() as { id: number };
+
+  /** Adds a server host (its target is created and checked) and waits for the first check. */
+  const addServer = async (name = 'Hetzner VPS') => {
+    const key = await addKey().catch(() => null);
+    const keys = (await request('GET', '/api/ssh-keys')).json() as { id: number }[];
+    const host = (
+      await request('POST', '/api/hosts', { type: 'server', name, address: `${name.replace(/\W/g, '').toLowerCase()}.example.com`, user: 'admin', sshKeyId: key?.id ?? keys[0]!.id })
+    ).json();
+    const target = ((await request('GET', '/api/containers')).json() as { id: number; hostId: number }[]).find((c) => c.hostId === host.id)!;
+    await app.containers.wait(target.id);
+    return { host, target: (await request('GET', `/api/containers/${target.id}`)).json() };
+  };
+
+  it('watches a server as soon as it is added – without a Proxmox node', async () => {
+    const { host, target } = await addServer();
+    assert.deepEqual(
+      [target.kind, target.name, target.hostId, target.hostName, target.configured, target.status],
+      ['server', 'Hetzner VPS', host.id, 'Hetzner VPS', true, 'running'],
+    );
+    assert.deepEqual(target.capabilities, capabilities('server'));
+    assert.equal(target.aptUpgradable.length, 1);
+    assert.equal(target.effectiveBackupBeforeUpdate, false);
+    // Commands ran directly on the server – no pct/qm.
+    assert.ok(shell.commands.some((c) => c.includes('apt list --upgradable')));
+    assert.equal(shell.commands.some((c) => /^(pct|qm) /.test(c)), false);
+    assert.equal(notifier.containerSent.at(-1)?.targetKind, 'server');
+    assert.equal(targetName(notifier.containerSent.at(-1)!), 'Hetzner VPS');
+    assert.equal((await request('GET', '/api/settings')).json().proxmox.configured, false);
+    assert.equal((await request('GET', '/api/hosts')).json()[0].targetCount, 1);
+
+    // Check all works with servers only.
+    assert.deepEqual((await request('POST', '/api/containers/check-all')).json(), { queued: 1 });
+  });
+
+  it('upgrades apt with apt-get upgrade and runs application updates on the server itself', async () => {
+    const { target } = await addServer();
+    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`, { backup: true })).status, 409);
+    shell.on(/ upgrade && /, { output: 'Setting up nginx (1.26.1) ...\n' });
+    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`)).status, 202);
+    const apt = await app.containers.wait(target.id);
+    assert.equal(apt?.status, 'succeeded', apt?.output ?? '');
+    assert.equal(shell.detached.at(-1)?.command, machineAptUpgradeScript('server'));
+
+    const added = await request('POST', `/api/containers/${target.id}/apps`, {
+      name: 'Gitea',
+      versionCommand: 'gitea --version',
+      latestSource: 'command',
+      latestCommand: 'echo 1.23.0',
+      updateCommand: '/opt/update-gitea.sh',
+      useTty: true,
+    });
+    assert.equal(added.status, 201);
+    shell.on(/gitea --version/, { output: '1.22.0\n' }).on(/echo 1\.23\.0/, { output: '1.23.0\n' });
+    shell.on(/update-gitea/, { output: 'Updated.\n' });
+    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    await request('POST', `/api/containers/${target.id}/check`);
+    await app.containers.wait(target.id);
+    const updateAll = await request('POST', '/api/containers/update-all', {});
+    assert.equal(updateAll.status, 202);
+    assert.deepEqual(updateAll.json(), { containers: 1, updates: 1 });
+    for (let i = 0; i < 50 && !shell.detached.some((d) => d.command.includes('update-gitea')); i++) await Bun.sleep(10);
+    await app.updater.idle();
+    const update = shell.detached.find((d) => d.command.includes('update-gitea'))!;
+    assert.equal(update.command, machineExec(appUpdateScript('/opt/update-gitea.sh')));
+    assert.equal(update.tty, true); // a pseudo-terminal works directly on a machine
+  });
+
+  it('restarts a server and checks it once it answers again; tasks on other hosts do not block it', async () => {
+    addProxmoxHost(store);
+    const { target } = await addServer();
+    shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
+    shell.commands.length = 0;
+    assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
+    const run = await app.containers.wait(target.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /Restart scheduled – Hetzner VPS is unavailable[\s\S]*Hetzner VPS is back[\s\S]*Checking Hetzner VPS again/);
+    assert.deepEqual(shell.commands.slice(0, 2), [
+      'systemd-run --quiet --unit=releasewatcher-host-restart --on-active=15 --timer-property=AccuracySec=1s systemctl reboot',
+      'true',
+    ]);
+
+    // A running check of the Proxmox host (another machine) does not block the restart of the server.
+    shell.on(/^hostname$/, { output: 'pve\n' });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const node = (await request('POST', '/api/containers/node')).json();
+    await app.containers.wait(node.id);
+    shell.on(/dist-upgrade/, async () => {
+      await gate;
+      return { output: '' };
+    });
+    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
+    release();
+    await app.containers.wait(node.id);
+    await app.containers.wait(target.id);
+  });
+
+  it('keeps a server without a key until one is chosen', async () => {
+    const host = (await request('POST', '/api/hosts', { type: 'server', address: 'vps.example.com' })).json();
+    const [target] = (await request('GET', '/api/containers')).json();
+    assert.equal(target.hostId, host.id);
+    assert.equal(target.name, 'vps.example.com');
+    assert.equal(target.kind, 'server');
+    // Without a key the host is not configured (the shell pool test shows the real shell is then unconfigured too).
+    assert.equal((await request('GET', '/api/hosts')).json()[0].configured, false);
+    await app.containers.wait(target.id);
+  });
+
+  it('renames the server with its host and removes both together', async () => {
+    const { host, target } = await addServer();
+    await request('PUT', `/api/hosts/${host.id}`, { name: 'Web server' });
+    assert.equal((await request('GET', `/api/containers/${target.id}`)).json().name, 'Web server');
+    // A name changed on the target itself is kept when the host is renamed again.
+    await request('PUT', `/api/containers/${target.id}`, { ...target, name: 'nginx box' });
+    await request('PUT', `/api/hosts/${host.id}`, { name: 'Web' });
+    assert.equal((await request('GET', `/api/containers/${target.id}`)).json().name, 'nginx box');
+
+    assert.equal((await request('DELETE', `/api/containers/${target.id}`)).status, 204);
+    assert.equal((await request('GET', `/api/hosts/${host.id}`)).status, 404);
+
+    const second = await addServer('Mail');
+    assert.equal((await request('DELETE', `/api/hosts/${second.host.id}`)).status, 204);
+    assert.equal((await request('GET', `/api/containers/${second.target.id}`)).status, 404);
+  });
+});

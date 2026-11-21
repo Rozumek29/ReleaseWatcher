@@ -15,10 +15,11 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Run } from '../../core/models';
+import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
+import { HostDialog, HostDialogData } from '../../shared/host.dialog';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
@@ -31,7 +32,7 @@ const BUSY_REFRESH_MS = 3000;
 /** Width at which the list and the detail pane stop sitting side by side (same as in the stylesheet). */
 const NARROW_QUERY = '(max-width: 1100px)';
 
-/** Proxmox LXC containers: pending apt/app updates and manual update actions. */
+/** Proxmox guests and servers: pending apt/app updates and manual update actions. */
 @Component({
   selector: 'app-containers-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -44,6 +45,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
     ContainerSettingsDialog,
     RunLogDialog,
     AptPackages,
+    HostDialog,
   ],
   templateUrl: './containers.page.html',
   styleUrl: './containers.page.scss',
@@ -89,6 +91,14 @@ export class ContainersPage {
   protected readonly backupFirst = signal(false);
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
   protected readonly hasNode = computed(() => this.containers().some((c) => c.kind === 'node'));
+  /** At least one target can be reached (its host has a key) – "Check all" and "Update" need one. */
+  protected readonly anyConfigured = computed(() => this.containers().some((c) => c.configured));
+  /** The missing-node hint matters when there is nothing yet or Proxmox targets are listed (not for servers only). */
+  protected readonly needsNode = computed(
+    () => this.containers().length === 0 || this.containers().some((c) => c.kind !== 'server'),
+  );
+  /** "Add server" dialog (a new server host gets its target right away). */
+  protected readonly addingServer = signal<HostDialogData | null>(null);
   protected readonly label = targetLabel;
   /** Containers "Update all" would update (same rules as the server: no host, no disabled or blocked ones). */
   protected readonly updatable = computed(() =>
@@ -157,6 +167,15 @@ export class ContainersPage {
       clearInterval(ticker);
       this.clearRefresh();
     });
+  }
+
+  protected async serverAdded(host: Host): Promise<void> {
+    this.addingServer.set(null);
+    this.toast.success(
+      host.configured ? `Added ${host.name} – checking it now.` : `Added ${host.name} – choose an SSH key for it in Settings → Connections.`,
+    );
+    await this.load();
+    void this.statusService.refresh();
   }
 
   protected async load(): Promise<void> {
@@ -730,9 +749,11 @@ function attentionRank(c: Container): number {
 }
 
 function compareContainers(a: Container, b: Container, sort: ContainerSort): number {
-  // The host stays on top, like the node in Proxmox's own tree.
+  // The host stays on top, like the node in Proxmox's own tree; servers follow the node's guests.
   const host = Number(b.kind === 'node') - Number(a.kind === 'node');
   if (host !== 0) return host;
+  const server = Number(a.kind === 'server') - Number(b.kind === 'server');
+  if (server !== 0) return server;
   if (sort === 'attention') {
     const rank = attentionRank(a) - attentionRank(b);
     if (rank !== 0) return rank;
@@ -747,7 +768,7 @@ function compareContainers(a: Container, b: Container, sort: ContainerSort): num
 function searchText(c: Container): string {
   return [
     c.name,
-    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : String(c.vmid),
+    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : c.kind === 'server' ? `server ${c.hostName ?? ''}` : String(c.vmid),
     ...c.apps.flatMap((a) => [a.name, a.repositoryFullName ?? '']),
   ]
     .join(' ')

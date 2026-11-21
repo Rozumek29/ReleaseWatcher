@@ -39,6 +39,8 @@ import {
   guestOf,
   isGuestKind,
   targetTitle,
+  machineAptUpgradeScript,
+  machineExec,
   type Container,
   type ContainerApp,
 } from '../src/proxmox/domain.ts';
@@ -51,6 +53,11 @@ describe('target capabilities', () => {
     assert.equal(isGuestKind('node'), false);
     assert.deepEqual(guestOf({ kind: 'vm', vmid: 137 }), { kind: 'vm', vmid: 137 });
     assert.equal(guestOf({ kind: 'node', vmid: 0 }), null);
+    assert.equal(isGuestKind('server'), false);
+    assert.equal(guestOf({ kind: 'server', vmid: 0 }), null);
+    assert.equal(machineExec('apt list'), pctExec(101, 'apt list').replace('pct exec 101 -- ', ''));
+    assert.match(machineAptUpgradeScript('server'), / upgrade &&/);
+    assert.match(machineAptUpgradeScript('node'), / dist-upgrade &&/);
   });
 
   it('describes what each kind supports', () => {
@@ -76,11 +83,23 @@ describe('target capabilities', () => {
       updateAll: false,
       restart: 'machine',
     });
+    assert.deepEqual(capabilities('server'), {
+      backup: null,
+      power: false,
+      aptOptional: true,
+      updateResources: false,
+      apps: true,
+      homeAssistant: false,
+      updateAll: true,
+      restart: 'machine',
+    });
+    assert.equal(restartCheckScript('server'), VM_RESTART_CHECK_SCRIPT);
   });
 
   it('starts sentences with the target label', () => {
-    assert.equal(targetTitle({ kind: 'node', vmid: 0 }), 'The Proxmox host');
-    assert.equal(targetTitle({ kind: 'lxc', vmid: 101 }), 'CT 101');
+    assert.equal(targetTitle({ kind: 'node', vmid: 0, name: 'pve' }), 'The Proxmox host');
+    assert.equal(targetTitle({ kind: 'lxc', vmid: 101, name: 'vw' }), 'CT 101');
+    assert.equal(targetTitle({ kind: 'server', vmid: 0, name: 'hetzner vps' }), 'hetzner vps');
   });
 });
 
