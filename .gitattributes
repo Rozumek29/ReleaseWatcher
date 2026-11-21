@@ -1,3 +1,9 @@
+# Text files are stored with LF line endings in the repository, whatever the OS or editor uses.
+* text=auto eol=lf
+
 # Files used on Linux hosts must keep LF line endings, also when checked out on Windows
 deploy/** text eol=lf
 *.sh text eol=lf
+
+*.png binary
+*.ico binary
