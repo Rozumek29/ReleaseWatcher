@@ -7,8 +7,79 @@ export const TARGET_KINDS = ['lxc', 'vm', 'node'] as const;
  * (`qm guest exec`); `node` = the Proxmox host itself (apt only).
  */
 export type TargetKind = (typeof TARGET_KINDS)[number];
+export const GUEST_KINDS = ['lxc', 'vm'] as const satisfies readonly TargetKind[];
 /** A guest on the node: a container or a virtual machine. */
-export type GuestKind = Exclude<TargetKind, 'node'>;
+export type GuestKind = (typeof GUEST_KINDS)[number];
+/** True for a guest on a Proxmox node (commands run through `pct exec` / `qm guest exec`). */
+export const isGuestKind = (kind: TargetKind): kind is GuestKind => (GUEST_KINDS as readonly TargetKind[]).includes(kind);
+
+/**
+ * What ReleaseWatcher can do with a target of one kind. Code branches on these instead of on `kind`, so a new kind
+ * only has to describe itself here (and in {@link TARGET_CAPABILITIES}).
+ */
+export interface TargetCapabilities {
+  /** How the target is backed up before updates; null = it cannot be backed up. */
+  backup: 'vzdump' | null;
+  /** The target can be started and shut down (status checks, "start when stopped"). */
+  power: boolean;
+  /** apt can be switched off (false = the entry exists for apt, so apt is always on). */
+  aptOptional: boolean;
+  /** CPU cores and memory can be raised for updates (`pct set`). */
+  updateResources: boolean;
+  /** Applications with version and update commands can be added (and detected). */
+  apps: boolean;
+  /** Home Assistant OS may run here (checked and updated through the QEMU guest agent). */
+  homeAssistant: boolean;
+  /** Included in "update all" (false = updated by hand only). */
+  updateAll: boolean;
+  /**
+   * `guest` = rebooted by the node (`pct`/`qm reboot`), the run waits for it; `machine` = the machine the SSH
+   * connection goes to reboots itself – the restart is only scheduled and nothing else may run on it.
+   */
+  restart: 'guest' | 'machine';
+}
+
+export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities>> = {
+  lxc: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    updateResources: true,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
+    restart: 'guest',
+  },
+  vm: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    // A virtual machine would need CPU/memory hotplug.
+    updateResources: false,
+    apps: true,
+    homeAssistant: true,
+    updateAll: true,
+    restart: 'guest',
+  },
+  node: {
+    // vzdump backs up guests only.
+    backup: null,
+    power: false,
+    aptOptional: false,
+    updateResources: false,
+    apps: false,
+    homeAssistant: false,
+    updateAll: false,
+    restart: 'machine',
+  },
+};
+
+/** Capabilities of a target kind (see {@link TargetCapabilities}). */
+export const capabilities = (kind: TargetKind): TargetCapabilities => TARGET_CAPABILITIES[kind];
+
+/** The guest an entry stands for; null when commands run directly on the machine the SSH connection goes to. */
+export const guestOf = (c: Pick<Container, 'kind' | 'vmid'>): GuestTarget | null =>
+  isGuestKind(c.kind) ? { kind: c.kind, vmid: c.vmid } : null;
 
 /** Proxmox CLI managing a guest: `pct` for containers, `qm` for virtual machines. */
 export const guestCli = (kind: GuestKind): 'pct' | 'qm' => (kind === 'vm' ? 'qm' : 'pct');
@@ -163,7 +234,7 @@ export const homeAssistantInstallContext = (
  * started are left out (they are updated by hand).
  */
 export function pendingUpdates(container: Container, apps: readonly ContainerApp[]): PendingUpdate[] {
-  if (container.kind === 'node' || !container.isEnabled) {
+  if (!capabilities(container.kind).updateAll || !container.isEnabled) {
     return [];
   }
   if (container.status === 'stopped' && !container.startWhenStopped) {
@@ -700,6 +771,12 @@ export function parseRestartCheck(output: string): string[] {
 /** Human-readable name of a check/update target in logs and notifications. */
 export const targetLabel = (c: Pick<Container, 'kind' | 'vmid'>): string =>
   c.kind === 'node' ? 'the Proxmox host' : c.kind === 'vm' ? `VM ${c.vmid}` : `CT ${c.vmid}`;
+
+/** {@link targetLabel} at the start of a sentence ("The Proxmox host", "CT 101"). */
+export const targetTitle = (c: Pick<Container, 'kind' | 'vmid'>): string => {
+  const label = targetLabel(c);
+  return label.charAt(0).toUpperCase() + label.slice(1);
+};
 
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',

@@ -174,10 +174,10 @@ export class ContainerSettingsDialog {
           startWhenStopped: this.startWhenStopped,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
-          ...(container.kind === 'lxc'
+          ...(container.capabilities.updateResources
             ? { updateCores: this.updateCores || null, updateMemoryMb: this.updateMemoryMb || null }
             : {}),
-          ...(container.kind === 'vm'
+          ...(container.capabilities.homeAssistant
             ? {
                 homeAssistantUrl: this.homeAssistantUrl.trim() || null,
                 homeAssistantInstall: this.homeAssistantInstall,

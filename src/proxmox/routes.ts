@@ -22,6 +22,8 @@ import {
   type PendingUpdate,
   type Run,
   targetLabel,
+  targetTitle,
+  capabilities,
 } from './domain.ts';
 import { installBlocker, normalizeHomeAssistantUrl } from './home-assistant.ts';
 import type { ContainerScheduler } from './scheduler.ts';
@@ -185,7 +187,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   /** Home Assistant OS of a virtual machine (null for containers); the token only as `hasToken` + a masked hint. */
   const homeAssistantDto = (c: Container) => {
-    if (c.kind !== 'vm') {
+    if (!capabilities(c.kind).homeAssistant) {
       return null;
     }
     const context = homeAssistantInstallContext(c);
@@ -210,13 +212,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     return {
       id: c.id,
       kind: c.kind,
+      /** What can be done with this target (the UI shows only the matching settings and actions). */
+      capabilities: capabilities(c.kind),
       vmid: c.vmid,
       name: c.name,
       isEnabled: c.isEnabled,
       aptEnabled: c.aptEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
-      effectiveBackupBeforeUpdate: c.kind !== 'node' && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
+      effectiveBackupBeforeUpdate: capabilities(c.kind).backup !== null && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
       startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       updateCores: c.updateCores,
@@ -291,6 +295,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   /** Storage to back up to before an update (null = no backup), or a problem response. */
   const resolveBackup = (container: Container, requested: boolean | null | undefined): string | null | Response => {
+    if (capabilities(container.kind).backup === null) {
+      return requested === true
+        ? problem(409, `${targetTitle(container)} cannot be backed up with vzdump – update it without a backup.`)
+        : null;
+    }
     const defaults = deps.backupDefaults();
     const enabled = requested ?? container.backupBeforeUpdate ?? defaults.enabled;
     if (!enabled) {
@@ -527,26 +536,24 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }
         const homeAssistantToken =
           body.homeAssistantToken === undefined ? container.homeAssistantToken : blankToNull(body.homeAssistantToken);
-        const isVm = container.kind === 'vm';
-        if (isVm && homeAssistantToken !== null && homeAssistantUrl === null) {
+        const can = capabilities(container.kind);
+        if (can.homeAssistant && homeAssistantToken !== null && homeAssistantUrl === null) {
           return validationProblem('homeAssistantUrl', 'Enter the Home Assistant URL the token is used with.');
         }
-        const isNode = container.kind === 'node';
+        // Settings a kind does not support are cleared (see TargetCapabilities).
         Object.assign(container, {
           name,
           isEnabled: body.isEnabled,
-          // The host entry exists only for apt; backups and temporary starts apply to containers only.
-          aptEnabled: isNode || body.aptEnabled,
-          backupBeforeUpdate: isNode ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
-          startWhenStopped: !isNode && (body.startWhenStopped ?? container.startWhenStopped),
+          aptEnabled: !can.aptOptional || body.aptEnabled,
+          backupBeforeUpdate:
+            can.backup === null ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
+          startWhenStopped: can.power && (body.startWhenStopped ?? container.startWhenStopped),
           checkCron,
-          // Only containers are resized for updates.
-          updateCores: container.kind === 'lxc' ? updateCores : null,
-          updateMemoryMb: container.kind === 'lxc' ? updateMemoryMb : null,
-          // Home Assistant OS runs in virtual machines only.
-          homeAssistantUrl: isVm ? homeAssistantUrl : null,
-          homeAssistantToken: isVm ? homeAssistantToken : null,
-          homeAssistantInstall: isVm && (body.homeAssistantInstall ?? container.homeAssistantInstall),
+          updateCores: can.updateResources ? updateCores : null,
+          updateMemoryMb: can.updateResources ? updateMemoryMb : null,
+          homeAssistantUrl: can.homeAssistant ? homeAssistantUrl : null,
+          homeAssistantToken: can.homeAssistant ? homeAssistantToken : null,
+          homeAssistantInstall: can.homeAssistant && (body.homeAssistantInstall ?? container.homeAssistantInstall),
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];
@@ -584,12 +591,6 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container.aptEnabled) {
             return problem(409, 'apt is disabled for this container.');
           }
-          if (container.kind === 'node') {
-            if (options.backup === true) {
-              return problem(409, 'The Proxmox host cannot be backed up with vzdump – update it without a backup.');
-            }
-            return accepted(service.startAptUpgrade(container, null));
-          }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
         }),
@@ -606,7 +607,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
@@ -626,15 +627,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
             return problem(409, `Updates of ${targetLabel(container)} are running – restart it when they have finished.`);
           }
-          if (container.kind === 'node') {
+          if (capabilities(container.kind).restart === 'machine') {
             if (service.hasActiveTasks() || containers.list().some((c) => updater.isQueued(c.id))) {
-              return problem(409, 'Checks or updates are running – restart the Proxmox host when they have finished.');
+              return problem(409, `Checks or updates are running – restart ${targetLabel(container)} when they have finished.`);
             }
           } else if (container.status === 'stopped') {
             return problem(409, `${targetLabel(container)} is stopped – it does not need a restart.`);
@@ -651,7 +652,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           if (updater.isQueued(container.id)) {
@@ -676,7 +677,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!service.shell.isConfigured) {
+          if (!service.shellFor(container).isConfigured) {
             throw new ShellNotConfiguredError();
           }
           let detected;
@@ -715,8 +716,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (!container) {
           return problem(404, 'Container not found.');
         }
-        if (container.kind === 'node') {
-          return problem(409, 'Applications can be added to guests only, not to the Proxmox host.');
+        if (!capabilities(container.kind).apps) {
+          return problem(409, `Applications cannot be added to ${targetLabel(container)}.`);
         }
         const input = toAppInput(body, null);
         if (input instanceof Response) {
