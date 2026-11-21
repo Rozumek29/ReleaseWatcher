@@ -176,6 +176,9 @@ Shared components in `web/src/app/shared/`:
 - `<app-switch [checked] label (toggled)>` – the only on/off control (no bare checkboxes for settings).
 - `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
+- `appInView` directive – emits `(inView)` when the element nears the viewport (`IntersectionObserver`); used for
+  infinite scrolling of long client-side lists: render a slice (`limit` signal, reset when filters change) and put
+  `appInView` on a *Show N more* button below the list, so it also works by click and without the observer.
 - `appBackdropClose` directive on a `<dialog>` – light dismiss: sets `closedby="any"` (the browser closes the dialog and
   fires `close`); where that is unsupported (Safari), `(backdropClose)` fires when press and release both happen on the backdrop.
 

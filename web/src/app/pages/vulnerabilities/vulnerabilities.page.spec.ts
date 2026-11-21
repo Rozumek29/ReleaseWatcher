@@ -93,4 +93,37 @@ describe('VulnerabilitiesPage', () => {
     expect(el.querySelector('.empty h2')?.textContent).toContain('No known vulnerabilities');
     expect(el.querySelector('.stats')).toBeNull();
   });
+
+  it('renders long lists in steps and starts over when a filter changes', async () => {
+    const many = Array.from({ length: 120 }, (_, i) =>
+      advisory(`GHSA-${String(i).padStart(3, '0')}`, { severity: i < 10 ? 'critical' : 'high' }),
+    );
+    const { el, fixture } = await render(many);
+    const rows = () => el.querySelectorAll('.advisory').length;
+    const more = () => el.querySelector<HTMLButtonElement>('.list-foot button');
+    expect(rows()).toBe(50);
+    expect(el.querySelector('.list-foot')?.textContent).toContain('Showing 50 of 120');
+    expect(el.querySelector('.tab-count')?.textContent).toBe('120');
+
+    more()!.click();
+    await settle(fixture);
+    expect(rows()).toBe(100);
+    expect(more()?.textContent).toContain('Show 20 more');
+
+    more()!.click();
+    await settle(fixture);
+    expect(rows()).toBe(120);
+    expect(more()).toBeNull();
+
+    const search = el.querySelector<HTMLInputElement>('#search')!;
+    search.value = 'GHSA-1';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(rows()).toBe(20);
+
+    search.value = '';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(rows()).toBe(50);
+  });
 });

@@ -8,15 +8,18 @@ import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
+import { InView } from '../../shared/in-view';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { compareSeverity, impactRank, SEVERITY_LABELS, SOURCE_LABELS } from '../../shared/severity';
 
 type Impact = 'all' | 'affecting' | 'unknown' | 'unaffected';
 
+const PAGE_SIZE = 50;
+
 /** Security advisories of all watched repositories, compared with the installed versions. */
 @Component({
   selector: 'app-vulnerabilities-page',
-  imports: [DatePipe, RouterLink, Avatar, Icon, RelativeTimePipe],
+  imports: [DatePipe, RouterLink, Avatar, Icon, InView, RelativeTimePipe],
   templateUrl: './vulnerabilities.page.html',
   styleUrl: './vulnerabilities.page.scss',
 })
@@ -92,7 +95,23 @@ export class VulnerabilitiesPage {
       );
   });
 
+  /** Rendered at once and added per step while scrolling; long lists stay fast to render. */
+  protected readonly pageSize = PAGE_SIZE;
+  protected readonly limit = signal(PAGE_SIZE);
+  /** The part of `visible` that is rendered (infinite scrolling). */
+  protected readonly shown = computed(() => this.visible().slice(0, this.limit()));
+  protected readonly remaining = computed(() => this.visible().length - this.shown().length);
+
   constructor() {
+    // A different filter starts at the top again.
+    effect(() => {
+      this.query();
+      this.impact();
+      this.severity();
+      this.source();
+      untracked(() => this.limit.set(PAGE_SIZE));
+    });
+
     // Reload whenever "Check all now" finished in the sidebar.
     effect(() => {
       this.statusService.revision();
@@ -107,6 +126,12 @@ export class VulnerabilitiesPage {
       this.toast.error(error);
     } finally {
       this.loading.set(false);
+    }
+  }
+
+  protected showMore(): void {
+    if (this.remaining() > 0) {
+      this.limit.update((limit) => limit + PAGE_SIZE);
     }
   }
 

@@ -89,8 +89,8 @@
   </div>
 } @else {
   <ul class="list">
-    @for (a of visible(); track a.repository.id + a.id; let i = $index) {
-      <li class="card advisory enter" [style.--i]="i < 12 ? i : 12" [attr.data-severity]="a.severity" [class.affects]="a.affectsInstalled === true">
+    @for (a of shown(); track a.repository.id + a.id; let i = $index) {
+      <li class="card advisory enter" [style.--i]="i % pageSize < 12 ? i % pageSize : 12" [attr.data-severity]="a.severity" [class.affects]="a.affectsInstalled === true">
         <div class="advisory-main">
           <div class="badges">
             <span class="badge" [attr.data-severity]="a.severity">
@@ -137,4 +137,12 @@
       </li>
     }
   </ul>
+  <div class="list-foot">
+    <span class="muted">Showing {{ shown().length }} of {{ visible().length }}</span>
+    @if (remaining() > 0) {
+      <button type="button" class="btn btn-secondary btn-sm" appInView (inView)="showMore()" (click)="showMore()">
+        Show {{ remaining() < pageSize ? remaining() : pageSize }} more
+      </button>
+    }
+  </div>
 }
