@@ -11,7 +11,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 [![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Docker](https://img.shields.io/badge/ghcr.io-releasewatcher-2496ed?logo=docker&logoColor=white)](#docker)
-[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-e57000?logo=proxmox&logoColor=white)](#proxmox-lxc-containers)
+[![Proxmox](https://img.shields.io/badge/Proxmox-LXC-e57000?logo=proxmox&logoColor=white)](#machines-proxmox-guests-and-servers)
 
 [Features](#features) · [Quick start](#quick-start) · [Installation](#installation) · [Configuration](#configuration) ·
 [API](#api) · [Development](#development)
@@ -68,7 +68,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
     <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/images/containers-dark.png">
-        <img src="docs/images/containers-light.png" alt="Containers page with pending apt packages and application updates">
+        <img src="docs/images/containers-light.png" alt="Machines page with pending apt packages and application updates">
       </picture>
       <p align="center"><sub>Containers – pending apt packages and application updates</sub></p>
     </td>
@@ -98,6 +98,8 @@ Open <http://localhost:8080>, create the account with the setup code, then:
 2. **Settings → General** – add a GitHub token (recommended); for containers add an SSH key and your Proxmox node
    under **Settings → Connections**.
 3. **Repositories** – add the repositories you want to watch.
+4. **Machines** – add the containers of your Proxmox node(s) and your servers to watch their apt packages and
+   applications.
 
 > [!NOTE]
 > If the image is private, log in first with `docker login ghcr.io` (a GitHub token with `read:packages`).
@@ -160,7 +162,10 @@ digest mode they send one summary together. **Settings → General → Vulnerabi
   installed version is known not to be affected.
 - A failed read is shown on the repository (per source) and never marks the release check as failed.
 
-### Proxmox LXC containers
+### Machines: Proxmox guests and servers
+
+The **Machines** page lists everything watched over SSH – guests of one or more Proxmox nodes, the nodes themselves
+and servers – grouped by host when there is more than one (the old `/containers` address redirects there).
 
 <details>
 <summary><b>Connecting the node</b></summary>
@@ -173,7 +178,7 @@ Connections live in **Settings → Connections**:
   returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
 - **Hosts** – **Add Proxmox node** (as many as you have) with its address, port, SSH user (`root`, or a user allowed
   to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node can have its own backup storage
-  (otherwise the default from Settings → Containers is used). The Containers page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
+  (otherwise the default from Settings → Containers is used). The Machines page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
   on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
   after the machine was reinstalled.
 
@@ -188,7 +193,7 @@ dedicated to it.
 <details>
 <summary><b>Servers (VPS and other Linux machines)</b></summary>
 
-A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Containers page or
+A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Machines page or
 Settings → Connections) takes its address, port, user and SSH key; it is watched right away:
 
 - Commands run directly on the server (`sh -lc` over SSH; a user other than `root` needs passwordless `sudo`).
@@ -196,7 +201,7 @@ Settings → Connections) takes its address, port, user and SSH key; it is watch
   backup. Applications work like in containers (version, latest version, update command, detection).
 - **Restart server** schedules `systemctl reboot`, waits until the server answers over SSH again and checks it. It
   waits for running checks and updates of that server first.
-- Removing the server on the Containers page also removes its host (and the other way round); its SSH key stays.
+- Removing the server on the Machines page also removes its host (and the other way round); its SSH key stays.
 
 </details>
 
@@ -262,7 +267,7 @@ Settings → Connections) takes its address, port, user and SSH key; it is watch
 
 - **Updates are manual only.** The console output is shown live and kept in the run history (last 50 runs per
   container). Only one task runs in a container at a time.
-- **Update** (Containers page) first shows checkboxes in the list, with every container that has pending updates
+- **Update** (Machines page) first shows checkboxes in the list, with every container that has pending updates
   ticked; a second click updates the ticked containers one after another: apt
   first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
   update skips the rest of that container. A container with several pending updates has its own **Update all (n)**.
@@ -399,7 +404,7 @@ Open `http://<container-ip>:8080`. Logs: `journalctl -u releasewatcher -f` (JSON
 - **Update:** replace `/opt/releasewatcher/releasewatcher` and `systemctl restart releasewatcher` (migrations run on
   start). Keep the old file to roll back.
 - **Version:** `releasewatcher --version` prints the installed version and exits – use it as the *version command*
-  when ReleaseWatcher's own container is on the Containers page.
+  when ReleaseWatcher's own container is on the Machines page.
 - **SSH key as a file:** `install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key` and set
   `PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key`.
 - **Backup:** `/var/lib/releasewatcher` (SQLite in WAL mode – stop the service or copy all `releasewatcher.db*`

@@ -41,7 +41,7 @@ describe('App shell', () => {
     const el = fixture.nativeElement as HTMLElement;
     const links = [...el.querySelectorAll('nav a')].map((a) => a.textContent?.trim());
     expect(links[0]).toContain('Repositories');
-    expect(links[1]).toContain('Containers');
+    expect(links[1]).toContain('Machines');
     expect(links[2]).toContain('Vulnerabilities');
     expect(links[3]).toContain('Settings');
     const counts = [...el.querySelectorAll('nav .count')].map((c) => c.textContent?.trim());

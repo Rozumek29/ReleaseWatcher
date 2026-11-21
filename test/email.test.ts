@@ -281,7 +281,7 @@ describe('buildEmail', () => {
     assert.equal(mail.subject, 'ReleaseWatcher: 2 new releases, 1 container with updates, 1 update failed');
     assert.match(mail.text, /CT 105 \(cloud\): updates available\n\nNextcloud: 29\.0\.1 → 29\.0\.2/);
     assert.match(mail.text, /CT 105 \(cloud\): update of Nextcloud failed\nUpdate failed – exit code 1/);
-    assert.match(mail.text, /Containers: https:\/\/rw\.example\.com\/containers/);
+    assert.match(mail.text, /Machines: https:\/\/rw\.example\.com\/machines/);
     assert.equal(mail.html.includes('<script>'), false);
     assert.match(mail.html, /x&lt;script&gt;/);
   });

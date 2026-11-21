@@ -24,7 +24,7 @@ export interface HostDialogData {
 
 /**
  * Adds or edits a host: address, login user and the SSH key it accepts. Used by Settings → Connections and by the
- * Containers page ("Add server"); it loads the saved keys itself when it opens.
+ * Machines page ("Add server"); it loads the saved keys itself when it opens.
  */
 @Component({
   selector: 'app-host-dialog',

@@ -63,7 +63,7 @@ describe('DiscordNotifier', () => {
     );
   });
 
-  it('links container notifications to the Containers page when PUBLIC_URL is set', () => {
+  it('links container notifications to the Machines page when PUBLIC_URL is set', () => {
     const notification = {
       vmid: 101,
       targetKind: 'lxc' as const,
@@ -73,10 +73,10 @@ describe('DiscordNotifier', () => {
     };
     const payload = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' });
     const linked = payload.embeds[0]!;
-    assert.equal(linked.url, 'https://updater.example.com/containers');
-    assert.equal(linked.description.includes('Open containers'), false);
+    assert.equal(linked.url, 'https://updater.example.com/machines');
+    assert.equal(linked.description.includes('Open machines'), false);
     assert.deepEqual(payload.components, [
-      { type: 1, components: [{ type: 2, style: 5, label: 'Open containers', url: 'https://updater.example.com/containers' }] },
+      { type: 1, components: [{ type: 2, style: 5, label: 'Open machines', url: 'https://updater.example.com/machines' }] },
     ]);
 
     // Without a public URL there is nothing to link to.

@@ -149,6 +149,14 @@ describe('servers', () => {
     await app.containers.wait(target.id);
   });
 
+  it('shows why a server could not be reached', async () => {
+    // The whole SSH connection fails (no status section at all).
+    shell.run = async () => ({ exitCode: 255, output: 'ssh: connect to host vps.example.com port 22: Connection timed out', timedOut: false });
+    const { target } = await addServer();
+    assert.match(target.lastError, /SSH connection failed: ssh: connect to host/);
+    assert.ok(target.lastCheckedAt);
+  });
+
   it('keeps a server without a key until one is chosen', async () => {
     const host = (await request('POST', '/api/hosts', { type: 'server', address: 'vps.example.com' })).json();
     const [target] = (await request('GET', '/api/containers')).json();

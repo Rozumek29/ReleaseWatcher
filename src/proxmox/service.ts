@@ -279,7 +279,7 @@ export interface ContainerServiceDeps {
   containers: ContainerStore;
   repositories: RepositoryStore;
   shells: ShellLookup;
-  /** The Proxmox node the Containers page works with (discovery, adding guests); null = none configured. */
+  /** The default Proxmox node (discovery and adding guests when a request names none); null = none configured. */
   nodeHostId: () => number | null;
   dispatcher: NotificationDispatcher;
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
@@ -349,7 +349,7 @@ export class ContainerService {
     this.machinePollMs = deps.machinePollMs ?? 10_000;
   }
 
-  /** The Proxmox node the Containers page works with; null = none configured. */
+  /** The default Proxmox node (the first one); null = none configured. */
   nodeHostId(): number | null {
     return this.deps.nodeHostId();
   }
@@ -482,6 +482,12 @@ export class ContainerService {
       try {
         const errors = await this.check(container, log, true);
         return { ok: errors === 0, exitCode: null };
+      } catch (error) {
+        // The machine could not be reached at all (SSH, `pct status`): show why on the target, not "not checked yet".
+        container.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
+        container.lastCheckedAt = this.now().toISOString();
+        this.deps.containers.save(container);
+        throw error;
       } finally {
         if (started) await this.shutDownAgain(container, log);
       }

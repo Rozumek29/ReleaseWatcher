@@ -151,7 +151,7 @@ describe('Discord digest and update results', () => {
     assert.equal(payload.content, '@here');
     const [embed] = payload.embeds;
     assert.equal(embed?.title, '1 new release, 1 container with updates, 1 update failed');
-    assert.equal(embed?.url, 'https://rw.example.com/containers');
+    assert.equal(embed?.url, 'https://rw.example.com/machines');
     assert.match(embed!.description, /\*\*New releases\*\*\n• \*\*acme\/widget\*\* \[v1\.2\.3\]\(/);
     assert.match(embed!.description, /CT 105 \(cloud\)\*\*: Nextcloud 29\.0\.1 → 29\.0\.2, 1 apt package\(s\)/);
     assert.match(embed!.description, /❌ \*\*CT 105 \(cloud\)\*\*: apt upgrade failed/);

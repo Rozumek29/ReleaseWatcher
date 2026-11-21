@@ -256,7 +256,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
         if (blocked) return problem(409, blocked);
         const targets = hosts.targetCounts().get(id) ?? 0;
         if (targets > 0) {
-          return problem(409, `${host.name} still has ${targets} watched machine(s) – remove them on the Containers page first.`);
+          return problem(409, `${host.name} still has ${targets} watched machine(s) – remove them on the Machines page first.`);
         }
         hosts.deleteHost(id);
         shells.remove(id);

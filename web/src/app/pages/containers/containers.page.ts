@@ -148,13 +148,33 @@ export class ContainersPage {
     return counts;
   });
 
+  /** Targets of more than one host (several nodes, or a node and servers) are listed in groups. */
+  protected readonly grouped = computed(() => new Set(this.containers().map((c) => groupOf(c).key)).size > 1);
+
   protected readonly visible = computed(() => {
     const filter = this.filter();
     const query = this.query().trim().toLowerCase();
     const sort = this.preferences.containerSort();
+    const grouped = this.grouped();
     return this.containers()
       .filter((c) => matchesFilter(c, filter) && (!query || searchText(c).includes(query)))
-      .sort((a, b) => compareContainers(a, b, sort));
+      .sort((a, b) => (grouped ? groupOf(a).order.localeCompare(groupOf(b).order) : 0) || compareContainers(a, b, sort));
+  });
+
+  /** Group headings of the list by the index of the group's first visible target (only when grouped). */
+  protected readonly groupHeadings = computed(() => {
+    const headings = new Map<number, { label: string; kind: 'proxmox' | 'servers' | 'none'; count: number }>();
+    if (!this.grouped()) return headings;
+    let current: { key: string; heading: { label: string; kind: 'proxmox' | 'servers' | 'none'; count: number } } | null = null;
+    this.visible().forEach((c, i) => {
+      const group = groupOf(c);
+      if (group.key !== current?.key) {
+        current = { key: group.key, heading: { label: group.label, kind: group.kind, count: 0 } };
+        headings.set(i, current.heading);
+      }
+      current.heading.count++;
+    });
+    return headings;
   });
 
   /** The selected container, or the first one in the list when nothing (still visible) is selected. */
@@ -746,6 +766,14 @@ const SORTS: readonly { value: ContainerSort; label: string }[] = [
   { value: 'name', label: 'Name' },
 ];
 
+/** List group of a target: its Proxmox node, all servers together, or targets without a host. */
+function groupOf(c: Container): { key: string; label: string; kind: 'proxmox' | 'servers' | 'none'; order: string } {
+  if (c.kind === 'server') return { key: 'servers', label: 'Servers', kind: 'servers', order: '2' };
+  if (c.hostId === null) return { key: 'none', label: 'Without a host', kind: 'none', order: '3' };
+  const name = c.hostName ?? 'Proxmox node';
+  return { key: `node-${c.hostId}`, label: name, kind: 'proxmox', order: `1 ${name.toLowerCase()} ${c.hostId}` };
+}
+
 function hasError(c: Container): boolean {
   return !!c.lastError || c.apps.some((a) => !!a.error);
 }
@@ -800,7 +828,8 @@ function compareContainers(a: Container, b: Container, sort: ContainerSort): num
 function searchText(c: Container): string {
   return [
     c.name,
-    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : c.kind === 'server' ? `server ${c.hostName ?? ''}` : String(c.vmid),
+    c.kind === 'node' ? 'host proxmox' : c.kind === 'vm' ? `vm ${c.vmid}` : c.kind === 'server' ? 'server' : String(c.vmid),
+    c.hostName ?? '',
     ...c.apps.flatMap((a) => [a.name, a.repositoryFullName ?? '']),
   ]
     .join(' ')
