@@ -362,5 +362,5 @@ export class FakeKeyTool implements KeyTool {
 export function addProxmoxHost(store: RepositoryStore, name = 'pve'): Host {
   const hosts = new HostStore(store.database, store.secretBox);
   const sshKeyId = hosts.addKey({ name: `${name} key`, privateKey: TEST_PRIVATE_KEY, publicKey: null, fingerprint: null });
-  return hosts.addHost({ type: 'proxmox', name, address: `${name}.lan`, port: 22, user: 'root', sshKeyId });
+  return hosts.addHost({ type: 'proxmox', name, address: `${name}.lan`, port: 22, user: 'root', sshKeyId, backupStorage: null });
 }

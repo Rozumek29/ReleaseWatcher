@@ -43,8 +43,13 @@ export interface ContainerRoutesDeps {
   service: ContainerService;
   scheduler: ContainerScheduler;
   updater: ContainerUpdater;
-  /** Global backup settings: storage for backups and whether to back up before updates by default. */
-  backupDefaults: () => { storage: string | null; enabled: boolean };
+  /**
+   * Backup settings for a target of the node `hostId`: its storage (the node's own, else the global one) and whether
+   * to back up before updates by default.
+   */
+  backupDefaults: (hostId: number | null) => { storage: string | null; enabled: boolean };
+  /** True when `hostId` is a Proxmox node (guests can be listed and added from it). */
+  isProxmoxHost: (hostId: number) => boolean;
   /** Name of a host (shown next to its targets); null when unknown. */
   hostName: (hostId: number) => string | null;
   /** Called after a target was removed (a server's host goes with it). */
@@ -55,7 +60,12 @@ const COMMAND_MAX_LENGTH = 4000;
 
 const addContainerSchema: ObjectSchema = {
   type: 'object',
-  properties: { vmid: { type: 'integer', minimum: 1 }, name: { type: 'string', nullable: true, maxLength: 100 } },
+  properties: {
+    vmid: { type: 'integer', minimum: 1 },
+    name: { type: 'string', nullable: true, maxLength: 100 },
+    /** Proxmox node to add the guest from; omitted = the default (first) node. */
+    hostId: { type: 'integer', nullable: true, minimum: 1 },
+  },
   required: ['vmid'],
 };
 
@@ -145,6 +155,14 @@ const blankToNull = (value: string | null | undefined): string | null => value?.
 
 export const runDto = (run: Run | Omit<Run, 'output'>) => ({ ...run });
 
+/** A request named a host that is not a Proxmox node. */
+class UnknownNodeError extends Error {
+  override name = 'UnknownNodeError';
+  constructor() {
+    super('Proxmox node not found.');
+  }
+}
+
 /** Maps service errors to problem responses; everything else propagates to the global handler. */
 async function guard(action: () => Response | Promise<Response>): Promise<Response> {
   try {
@@ -152,6 +170,9 @@ async function guard(action: () => Response | Promise<Response>): Promise<Respon
   } catch (error) {
     if (error instanceof ShellNotConfiguredError) {
       return problem(409, error.message);
+    }
+    if (error instanceof UnknownNodeError) {
+      return problem(404, error.message);
     }
     if (
       error instanceof ContainerBusyError ||
@@ -228,7 +249,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       aptEnabled: c.aptEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
-      effectiveBackupBeforeUpdate: capabilities(c.kind).backup !== null && (c.backupBeforeUpdate ?? deps.backupDefaults().enabled),
+      effectiveBackupBeforeUpdate:
+        capabilities(c.kind).backup !== null && (c.backupBeforeUpdate ?? deps.backupDefaults(c.hostId).enabled),
+      /** Storage its backups go to (its node's, else the global one); null = it cannot be backed up or none is chosen. */
+      backupStorage: capabilities(c.kind).backup === null ? null : deps.backupDefaults(c.hostId).storage,
       startWhenStopped: c.startWhenStopped,
       checkCron: c.checkCron,
       updateCores: c.updateCores,
@@ -308,21 +332,36 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         ? problem(409, `${targetTitle(container)} cannot be backed up with vzdump – update it without a backup.`)
         : null;
     }
-    const defaults = deps.backupDefaults();
+    const defaults = deps.backupDefaults(container.hostId);
     const enabled = requested ?? container.backupBeforeUpdate ?? defaults.enabled;
     if (!enabled) {
       return null;
     }
-    return defaults.storage ?? problem(409, 'Choose a backup storage in Settings → Proxmox node, or update without a backup.');
+    return (
+      defaults.storage ??
+      problem(409, 'Choose a backup storage (Settings → Containers, or the node under Connections), or update without a backup.')
+    );
   };
 
-  /** ID of the Proxmox node to add guests from; throws (→ 409) when no node is configured. */
-  const requireNode = (): number => {
-    const hostId = service.nodeHostId();
-    if (hostId === null || !service.shell.isConfigured) {
+  /**
+   * The Proxmox node a request names (`hostId`, from the query or the body) or the default one. Throws
+   * {@link UnknownNodeError} (→ 404) for an unknown node and ShellNotConfiguredError (→ 409) when it has no key.
+   */
+  const requireNode = (requested: number | null | undefined = null): number => {
+    if (requested != null && !deps.isProxmoxHost(requested)) {
+      throw new UnknownNodeError();
+    }
+    const hostId = requested ?? service.nodeHostId();
+    if (hostId === null || !service.shellForHost(hostId).isConfigured) {
       throw new ShellNotConfiguredError();
     }
     return hostId;
+  };
+
+  /** `?hostId=` of a request (null = not given). */
+  const queryHostId = (req: Request): number | null => {
+    const raw = new URL(req.url).searchParams.get('hostId');
+    return raw === null || raw === '' ? null : parseId(raw, 'query/hostId');
   };
 
   const accepted = (run: Run) => Response.json(runDto(run), { status: 202, headers: { location: `/api/runs/${run.id}` } });
@@ -355,10 +394,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
   return {
     '/api/proxmox/test': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            return Response.json({ output: await service.testConnection() });
+            return Response.json({ output: await service.testConnection(hostId) });
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
@@ -367,14 +407,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     // Containers present on the node (`pct list`), marked when already added.
     '/api/proxmox/containers': {
-      GET: () =>
+      GET: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            const found = await service.discover();
-            const hostId = service.nodeHostId();
-            return Response.json(
-              found.map((c) => ({ ...c, added: hostId !== null && containers.existsVmid(hostId, c.vmid) })),
-            );
+            const found = await service.discover(hostId);
+            return Response.json(found.map((c) => ({ ...c, added: containers.existsVmid(hostId, c.vmid) })));
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
@@ -384,10 +422,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
 
     // Storages on the node that accept backups (`pvesm status --content backup`).
     '/api/proxmox/storages': {
-      GET: () =>
+      GET: (req: Request) =>
         guard(async () => {
+          const hostId = requireNode(queryHostId(req));
           try {
-            return Response.json(await service.backupStorages());
+            return Response.json(await service.backupStorages(hostId));
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing storages failed.', { detail: errorMessage(error) });
@@ -399,14 +438,14 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       GET: () => Response.json(listDtos()),
       POST: (req: Request) =>
         guard(async () => {
-          const body = await readBody<{ vmid: number; name?: string | null }>(req, addContainerSchema);
-          const hostId = requireNode();
+          const body = await readBody<{ vmid: number; name?: string | null; hostId?: number | null }>(req, addContainerSchema);
+          const hostId = requireNode(body.hostId);
           if (containers.existsVmid(hostId, body.vmid)) {
             return problem(409, `Guest ${body.vmid} has already been added.`);
           }
           let found: DiscoveredContainer | undefined;
           try {
-            found = (await service.discover()).find((c) => c.vmid === body.vmid);
+            found = (await service.discover(hostId)).find((c) => c.vmid === body.vmid);
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
@@ -423,15 +462,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     // The Proxmox host itself as a target: apt check and dist-upgrade on the node (no applications, no backup).
     '/api/containers/node': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
-          const hostId = requireNode();
+          const hostId = requireNode(queryHostId(req));
           if (containers.getNode(hostId)) {
             return problem(409, 'The Proxmox host has already been added.');
           }
           let name: string;
           try {
-            name = await service.nodeHostname();
+            name = await service.nodeHostname(hostId);
           } catch (error) {
             return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
           }
@@ -446,12 +485,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     // Adds every container of the node that has not been added yet and queues a check of each. Virtual machines
     // are added one by one: they need the QEMU guest agent, and appliances like Home Assistant OS have no apt.
     '/api/containers/add-all': {
-      POST: () =>
+      POST: (req: Request) =>
         guard(async () => {
-          const hostId = requireNode();
+          const hostId = requireNode(queryHostId(req));
           let found: DiscoveredContainer[];
           try {
-            found = await service.discover();
+            found = await service.discover(hostId);
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }

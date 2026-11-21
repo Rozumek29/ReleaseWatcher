@@ -25,6 +25,13 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
+
+  .node-select {
+    width: auto;
+    max-width: 220px;
+    margin-left: auto;
+  }
 
   h2 {
     margin: 0;

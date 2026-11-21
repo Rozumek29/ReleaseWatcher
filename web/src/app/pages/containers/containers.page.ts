@@ -86,11 +86,25 @@ export class ContainersPage {
   /** "Add all" adds containers only: virtual machines need the guest agent and may have no apt. */
   protected readonly availableContainers = computed(() => this.available().filter((c) => c.kind === 'lxc'));
   protected readonly globalCron = computed(() => this.settings()?.proxmox.checkCron ?? '');
-  protected readonly backupStorage = computed(() => this.settings()?.proxmox.backupStorage ?? null);
+  /** Proxmox nodes guests can be added from (the first one is the default). */
+  protected readonly nodes = computed(() => this.settings()?.proxmox.nodes ?? []);
+  /** Node the add form lists guests of (null = the default node). */
+  protected readonly addHostId = signal<number | null>(null);
+  /**
+   * Backup storage shown with "Update all": the storage of the selected targets' node(s); several nodes with
+   * different storages are summarised.
+   */
+  protected readonly headerStorage = computed(() => {
+    const storages = new Set(this.updatable().map((c) => c.backupStorage).filter((s): s is string => s !== null));
+    return storages.size === 0 ? null : storages.size === 1 ? [...storages][0]! : 'each node’s storage';
+  });
   /** "Backup first" checkbox of the open update confirmation. */
   protected readonly backupFirst = signal(false);
   protected readonly anyBusy = computed(() => this.containers().some((c) => c.isBusy));
-  protected readonly hasNode = computed(() => this.containers().some((c) => c.kind === 'node'));
+  /** The node picked in the add form has its own entry already ("Add host" is hidden). */
+  protected readonly hasNode = computed(() =>
+    this.containers().some((c) => c.kind === 'node' && (this.addHostId() === null || c.hostId === this.addHostId())),
+  );
   /** At least one target can be reached (its host has a key) – "Check all" and "Update" need one. */
   protected readonly anyConfigured = computed(() => this.containers().some((c) => c.configured));
   /** The missing-node hint matters when there is nothing yet or Proxmox targets are listed (not for servers only). */
@@ -209,10 +223,23 @@ export class ContainersPage {
 
   protected async openAdd(): Promise<void> {
     this.addOpen.set(true);
+    if (this.addHostId() === null || !this.nodes().some((n) => n.id === this.addHostId())) {
+      this.addHostId.set(this.nodes()[0]?.id ?? null);
+    }
+    await this.discover();
+  }
+
+  /** Another node picked in the add form: lists its guests. */
+  protected async pickNode(hostId: number): Promise<void> {
+    this.addHostId.set(Number(hostId));
+    await this.discover();
+  }
+
+  private async discover(): Promise<void> {
     this.discovering.set(true);
     this.discoverError.set(null);
     try {
-      const found = await firstValueFrom(this.api.discoverContainers());
+      const found = await firstValueFrom(this.api.discoverContainers(this.nodeParam()));
       this.discovered.set(found);
       this.selectedVmid = found.find((c) => !c.added)?.vmid ?? null;
     } catch (error) {
@@ -221,6 +248,11 @@ export class ContainersPage {
     } finally {
       this.discovering.set(false);
     }
+  }
+
+  /** `hostId` for requests about the picked node – null (the default node) while there is only one. */
+  private nodeParam(): number | null {
+    return this.nodes().length > 1 ? this.addHostId() : null;
   }
 
   /** Kind of the guest picked in the add form. */
@@ -236,7 +268,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addContainer(vmid));
+      const created = await firstValueFrom(this.api.addContainer(vmid, null, this.nodeParam()));
       this.containers.update((list) => [...list, created].sort((a, b) => a.vmid - b.vmid));
       this.selectedId.set(created.id);
       this.scheduleRefresh(); // the first check of the new container runs in the background
@@ -260,7 +292,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addAllContainers());
+      const created = await firstValueFrom(this.api.addAllContainers(this.nodeParam()));
       const vmids = new Set(created.map((c) => c.vmid));
       this.discovered.update((list) => list.map((c) => (vmids.has(c.vmid) ? { ...c, added: true } : c)));
       this.addOpen.set(false);
@@ -286,7 +318,7 @@ export class ContainersPage {
     }
     this.adding.set(true);
     try {
-      const created = await firstValueFrom(this.api.addNode());
+      const created = await firstValueFrom(this.api.addNode(this.nodeParam()));
       this.containers.update((list) => [created, ...list]);
       this.selectedId.set(created.id);
       this.scheduleRefresh();
@@ -323,7 +355,7 @@ export class ContainersPage {
   protected startPicking(): void {
     this.confirming.set(null);
     this.backupFirst.set(
-      this.backupStorage() !== null && this.updatable().some((c) => c.effectiveBackupBeforeUpdate),
+      this.updatable().some((c) => c.effectiveBackupBeforeUpdate && c.backupStorage !== null),
     );
     this.picked.set(new Set(this.updatable().map((c) => c.id)));
   }
@@ -356,7 +388,7 @@ export class ContainersPage {
     this.updatingAll.set(true);
     try {
       const { containers, updates } = await firstValueFrom(
-        this.api.updateAllContainers(this.backupFirst() && this.backupStorage() !== null, ids),
+        this.api.updateAllContainers(this.backupFirst() && this.headerStorage() !== null, ids),
       );
       this.toast.info(
         containers > 0
@@ -381,7 +413,7 @@ export class ContainersPage {
   /** Opens an update confirmation; "Backup first" starts with the container's default. */
   protected ask(key: string, container: Container): void {
     this.backupFirst.set(
-      container.capabilities.backup !== null && container.effectiveBackupBeforeUpdate && this.backupStorage() !== null,
+      container.capabilities.backup !== null && container.effectiveBackupBeforeUpdate && container.backupStorage !== null,
     );
     this.confirming.set(key);
   }
@@ -545,7 +577,7 @@ export class ContainersPage {
   /** Runs every pending update of one container, one after another (a single backup before the first one). */
   protected async updateContainer(container: Container): Promise<void> {
     this.confirming.set(null);
-    const backup = this.backupFirst() && this.backupStorage() !== null;
+    const backup = this.backupFirst() && container.backupStorage !== null;
     await this.withBusy(container.id, async () => {
       const { updates } = await firstValueFrom(this.api.runContainerUpdates(container.id, backup));
       this.toast.info(

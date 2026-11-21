@@ -145,6 +145,8 @@ export interface AppSettings {
   proxmox: {
     /** True when a Proxmox node is added (Settings → Connections) and has an SSH key. */
     configured: boolean;
+    /** Proxmox nodes guests can be added from (the first one is the default). */
+    nodes: ProxmoxNode[];
     checkCron: string;
     checkCronSource: SettingSource;
     /** How many containers are checked at the same time. */
@@ -449,6 +451,8 @@ export interface Container {
   backupBeforeUpdate: boolean | null;
   /** The value in effect for this container (own setting or the global default). */
   effectiveBackupBeforeUpdate: boolean;
+  /** Storage its backups go to (its node's, else the global one); null = no backups possible or none chosen. */
+  backupStorage: string | null;
   /** Started temporarily for checks and updates when stopped, shut down again afterwards. */
   startWhenStopped: boolean;
   /** Overrides the global schedule; null = global. */
@@ -607,6 +611,8 @@ export interface Host {
   user: string;
   sshKeyId: number | null;
   sshKeyName: string | null;
+  /** Proxmox node: storage for backups before updates; null = the global setting. */
+  backupStorage: string | null;
   /** A key is chosen (whether the host answers shows "Test connection"). */
   configured: boolean;
   /** Containers, virtual machines and the node itself watched through this host. */
@@ -622,4 +628,13 @@ export interface HostInput {
   port?: number | null;
   user?: string | null;
   sshKeyId?: number | null;
+  backupStorage?: string | null;
+}
+
+/** A Proxmox node as listed in the settings. */
+export interface ProxmoxNode {
+  id: number;
+  name: string;
+  configured: boolean;
+  backupStorage: string | null;
 }

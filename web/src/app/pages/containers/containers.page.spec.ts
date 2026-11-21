@@ -504,6 +504,43 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.add-card')).toBeNull();
   });
 
+  it('adds a guest of another Proxmox node', async () => {
+    await TestBed.configureTestingModule({
+      imports: [ContainersPage],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+    }).compileComponents();
+    http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(ContainersPage);
+    fixture.detectChanges();
+    http.expectOne('/api/containers').flush([]);
+    const settings = proxmoxSettings(true);
+    settings.proxmox.nodes = [
+      { id: 1, name: 'pve1', configured: true, backupStorage: null },
+      { id: 2, name: 'pve2', configured: true, backupStorage: 'pbs2' },
+    ];
+    http.expectOne('/api/settings').flush(settings);
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
+    http.expectOne('/api/proxmox/containers?hostId=1').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'vw', added: false }]);
+    await settle(fixture);
+    const node = el.querySelector<HTMLSelectElement>('#add-node')!;
+    expect([...node.options].map((o) => o.textContent)).toEqual(['pve1', 'pve2']);
+    node.value = node.options[1]!.value;
+    node.dispatchEvent(new Event('change'));
+    http.expectOne('/api/proxmox/containers?hostId=2').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'jf', added: false }]);
+    await settle(fixture);
+    expect([...el.querySelectorAll('#vmid option')].map((o) => o.textContent)).toEqual(['CT 100 · jf (running)']);
+
+    el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
+    const request = http.expectOne('/api/containers');
+    expect(request.request.body).toEqual({ vmid: 100, name: null, hostId: 2 });
+    request.flush(container({ id: 2, vmid: 100, name: 'jf', hostId: 2, hostName: 'pve2', backupStorage: 'pbs2' }));
+    await settle(fixture);
+    http.expectOne('/api/status').flush({});
+  });
+
   it('adds a virtual machine with a hint about the guest agent and labels it as a VM', async () => {
     const { fixture, el } = await create([]);
 

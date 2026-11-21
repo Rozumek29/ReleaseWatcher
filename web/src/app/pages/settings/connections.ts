@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import { Host, HostType, SshKey } from '../../core/models';
@@ -32,9 +32,6 @@ export class ConnectionsPanel implements OnInit {
   protected readonly testResults = signal<ReadonlyMap<number, { ok: boolean; text: string }>>(new Map());
   protected readonly editingHost = signal<HostDialogData | null>(null);
   protected readonly keyDialog = signal<SshKeyDialogMode | null>(null);
-
-  /** Only one Proxmox node for now – the Containers page works with the first one. */
-  protected readonly hasProxmoxHost = computed(() => (this.hosts() ?? []).some((h) => h.type === 'proxmox'));
 
   async ngOnInit(): Promise<void> {
     await this.reload();

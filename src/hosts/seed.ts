@@ -53,6 +53,7 @@ export async function seedProxmoxHost(deps: SeedDeps): Promise<Host | null> {
       port: Number.isInteger(legacy.port) ? legacy.port : DEFAULT_SSH_PORT,
       user: legacy.user || DEFAULT_SSH_USER,
       sshKeyId,
+      backupStorage: null,
     });
     log.info({ host: legacy.host, withKey: sshKeyId !== null }, 'Moved the Proxmox node settings into a host');
   }

@@ -80,6 +80,28 @@
           </span>
         </div>
 
+        @if (d.type === 'proxmox' && d.host) {
+          <div class="field">
+            <label for="host-backup">Backup storage</label>
+            <select id="host-backup" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
+              <option value="">– the global setting (Settings → Containers) –</option>
+              @if (backupStorage && !hasStorage(backupStorage)) {
+                <option [value]="backupStorage">{{ backupStorage }}</option>
+              }
+              @for (st of storages() ?? []; track st.name) {
+                <option [value]="st.name" [disabled]="st.status !== 'active'">{{ st.name }} ({{ st.type }})</option>
+              }
+            </select>
+            @if (errors()['backupStorage']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+            @if (storagesError(); as e) {
+              <span class="error">Could not list storages: {{ e }}</span>
+            }
+            <span class="hint">Storage of this node for <code>vzdump</code> backups made before updates of its guests.</span>
+          </div>
+        }
+
         <div class="field">
           <label for="host-name">Name <span class="optional">optional</span></label>
           <input id="host-name" class="input" name="name" [(ngModel)]="name" [placeholder]="address || 'Shown in lists and notifications'" autocomplete="off" [class.invalid]="errors()['name']" />

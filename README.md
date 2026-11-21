@@ -171,8 +171,9 @@ Connections live in **Settings → Connections**:
   **Generate key** creates an Ed25519 key pair on the server and shows its public key to copy into
   `~/.ssh/authorized_keys`; **Add key** pastes an existing private key. Private keys are encrypted at rest and never
   returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
-- **Hosts** – **Add Proxmox node** with its address, port, SSH user (`root`, or a user allowed to run `pct`/`qm`
-  through passwordless `sudo`) and one of the keys. **Test connection** runs `pveversion` on it. A host key is trusted
+- **Hosts** – **Add Proxmox node** (as many as you have) with its address, port, SSH user (`root`, or a user allowed
+  to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node can have its own backup storage
+  (otherwise the default from Settings → Containers is used). The Containers page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
   on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
   after the machine was reinstalled.
 
@@ -589,7 +590,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `GET` / `PUT` / `DELETE` | `/api/hosts/:id` | One host; partial update (omitted = keep); delete (a server's target goes with it; a Proxmox node: `409` while it has watched machines) |
 | `POST` | `/api/hosts/:id/test` | Connect and return `pveversion` (Proxmox) or `uname -a` |
 | `POST` | `/api/hosts/:id/forget-host-key` | Remove the pinned SSH host key (after a reinstall) |
-| `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output |
+| `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output. Like the other `/api/proxmox/*` routes and `POST /api/containers/node` / `add-all`, it takes `?hostId=` (default: the first node); `POST /api/containers` takes `hostId` in the body |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups |
 | `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |

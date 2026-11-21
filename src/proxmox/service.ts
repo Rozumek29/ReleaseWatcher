@@ -387,9 +387,14 @@ export class ContainerService {
     await Promise.allSettled([...this.active.values()]);
   }
 
+  /** Shell of a Proxmox node (null = the default one, see {@link nodeHostId}). */
+  shellForHost(hostId: number | null = this.deps.nodeHostId()): NodeShell {
+    return this.deps.shells.forHost(hostId);
+  }
+
   /** Connects to the node and returns `pveversion` output. */
-  async testConnection(): Promise<string> {
-    const result = await this.shell.run('pveversion 2>/dev/null || uname -a', { timeoutMs: NODE_TIMEOUT_MS });
+  async testConnection(hostId: number | null = this.deps.nodeHostId()): Promise<string> {
+    const result = await this.shellForHost(hostId).run('pveversion 2>/dev/null || uname -a', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -397,8 +402,8 @@ export class ContainerService {
   }
 
   /** Host name of the node (`hostname`). */
-  async nodeHostname(): Promise<string> {
-    const result = await this.shell.run('hostname', { timeoutMs: NODE_TIMEOUT_MS });
+  async nodeHostname(hostId: number | null = this.deps.nodeHostId()): Promise<string> {
+    const result = await this.shellForHost(hostId).run('hostname', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -406,8 +411,8 @@ export class ContainerService {
   }
 
   /** Lists containers and virtual machines on the node (`pct list`, `qm list`). */
-  async discover(): Promise<DiscoveredContainer[]> {
-    const result = await this.shell.run(DISCOVER_COMMAND, { timeoutMs: NODE_TIMEOUT_MS });
+  async discover(hostId: number | null = this.deps.nodeHostId()): Promise<DiscoveredContainer[]> {
+    const result = await this.shellForHost(hostId).run(DISCOVER_COMMAND, { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -1141,8 +1146,8 @@ export class ContainerService {
   }
 
   /** Lists storages on the node that accept backups. */
-  async backupStorages(): Promise<BackupStorage[]> {
-    const result = await this.shell.run('pvesm status --content backup', { timeoutMs: NODE_TIMEOUT_MS });
+  async backupStorages(hostId: number | null = this.deps.nodeHostId()): Promise<BackupStorage[]> {
+    const result = await this.shellForHost(hostId).run('pvesm status --content backup', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }

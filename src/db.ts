@@ -453,6 +453,8 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE containers_new RENAME TO containers;
    CREATE UNIQUE INDEX idx_containers_host_vmid ON containers (host_id, kind, vmid);
    CREATE INDEX idx_containers_enabled ON containers (is_enabled, vmid);`,
+  // Backup storage per Proxmox node (storage IDs differ between nodes); NULL = the global setting.
+  `ALTER TABLE hosts ADD COLUMN backup_storage TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
