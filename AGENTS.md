@@ -22,7 +22,9 @@ described in `DESIGN.md` – follow it for every UI or API change so new code lo
 - Keep pushing follow-up commits to the same branch; the PR updates itself.
 - Wait for CI with `gh pr checks <pr> --watch` – AI agents run it through the **Monitor** tool (not a
   blocking shell call with `sleep`/`timeout`) and react when it finishes.
-- Merge only after CI passes, and **always squash-merge**:
+- **The PR stays a draft until the user explicitly says to merge.** Green CI is not a reason to mark it
+  ready or merge it – report the result and wait.
+- When told to merge: only after CI passes, and **always squash-merge**:
 
   ```bash
   gh pr ready && gh pr merge --squash --delete-branch
