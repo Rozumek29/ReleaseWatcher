@@ -340,7 +340,8 @@ install -d -m 755 /opt/releasewatcher                                           
 install -d -o root -g releasewatcher -m 750 /etc/releasewatcher                 # configuration
 
 # 3. Executable from the GitHub release
-gh release download v1.3.0 -R rozumek29/releasewatcher -p 'releasewatcher-*-linux-x64'
+gh release download v1.3.0 -R rozumek29/releasewatcher -p 'releasewatcher-*-linux-x64.tar.xz'
+tar -xJf releasewatcher-1.3.0-linux-x64.tar.xz   # needs xz-utils
 install -m 755 releasewatcher-1.3.0-linux-x64 /opt/releasewatcher/releasewatcher
 
 # 4. Configuration (optional – everything can be set in the UI; behind a reverse proxy set PUBLIC_URL)
@@ -684,7 +685,7 @@ Push a tag – `.github/workflows/release.yml` builds and publishes everything:
 
 | Tag | GitHub Release | Docker image |
 | --- | --- | --- |
-| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64` (+ `.tar.xz`) | `1.2.3`, `1.2`, `latest` |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64.tar.xz` | `1.2.3`, `1.2`, `latest` |
 | `beta-1.2.3` | pre-release with the same files | `beta-1.2.3` |
 
 ```bash
@@ -695,8 +696,9 @@ Push only the tag – a release created by hand on github.com has no files and m
 
 Release artifacts (`bun run package`):
 
-- **`releasewatcher-<version>-linux-x64`** – one self-contained executable (`bun build --compile --bytecode`, Bun
-  runtime and UI embedded). About 110 MB, almost all of it the Bun runtime; also packed as `.tar.xz` (~40 MB).
+- **`releasewatcher-<version>-linux-x64.tar.xz`** – one self-contained executable (`bun build --compile --bytecode`,
+  Bun runtime and UI embedded), packed with xz: ~40 MB to download, about 110 MB unpacked (almost all of it the Bun
+  runtime).
 - **`releasewatcher-<version>.zip`** – server sources, production UI and runtime dependencies for an installed Bun
   (`bun start`, no `bun install` needed).
 
