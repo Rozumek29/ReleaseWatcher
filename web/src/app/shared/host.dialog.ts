@@ -12,7 +12,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError, fieldErrors } from '../core/api.service';
-import { Host, HostInput, HostType, SshKey } from '../core/models';
+import { BackupStorage, Host, HostInput, HostType, SshKey } from '../core/models';
 import { BackdropClose } from './backdrop-close';
 import { Icon } from './icon';
 
@@ -48,9 +48,14 @@ export class HostDialog {
   protected port: number | null = 22;
   protected user = 'root';
   protected sshKeyId: number | null = null;
+  /** Proxmox node: its backup storage ('' = the global setting). */
+  protected backupStorage = '';
 
   /** Saved keys to choose from (null while loading). */
   protected readonly keys = signal<SshKey[] | null>(null);
+  /** Storages of an existing Proxmox node that accept backups (null = not loaded / not available). */
+  protected readonly storages = signal<BackupStorage[] | null>(null);
+  protected readonly storagesError = signal<string | null>(null);
   protected readonly saving = signal(false);
   protected readonly errors = signal<Record<string, string>>({});
   protected readonly saveError = signal<string | null>(null);
@@ -66,7 +71,13 @@ export class HostDialog {
         this.port = host?.port ?? 22;
         this.user = host?.user ?? 'root';
         this.sshKeyId = host?.sshKeyId ?? null;
+        this.backupStorage = host?.backupStorage ?? '';
         void this.loadKeys(host === null);
+        this.storages.set(null);
+        this.storagesError.set(null);
+        if (host?.type === 'proxmox' && host.configured) {
+          void this.loadStorages(host.id);
+        }
         this.errors.set({});
         this.saveError.set(null);
         if (!dialog.open) {
@@ -93,6 +104,14 @@ export class HostDialog {
     }
   }
 
+  private async loadStorages(hostId: number): Promise<void> {
+    try {
+      this.storages.set(await firstValueFrom(this.api.getBackupStorages(hostId)));
+    } catch (error) {
+      this.storagesError.set(describeError(error));
+    }
+  }
+
   protected title(data: HostDialogData): string {
     const what = data.type === 'proxmox' ? 'Proxmox node' : 'server';
     return data.host ? `Edit ${data.host.name}` : `Add ${what}`;
@@ -108,6 +127,7 @@ export class HostDialog {
       port,
       user: this.user.trim() || null,
       sshKeyId: this.sshKeyId,
+      ...(data.type === 'proxmox' && data.host ? { backupStorage: this.backupStorage.trim() || null } : {}),
     };
     this.saving.set(true);
     this.errors.set({});
@@ -127,6 +147,10 @@ export class HostDialog {
     } finally {
       this.saving.set(false);
     }
+  }
+
+  protected hasStorage(name: string): boolean {
+    return (this.storages() ?? []).some((st) => st.name === name);
   }
 
   protected close(): void {

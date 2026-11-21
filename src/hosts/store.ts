@@ -19,6 +19,7 @@ interface HostRow {
   port: number;
   user: string;
   ssh_key_id: number | null;
+  backup_storage: string | null;
   created_at: string;
 }
 
@@ -30,6 +31,7 @@ const toHost = (r: HostRow): Host => ({
   port: r.port,
   user: r.user,
   sshKeyId: r.ssh_key_id,
+  backupStorage: r.backup_storage,
   createdAt: r.created_at,
 });
 
@@ -127,7 +129,11 @@ export class HostStore {
     return r ? toHost(r) : null;
   }
 
-  /** The Proxmox node the Containers page works with (the first one added). */
+  listProxmoxHosts(): Host[] {
+    return this.db.query<HostRow, []>("SELECT * FROM hosts WHERE type = 'proxmox' ORDER BY id").all().map(toHost);
+  }
+
+  /** The default Proxmox node (the first one added) – used when a request names none. */
   firstProxmoxHost(): Host | null {
     const r = this.db.query<HostRow, []>("SELECT * FROM hosts WHERE type = 'proxmox' ORDER BY id LIMIT 1").get();
     return r ? toHost(r) : null;
@@ -135,16 +141,27 @@ export class HostStore {
 
   addHost(input: HostInput): Host {
     const result = this.db
-      .query('INSERT INTO hosts (type, name, address, port, user, ssh_key_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
-      .run(input.type, input.name.trim(), input.address, input.port, input.user, input.sshKeyId, new Date().toISOString());
+      .query(
+        'INSERT INTO hosts (type, name, address, port, user, ssh_key_id, backup_storage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+      )
+      .run(
+        input.type,
+        input.name.trim(),
+        input.address,
+        input.port,
+        input.user,
+        input.sshKeyId,
+        input.backupStorage,
+        new Date().toISOString(),
+      );
     return this.getHost(Number(result.lastInsertRowid))!;
   }
 
   /** Saves the connection fields (the type of a host never changes). */
   saveHost(host: Host): void {
     this.db
-      .query('UPDATE hosts SET name = ?, address = ?, port = ?, user = ?, ssh_key_id = ? WHERE id = ?')
-      .run(host.name.trim(), host.address, host.port, host.user, host.sshKeyId, host.id);
+      .query('UPDATE hosts SET name = ?, address = ?, port = ?, user = ?, ssh_key_id = ?, backup_storage = ? WHERE id = ?')
+      .run(host.name.trim(), host.address, host.port, host.user, host.sshKeyId, host.backupStorage, host.id);
   }
 
   /** Number of targets (containers, VMs, the node itself) per host. */

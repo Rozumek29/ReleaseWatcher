@@ -1,6 +1,7 @@
 /**
  * Machines ReleaseWatcher reaches over SSH and the named keys it logs in with. Pure types and validation – no I/O.
  */
+import { STORAGE_ID_PATTERN } from '../proxmox/domain.ts';
 
 export const HOST_TYPES = ['proxmox', 'server'] as const;
 /** `proxmox` = a Proxmox VE node (its guests and the node itself are targets); `server` = a plain Linux machine. */
@@ -31,10 +32,12 @@ export interface Host {
   user: string;
   /** Key used to log in; null = not chosen yet (the host cannot be reached). */
   sshKeyId: number | null;
+  /** Proxmox node: storage for vzdump backups before updates; null = the global setting. Always null for servers. */
+  backupStorage: string | null;
   createdAt: string;
 }
 
-export type HostInput = Pick<Host, 'type' | 'name' | 'address' | 'port' | 'user' | 'sshKeyId'>;
+export type HostInput = Pick<Host, 'type' | 'name' | 'address' | 'port' | 'user' | 'sshKeyId' | 'backupStorage'>;
 
 export const DEFAULT_SSH_PORT = 22;
 export const DEFAULT_SSH_USER = 'root';
@@ -92,6 +95,10 @@ export function validateHost(input: HostInput): FieldErrors {
   if (port) errors['port'] = port;
   const user = validateUser(input.user);
   if (user) errors['user'] = user;
+  if (input.backupStorage !== null) {
+    if (input.type !== 'proxmox') errors['backupStorage'] = 'Only Proxmox nodes have a backup storage.';
+    else if (!STORAGE_ID_PATTERN.test(input.backupStorage)) errors['backupStorage'] = 'Enter a Proxmox storage ID, e.g. "local" or "pbs".';
+  }
   return errors;
 }
 

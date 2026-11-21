@@ -328,7 +328,7 @@
           </div>
           <div class="proxmox-col">
             <div class="field">
-              <label for="pve-backup-storage">Backup storage</label>
+              <label for="pve-backup-storage">Default backup storage</label>
               <div class="storage-row">
                 <select id="pve-backup-storage" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
                   <option value="">– none (no backups before updates) –</option>
@@ -350,7 +350,8 @@
                 <span class="error">Could not list storages: {{ e }}</span>
               }
               <span class="hint">
-                {{ sourceLabel(s.proxmox.backupStorageSource) }}. Storages of the node that accept backups. Backups are made
+                {{ sourceLabel(s.proxmox.backupStorageSource) }}. Used by nodes without their own storage (Connections → node →
+                Edit); the list shows the storages of the first node. Backups are made
                 with <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
                 to the storage's retention (prune) settings.
               </span>

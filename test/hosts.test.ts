@@ -57,12 +57,15 @@ afterEach(async () => {
 
 describe('host validation', () => {
   it('rejects addresses and users that could become ssh options', () => {
-    const valid = { type: 'server' as const, name: 'vps', address: 'vps.example.com', port: 22, user: 'admin', sshKeyId: null };
+    const valid = { type: 'server' as const, name: 'vps', address: 'vps.example.com', port: 22, user: 'admin', sshKeyId: null, backupStorage: null };
     assert.deepEqual(validateHost(valid), {});
     assert.ok(validateHost({ ...valid, address: '-oProxyCommand=x' }).address);
     assert.ok(validateHost({ ...valid, user: '-l' }).user);
     assert.ok(validateHost({ ...valid, port: 70_000 }).port);
     assert.ok(validateHost({ ...valid, name: ' ' }).name);
+    assert.ok(validateHost({ ...valid, backupStorage: 'pbs' }).backupStorage); // servers have no vzdump
+    assert.deepEqual(validateHost({ ...valid, type: 'proxmox', backupStorage: 'pbs' }), {});
+    assert.ok(validateHost({ ...valid, type: 'proxmox', backupStorage: '../x' }).backupStorage);
   });
 });
 
@@ -71,7 +74,7 @@ describe('shell pool', () => {
     const store = new RepositoryStore(':memory:');
     const hosts = new HostStore(store.database, store.secretBox);
     const keyId = hosts.addKey({ name: 'k', privateKey: TEST_PRIVATE_KEY, publicKey: null, fingerprint: null });
-    const host = hosts.addHost({ type: 'server', name: 'vps', address: 'vps.lan', port: 22, user: 'root', sshKeyId: null });
+    const host = hosts.addHost({ type: 'server', name: 'vps', address: 'vps.lan', port: 22, user: 'root', sshKeyId: null, backupStorage: null });
     const pool = new ShellPool({ hosts, knownHostsFile: 'kh' });
     const shell = pool.forHost(host.id);
     assert.equal(shell.isConfigured, false); // no key yet
@@ -158,6 +161,7 @@ describe('hosts API', () => {
         user: 'root',
         sshKeyId: key.id,
         sshKeyName: 'Main',
+        backupStorage: null,
         configured: true,
         targetCount: 0,
         createdAt: undefined,

@@ -538,8 +538,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         advisoryCronSource: settings.sourceOf('advisoryCheckCron'),
       },
       proxmox: {
-        // A Proxmox node is added (Settings → Hosts) and has an SSH key.
-        configured: containers.shell.isConfigured,
+        // A Proxmox node is added (Settings → Connections) and has an SSH key.
+        configured: hostStore.listProxmoxHosts().some((h) => shells.forHost(h.id).isConfigured),
+        /** Proxmox nodes guests can be added from (the first one is the default). */
+        nodes: hostStore.listProxmoxHosts().map((h) => ({
+          id: h.id,
+          name: h.name,
+          configured: shells.forHost(h.id).isConfigured,
+          backupStorage: h.backupStorage,
+        })),
         checkCron: current.containerCheckCron,
         checkCronSource: settings.sourceOf('containerCheckCron'),
         checkConcurrency: current.containerCheckConcurrency,
@@ -906,7 +913,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           service: containers,
           scheduler,
           updater,
-          backupDefaults: () => ({ storage: settings.current.backupStorage, enabled: settings.current.backupBeforeUpdate }),
+          backupDefaults: (hostId) => ({
+            storage: (hostId === null ? null : hostStore.getHost(hostId)?.backupStorage) ?? settings.current.backupStorage,
+            enabled: settings.current.backupBeforeUpdate,
+          }),
+          isProxmoxHost: (hostId) => hostStore.getHost(hostId)?.type === 'proxmox',
           hostName: (hostId) => hostStore.getHost(hostId)?.name ?? null,
           // A server's host exists only for its one target: removing the server removes the connection too.
           onTargetDeleted: (container) => {

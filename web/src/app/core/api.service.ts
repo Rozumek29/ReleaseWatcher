@@ -164,12 +164,14 @@ export class ApiService {
 
   /* ---------- Proxmox containers ---------- */
 
-  discoverContainers(): Observable<DiscoveredContainer[]> {
-    return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers`);
+  /** Guests of a Proxmox node (null = the default node). */
+  discoverContainers(hostId: number | null = null): Observable<DiscoveredContainer[]> {
+    return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers${hostQuery(hostId)}`);
   }
 
-  getBackupStorages(): Observable<BackupStorage[]> {
-    return this.http.get<BackupStorage[]>(`${this.baseUrl}/proxmox/storages`);
+  /** Storages of a Proxmox node that accept backups (null = the default node). */
+  getBackupStorages(hostId: number | null = null): Observable<BackupStorage[]> {
+    return this.http.get<BackupStorage[]>(`${this.baseUrl}/proxmox/storages${hostQuery(hostId)}`);
   }
 
   getContainers(): Observable<Container[]> {
@@ -180,8 +182,8 @@ export class ApiService {
     return this.http.get<Container>(`${this.baseUrl}/containers/${id}`);
   }
 
-  addContainer(vmid: number, name: string | null = null): Observable<Container> {
-    return this.http.post<Container>(`${this.baseUrl}/containers`, { vmid, name });
+  addContainer(vmid: number, name: string | null = null, hostId: number | null = null): Observable<Container> {
+    return this.http.post<Container>(`${this.baseUrl}/containers`, hostId === null ? { vmid, name } : { vmid, name, hostId });
   }
 
   updateContainer(id: number, request: UpdateContainerRequest): Observable<Container> {
@@ -193,13 +195,13 @@ export class ApiService {
   }
 
   /** Adds the Proxmox host itself as a target (apt check and dist-upgrade). */
-  addNode(): Observable<Container> {
-    return this.http.post<Container>(`${this.baseUrl}/containers/node`, {});
+  addNode(hostId: number | null = null): Observable<Container> {
+    return this.http.post<Container>(`${this.baseUrl}/containers/node${hostQuery(hostId)}`, {});
   }
 
   /** Adds every container of the node that has not been added yet; returns the added ones. */
-  addAllContainers(): Observable<Container[]> {
-    return this.http.post<Container[]>(`${this.baseUrl}/containers/add-all`, {});
+  addAllContainers(hostId: number | null = null): Observable<Container[]> {
+    return this.http.post<Container[]>(`${this.baseUrl}/containers/add-all${hostQuery(hostId)}`, {});
   }
 
   checkAllContainers(): Observable<{ queued: number }> {
@@ -299,6 +301,9 @@ export class ApiService {
 }
 
 /** Extracts a human readable message from a problem-details response. */
+/** `?hostId=…` for requests about one Proxmox node; empty for the default node. */
+const hostQuery = (hostId: number | null): string => (hostId === null ? '' : `?hostId=${hostId}`);
+
 export function describeError(error: unknown): string {
   if (error instanceof HttpErrorResponse) {
     const problem = error.error as { title?: string; detail?: string; errors?: Record<string, string[]> } | null;

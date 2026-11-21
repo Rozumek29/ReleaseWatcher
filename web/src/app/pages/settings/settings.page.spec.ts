@@ -12,6 +12,7 @@ const settings: AppSettings = {
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured: true,
+    nodes: [{ id: 1, name: 'pve', configured: true, backupStorage: null }],
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,

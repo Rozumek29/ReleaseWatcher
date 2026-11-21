@@ -64,6 +64,7 @@ const hostSchema: ObjectSchema = {
     port: { type: 'integer', nullable: true },
     user: { type: 'string', nullable: true, maxLength: 32 },
     sshKeyId: { type: 'integer', nullable: true },
+    backupStorage: { type: 'string', nullable: true, maxLength: 100 },
   },
 };
 
@@ -74,6 +75,7 @@ interface HostBody {
   port?: number | null;
   user?: string | null;
   sshKeyId?: number | null;
+  backupStorage?: string | null;
 }
 
 const fieldProblem = (errors: FieldErrors): Response =>
@@ -106,6 +108,8 @@ export function hostRoutes(deps: HostRoutesDeps) {
       user: h.user,
       sshKeyId: h.sshKeyId,
       sshKeyName: key?.name ?? null,
+      /** Proxmox node: storage for backups before updates; null = the global setting. */
+      backupStorage: h.backupStorage,
       /** A key is chosen, so commands can run (whether the host answers shows "Test connection"). */
       configured: key !== null,
       /** Containers, virtual machines and the node itself watched through this host. */
@@ -205,6 +209,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
           port: body.port ?? DEFAULT_SSH_PORT,
           user: body.user?.trim() || DEFAULT_SSH_USER,
           sshKeyId: body.sshKeyId ?? null,
+          backupStorage: body.backupStorage?.trim() || null,
         };
         const errors = { ...validateHost(input), ...keyError(input.sshKeyId) };
         if (Object.keys(errors).length > 0) return fieldProblem(errors);
@@ -235,6 +240,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
           port: body.port === undefined || body.port === null ? host.port : body.port,
           user: body.user === undefined || body.user === null ? host.user : body.user.trim() || DEFAULT_SSH_USER,
           sshKeyId: body.sshKeyId === undefined ? host.sshKeyId : body.sshKeyId,
+          backupStorage: body.backupStorage === undefined ? host.backupStorage : body.backupStorage?.trim() || null,
         };
         const errors = { ...validateHost(updated), ...keyError(updated.sshKeyId) };
         if (Object.keys(errors).length > 0) return fieldProblem(errors);

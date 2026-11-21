@@ -7,6 +7,7 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured,
+    nodes: configured ? [{ id: 1, name: 'pve', configured: true, backupStorage: null }] : [],
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,
@@ -102,6 +103,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   backupBeforeUpdate: null,
   startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
+  backupStorage: 'pbs',
   checkCron: null,
   updateCores: null,
   updateMemoryMb: null,

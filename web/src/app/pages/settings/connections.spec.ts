@@ -24,6 +24,7 @@ const host = (id: number, extra: Partial<Host> = {}): Host => ({
   user: 'root',
   sshKeyId: 1,
   sshKeyName: 'Key 1',
+  backupStorage: null,
   configured: true,
   targetCount: 3,
   createdAt: '2026-01-01T00:00:00Z',
@@ -63,8 +64,9 @@ describe('ConnectionsPanel', () => {
     expect(el.textContent).toContain('3 watched machine(s)');
     expect(el.textContent).toContain('SHA256:fp1');
     expect(el.textContent).toContain('Used by 1 host(s)');
-    // One Proxmox node for now: no second "Add Proxmox node".
-    expect(el.textContent).not.toContain('Add Proxmox node');
+    // More Proxmox nodes can be added.
+    expect(el.textContent).toContain('Add Proxmox node');
+    expect(el.textContent).toContain('Backups: global storage');
     const removes = [...el.querySelectorAll<HTMLButtonElement>('button.btn-danger-ghost')];
     // Host with machines, key in use: disabled; the unused key can be removed.
     expect(removes.map((b) => b.disabled)).toEqual([true, true, false]);
@@ -144,6 +146,31 @@ describe('ConnectionsPanel', () => {
     await settle(fixture);
     expect(el.querySelector<HTMLTextAreaElement>('#key-public')!.value).toBe('ssh-ed25519 AAAA5 releasewatcher');
     expect(el.textContent).toContain('Key Homelab generated');
+  });
+
+  it('picks the backup storage of a Proxmox node', async () => {
+    const { http, fixture, el, button } = await setup([host(1)], [key(1, { hostCount: 1 })]);
+    button('Edit').click();
+    await settle(fixture);
+    http.expectOne('/api/ssh-keys').flush([key(1, { hostCount: 1 })]);
+    http.expectOne('/api/proxmox/storages?hostId=1').flush([
+      { name: 'local', type: 'dir', status: 'active', availableBytes: 1 },
+      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 1 },
+    ]);
+    await settle(fixture);
+    const select = el.querySelector<HTMLSelectElement>('#host-backup')!;
+    expect([...select.options].map((o) => o.textContent?.trim())).toEqual([
+      '– the global setting (Settings → Containers) –',
+      'local (dir)',
+      'pbs (pbs)',
+    ]);
+    select.value = 'pbs';
+    select.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    el.querySelector<HTMLFormElement>('app-host-dialog form')!.dispatchEvent(new Event('submit'));
+    const save = http.expectOne('/api/hosts/1');
+    expect(save.request.method).toBe('PUT');
+    expect(save.request.body.backupStorage).toBe('pbs');
   });
 
   it('tests the connection of a host', async () => {

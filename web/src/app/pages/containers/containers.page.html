@@ -11,10 +11,10 @@
       <button type="button" class="btn btn-sm btn-ghost" (click)="togglePickAll()">
         {{ pickedUpdatable().length === updatable().length ? 'Select none' : 'Select all' }}
       </button>
-      <label class="backup-check" [class.disabled]="!backupStorage()" title="Backs up the containers set to back up before updates">
-        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+      <label class="backup-check" [class.disabled]="!headerStorage()" title="Backs up the containers set to back up before updates">
+        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!headerStorage()" />
         Backup first
-        @if (backupStorage(); as storage) {
+        @if (headerStorage(); as storage) {
           <span class="muted mono">→ {{ storage }}</span>
         } @else {
           <span class="muted">(choose a storage in Settings)</span>
@@ -72,6 +72,14 @@
   <section class="card add-card" aria-labelledby="add-title">
     <div class="add-head">
       <h2 id="add-title">Add a container or virtual machine</h2>
+      @if (nodes().length > 1) {
+        <label for="add-node" class="visually-hidden">Proxmox node</label>
+        <select id="add-node" class="input node-select" [ngModel]="addHostId()" (ngModelChange)="pickNode($event)">
+          @for (n of nodes(); track n.id) {
+            <option [ngValue]="n.id" [disabled]="!n.configured">{{ n.name }}{{ n.configured ? '' : ' (no SSH key)' }}</option>
+          }
+        </select>
+      }
       <button type="button" class="icon-btn" (click)="addOpen.set(false)" aria-label="Close">
         <app-icon name="close" [size]="16" />
       </button>
@@ -333,7 +341,7 @@
                     next {{ c.nextCheckAt | relativeTime: now() }}
                   </span>
                 }
-                @if (c.effectiveBackupBeforeUpdate && backupStorage()) {
+                @if (c.effectiveBackupBeforeUpdate && c.backupStorage) {
                   <span class="meta-item" title="A vzdump backup is made before updates (can be changed per update)">
                     backup before updates
                   </span>
@@ -348,10 +356,10 @@
                 <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
               } @else if (confirming() === 'update-' + c.id) {
                 <span class="confirm-text warn">Run {{ pendingCount(c) }} update(s) one after another?</span>
-                <label class="backup-check" [class.disabled]="!backupStorage()" title="One backup before the first update">
-                  <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                <label class="backup-check" [class.disabled]="!c.backupStorage" title="One backup before the first update">
+                  <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                   Backup first
-                  @if (backupStorage(); as storage) {
+                  @if (c.backupStorage; as storage) {
                     <span class="muted mono">→ {{ storage }}</span>
                   } @else {
                     <span class="muted">(choose a storage in Settings)</span>
@@ -468,10 +476,10 @@
                       @if (!c.capabilities.backup) {
                         <span class="muted small">apt-get {{ c.kind === 'node' ? 'dist-upgrade' : 'upgrade' }}, no backup</span>
                       } @else {
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                       Backup first
-                      @if (backupStorage(); as storage) {
+                      @if (c.backupStorage; as storage) {
                         <span class="muted mono">→ {{ storage }}</span>
                       } @else {
                         <span class="muted">(choose a storage in Settings)</span>
@@ -521,10 +529,10 @@
                   <div class="item-actions">
                     @if (confirming() === 'ha-' + c.id) {
                       <span class="confirm-text warn">Install {{ installableHa(c).length }} Home Assistant update(s)?</span>
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                         Backup first
-                        @if (backupStorage(); as storage) {
+                        @if (c.backupStorage; as storage) {
                           <span class="muted mono">→ {{ storage }}</span>
                         } @else {
                           <span class="muted">(choose a storage in Settings)</span>
@@ -560,10 +568,10 @@
                   <div class="item-actions">
                     @if (confirming() === 'ha-' + c.id + '-' + u.id) {
                       <span class="confirm-text warn">Update {{ u.name }}?</span>
-                      <label class="backup-check" [class.disabled]="!backupStorage()">
-                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                      <label class="backup-check" [class.disabled]="!c.backupStorage">
+                        <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                         Backup first
-                        @if (backupStorage(); as storage) {
+                        @if (c.backupStorage; as storage) {
                           <span class="muted mono">→ {{ storage }}</span>
                         } @else {
                           <span class="muted">(choose a storage in Settings)</span>
@@ -614,10 +622,10 @@
                 <div class="item-actions">
                   @if (confirming() === 'app-' + c.id + '-' + a.id) {
                     <span class="confirm-text warn">Run <code>{{ a.updateCommand }}</code>?</span>
-                    <label class="backup-check" [class.disabled]="!backupStorage()">
-                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
+                    <label class="backup-check" [class.disabled]="!c.backupStorage">
+                      <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
                       Backup first
-                      @if (backupStorage(); as storage) {
+                      @if (c.backupStorage; as storage) {
                         <span class="muted mono">→ {{ storage }}</span>
                       } @else {
                         <span class="muted">(choose a storage in Settings)</span>
@@ -663,7 +671,7 @@
   [container]="editing()"
   [globalCron]="globalCron()"
   [globalBackup]="settings()?.proxmox?.backupBeforeUpdate ?? false"
-  [backupStorage]="backupStorage()"
+  [backupStorage]="editing()?.backupStorage ?? null"
   (saved)="onSettingsSaved($event)"
   (closed)="onSettingsClosed()"
 />
