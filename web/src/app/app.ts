@@ -1,4 +1,13 @@
-import { Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { AuthService } from './core/auth.service';
@@ -17,6 +26,7 @@ interface NavItem {
 /** App shell: sidebar navigation, poller status and global toasts; sign-in pages get a bare layout. */
 @Component({
   selector: 'app-root',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [RouterOutlet, RouterLink, RouterLinkActive, Icon, RelativeTimePipe],
   templateUrl: './app.html',
   styleUrl: './app.scss',

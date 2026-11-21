@@ -1,4 +1,4 @@
-import { Component, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError, fieldErrors } from '../../core/api.service';
@@ -10,6 +10,7 @@ export const MIN_PASSWORD_LENGTH = 10;
 /** First run: creates the only account (needs the one-time setup code printed by the server). */
 @Component({
   selector: 'app-setup-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, Icon],
   templateUrl: './setup.page.html',
   styleUrl: './auth.scss',

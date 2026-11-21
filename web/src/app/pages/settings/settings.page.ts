@@ -1,5 +1,12 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, OnInit, computed, inject, signal } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -46,6 +53,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
 
 @Component({
   selector: 'app-settings-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, DecimalPipe, Icon, RelativeTimePipe, Switch],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',

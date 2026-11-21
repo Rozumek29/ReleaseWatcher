@@ -1,5 +1,16 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  ElementRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import { SecurityAdvisory, WatchedRepository } from '../../core/models';
@@ -12,6 +23,7 @@ import { impactRank, SEVERITY_LABELS, SOURCE_LABELS } from '../../shared/severit
 /** Security advisories (GHSA) of one repository, with their impact on the installed version. */
 @Component({
   selector: 'app-advisories-dialog',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [BackdropClose, DatePipe, Avatar, Icon, RelativeTimePipe],
   templateUrl: './advisories.dialog.html',
   styleUrl: './advisories.dialog.scss',

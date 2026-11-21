@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError, fieldErrors } from '../../core/api.service';
@@ -12,6 +12,7 @@ import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 /** The single account: user name, password, passkeys and signed-in sessions. */
 @Component({
   selector: 'app-account-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, Icon, RelativeTimePipe],
   templateUrl: './account.page.html',
   styleUrl: './account.page.scss',

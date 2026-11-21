@@ -1,5 +1,13 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/api.service';
@@ -23,6 +31,7 @@ export const SEARCH_DELAY_MS = 250;
 /** Security advisories of all watched repositories, compared with the installed versions. */
 @Component({
   selector: 'app-vulnerabilities-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [DatePipe, RouterLink, Avatar, Icon, InView, RelativeTimePipe],
   templateUrl: './vulnerabilities.page.html',
   styleUrl: './vulnerabilities.page.scss',

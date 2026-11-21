@@ -1,5 +1,13 @@
 import { DatePipe } from '@angular/common';
-import { Component, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -19,6 +27,7 @@ type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors'
 
 @Component({
   selector: 'app-repositories-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, DatePipe, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, AdvisoriesDialog],
   templateUrl: './repositories.page.html',
   styleUrl: './repositories.page.scss',

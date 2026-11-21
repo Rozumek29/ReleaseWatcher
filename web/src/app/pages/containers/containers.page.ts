@@ -1,6 +1,16 @@
 import { DatePipe } from '@angular/common';
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, DestroyRef, ElementRef, computed, effect, inject, signal, untracked } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  ElementRef,
+  computed,
+  effect,
+  inject,
+  signal,
+  untracked,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
@@ -24,6 +34,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
 /** Proxmox LXC containers: pending apt/app updates and manual update actions. */
 @Component({
   selector: 'app-containers-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     FormsModule,
     DatePipe,

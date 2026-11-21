@@ -1,5 +1,5 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { Component, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError } from '../../core/api.service';
@@ -9,6 +9,7 @@ import { Icon } from '../../shared/icon';
 /** Sign-in with the password or a passkey. */
 @Component({
   selector: 'app-login-page',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, Icon],
   templateUrl: './login.page.html',
   styleUrl: './auth.scss',

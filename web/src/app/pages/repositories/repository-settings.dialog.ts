@@ -1,4 +1,14 @@
-import { Component, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  ElementRef,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+  viewChild,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
@@ -20,6 +30,7 @@ import { BackdropClose } from '../../shared/backdrop-close';
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
 @Component({
   selector: 'app-repository-settings-dialog',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [BackdropClose, FormsModule, Avatar, Icon, Switch],
   templateUrl: './repository-settings.dialog.html',
   styleUrl: './repository-settings.dialog.scss',

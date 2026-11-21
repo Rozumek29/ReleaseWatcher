@@ -1,5 +1,6 @@
 import { DatePipe } from '@angular/common';
 import {
+  ChangeDetectionStrategy,
   Component,
   DestroyRef,
   ElementRef,
@@ -41,6 +42,7 @@ function keepTail(output: string): string {
 /** Console output of a check/update, refreshed live while it runs, plus the run history. */
 @Component({
   selector: 'app-run-log-dialog',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [BackdropClose, DatePipe, Icon, RelativeTimePipe],
   templateUrl: './run-log.dialog.html',
   styleUrls: ['./dialog.scss', './run-log.dialog.scss'],

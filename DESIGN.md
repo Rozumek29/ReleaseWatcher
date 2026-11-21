@@ -256,6 +256,10 @@ Shared components in `web/src/app/shared/`:
 
 - Standalone components only, `inject()` for DI, `input()` / `output()` / `viewChild()` functions, signals and
   `computed()` for state; `effect()` only for side effects (opening dialogs, saving preferences, reloads).
+- Every component uses `changeDetection: ChangeDetectionStrategy.OnPush`: a component is checked only when a signal
+  it reads, an input or one of its template events changes, so ticks elsewhere (clock, status poll, run log) don't
+  re-check every list. State shown in a template therefore lives in signals; a plain field (e.g. an `ngModel` form
+  value) may only be written from a template event, an `effect()` or together with a signal the template reads.
 - New control flow (`@if`, `@for` with `track`, `@else`), no `*ngIf` / `*ngFor`.
 - Template-driven forms (`FormsModule`, `ngModel`) are the project standard; keep forms small.
 - HTTP only through `ApiService`; components convert with `firstValueFrom` and use `async/await` + `try/finally`

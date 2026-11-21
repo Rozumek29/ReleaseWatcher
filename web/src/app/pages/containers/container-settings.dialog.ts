@@ -1,5 +1,6 @@
 import { NgTemplateOutlet } from '@angular/common';
 import {
+  ChangeDetectionStrategy,
   Component,
   ElementRef,
   Injector,
@@ -63,6 +64,7 @@ const byName = (list: ContainerApp[]): ContainerApp[] =>
 /** Settings of one container and its applications (version check + update command). */
 @Component({
   selector: 'app-container-settings-dialog',
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [BackdropClose, FormsModule, NgTemplateOutlet, Icon, Switch],
   templateUrl: './container-settings.dialog.html',
   styleUrls: ['./dialog.scss', './container-settings.dialog.scss'],
