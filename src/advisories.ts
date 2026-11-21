@@ -119,6 +119,37 @@ function matchesAll(version: string, constraints: string): boolean | null {
 }
 
 /**
+ * Upper bound implied by the first patched version: "1.2.3" or ">= 1.2.3" → "< 1.2.3", "> 1.2.3" → "<= 1.2.3".
+ * Null when there is no fix or the value lists several versions.
+ */
+function patchedBound(patchedVersions: string | null): string | null {
+  const patched = patchedVersions?.trim();
+  if (!patched || patched.includes(',') || patched.includes('||')) {
+    return null;
+  }
+  const match = patched.match(/^(>=|>|=|==)?\s*(\S+)$/);
+  if (!match?.[2]) {
+    return null;
+  }
+  return `${match[1] === '>' ? '<=' : '<'} ${match[2]}`;
+}
+
+/**
+ * The vulnerable range, capped by the patched version where the range has no upper bound. Advisories often say
+ * ">= 0.104.0" with "patched: 0.135.0", which would otherwise flag every newer version as vulnerable.
+ */
+export function effectiveRange(vulnerableRange: string, patchedVersions: string | null): string {
+  const bound = patchedBound(patchedVersions);
+  if (!bound) {
+    return vulnerableRange;
+  }
+  return vulnerableRange
+    .split('||')
+    .map((alternative) => (alternative.includes('<') ? alternative.trim() : [alternative.trim(), bound].filter(Boolean).join(', ')))
+    .join(' || ');
+}
+
+/**
  * Does the advisory affect `version`? True/false when at least one vulnerable range could be compared, null when the
  * version is unknown or no range is usable.
  */
@@ -133,7 +164,7 @@ export function advisoryAffects(advisory: Pick<SecurityAdvisory, 'vulnerabilitie
       unknown = true;
       continue;
     }
-    const result = versionInRange(version, vulnerability.vulnerableRange);
+    const result = versionInRange(version, effectiveRange(vulnerability.vulnerableRange, vulnerability.patchedVersions));
     if (result === true) {
       return true;
     }

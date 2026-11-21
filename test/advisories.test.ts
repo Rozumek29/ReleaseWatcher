@@ -5,6 +5,7 @@ import {
   ADVISORY_REFRESH_INTERVAL_MS,
   advisoryAffects,
   advisoryImpact,
+  effectiveRange,
   installedVersions,
   normalizeSeverity,
   sortAdvisories,
@@ -51,6 +52,32 @@ describe('advisoryAffects', () => {
     });
     assert.equal(advisoryAffects(mixed, '1.2.0'), null);
     assert.equal(advisoryAffects(mixed, '0.5.0'), true);
+  });
+});
+
+describe('patched versions', () => {
+  it('cap a vulnerable range without an upper bound', () => {
+    assert.equal(effectiveRange('>= 0.104.0', '0.135.0'), '>= 0.104.0, < 0.135.0');
+    assert.equal(effectiveRange('>= 0.35.0', '>= 0.120.0'), '>= 0.35.0, < 0.120.0');
+    assert.equal(effectiveRange('>= 0.1.0', '>0.45.0'), '>= 0.1.0, <= 0.45.0');
+    assert.equal(effectiveRange('>= 1.0.0, < 1.5.0', '1.4.0'), '>= 1.0.0, < 1.5.0');
+    assert.equal(effectiveRange('< 1.0.0 || >= 2.0.0', '2.3.0'), '< 1.0.0 || >= 2.0.0, < 2.3.0');
+    assert.equal(effectiveRange('>= 1.0.0', null), '>= 1.0.0');
+    assert.equal(effectiveRange('>= 1.0.0', '1.2.5, 2.0.3'), '>= 1.0.0');
+  });
+
+  it('do not flag versions at or above the fix (clidey/whodb GHSA-x3h5-pr45-fx4r)', () => {
+    const a = advisory('GHSA-x3h5-pr45-fx4r', 1, '>= 0.104.0', {
+      vulnerabilities: [{ packageName: 'github.com/clidey/whodb/core', vulnerableRange: '>= 0.104.0', patchedVersions: '0.135.0' }],
+    });
+    assert.equal(advisoryAffects(a, '0.139.0'), false);
+    assert.equal(advisoryAffects(a, '0.135.0'), false);
+    assert.equal(advisoryAffects(a, '0.134.2'), true);
+    assert.equal(advisoryAffects(a, '0.103.0'), false);
+    const unfixed = advisory('GHSA-open', 1, '>= 1.0.0', {
+      vulnerabilities: [{ packageName: 'app', vulnerableRange: '>= 1.0.0', patchedVersions: null }],
+    });
+    assert.equal(advisoryAffects(unfixed, '9.0.0'), true);
   });
 });
 
