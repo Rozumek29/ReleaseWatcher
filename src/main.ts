@@ -10,7 +10,6 @@ import { GitHubReleaseSource } from './github.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
 import { OsvApiClient } from './osv.ts';
-import { SshShell } from './proxmox/ssh.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 import { localVersionUrl } from './version.ts';
@@ -49,16 +48,6 @@ if (seeded) {
 }
 const settings = new SettingsService(store, config);
 const notifiers = createNotifiers(config, settings);
-const shell = new SshShell(() => {
-  const current = settings.current;
-  return {
-    host: current.proxmoxHost,
-    port: current.proxmoxPort,
-    user: current.proxmoxUser,
-    privateKey: current.proxmoxSshKey,
-    knownHostsFile: config.proxmox.knownHostsFile,
-  };
-});
 
 const app = await buildApp({
   store,
@@ -66,7 +55,7 @@ const app = await buildApp({
   source: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
   osv: new OsvApiClient(),
   notifiers,
-  shell,
+  knownHostsFile: config.proxmox.knownHostsFile,
   auth: {
     publicUrl: config.publicUrl,
     trustProxy: config.trustProxy,
@@ -80,8 +69,7 @@ const app = await buildApp({
 
 const shutdown = async (signal: string) => {
   log.info({ signal }, 'Shutting down');
-  await app.close(); // also stops the scheduled jobs and the container scheduler
-  shell.dispose();
+  await app.close(); // also stops the scheduled jobs and the container scheduler and removes temporary key files
   store.close();
   log.close();
   process.exit(0);
@@ -106,7 +94,7 @@ log.info(
     releaseCheckCron: settings.current.releaseCheckCron,
     advisoryCheckCron: settings.current.advisoryCheckCron,
     notifiers: notifiers.filter((n) => n.isEnabled).map((n) => n.name),
-    proxmox: shell.isConfigured ? settings.current.proxmoxHost : null,
+    proxmoxConfigured: app.containers.shell.isConfigured,
     containerCheckCron: settings.current.containerCheckCron,
   },
   'ReleaseWatcher started',

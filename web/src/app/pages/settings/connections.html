@@ -1,0 +1,170 @@
+<div class="sections">
+  <!-- Hosts -->
+  <section class="card section wide enter" style="--i: 0" aria-labelledby="hosts-title">
+    <div class="section-head">
+      <span class="section-icon hosts"><app-icon name="server" /></span>
+      <div class="section-title">
+        <h2 id="hosts-title">Hosts</h2>
+        <p>Machines ReleaseWatcher connects to over SSH.</p>
+      </div>
+      @if (!hasProxmoxHost()) {
+        <button type="button" class="btn btn-sm head-action" (click)="addHost('proxmox')" [disabled]="hosts() === null">
+          <app-icon name="plus" [size]="14" /> Add Proxmox node
+        </button>
+      }
+    </div>
+
+    <div class="section-body">
+      @if (hosts(); as list) {
+        @for (h of list; track h.id) {
+          <div class="row enter" [style.--i]="$index">
+            <div class="row-main">
+              <div class="row-title">
+                <span class="name">{{ h.name }}</span>
+                <span class="badge" [class.badge-accent]="h.type === 'proxmox'">{{ typeLabel(h.type) }}</span>
+                @if (!h.configured) {
+                  <span class="badge badge-warning"><app-icon name="alert" [size]="12" /> No SSH key</span>
+                }
+              </div>
+              <div class="row-meta">
+                <span class="mono">{{ destination(h) }}</span>
+                @if (h.sshKeyName) {
+                  <span><app-icon name="key" [size]="12" /> {{ h.sshKeyName }}</span>
+                }
+                <span>{{ h.targetCount }} watched machine(s)</span>
+              </div>
+            </div>
+            <div class="row-actions">
+              @if (confirming() === 'delete-host-' + h.id) {
+                <span class="confirm-text">Remove {{ h.name }}?</span>
+                <button type="button" class="btn btn-sm" (click)="deleteHost(h)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else if (confirming() === 'forget-host-' + h.id) {
+                <span class="confirm-text">Forget the pinned host key? Do this only after reinstalling the machine.</span>
+                <button type="button" class="btn btn-sm" (click)="forgetHostKey(h)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else {
+                <button type="button" class="btn btn-sm btn-secondary" (click)="testHost(h)" [disabled]="isBusy('host-' + h.id) || !h.configured">
+                  <app-icon [name]="isBusy('host-' + h.id) ? 'refresh' : 'terminal'" [size]="14" [class.spin]="isBusy('host-' + h.id)" />
+                  {{ isBusy('host-' + h.id) ? 'Connecting…' : 'Test connection' }}
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="editHost(h)" [disabled]="isBusy('host-' + h.id)">Edit</button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-ghost"
+                  (click)="confirming.set('forget-host-' + h.id)"
+                  [disabled]="isBusy('host-' + h.id)"
+                  title="Remove the pinned SSH host key (after the machine was reinstalled)"
+                >
+                  Forget host key
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-danger-ghost"
+                  (click)="confirming.set('delete-host-' + h.id)"
+                  [disabled]="isBusy('host-' + h.id) || h.targetCount > 0"
+                  [title]="h.targetCount > 0 ? 'Remove its machines on the Containers page first' : 'Remove host'"
+                >
+                  Remove
+                </button>
+              }
+            </div>
+            @if (testResults().get(h.id); as t) {
+              <pre class="node-test" [class.failed]="!t.ok" aria-label="Connection test result">{{ t.text }}</pre>
+            }
+          </div>
+        } @empty {
+          <div class="empty-row">
+            <app-icon name="server" [size]="20" />
+            <p>
+              No hosts yet. Add your Proxmox node to check and update its containers – first add or generate the SSH key
+              it accepts below.
+            </p>
+          </div>
+        }
+      } @else {
+        <div class="skeleton row-skeleton"></div>
+      }
+      <p class="hint">
+        Only key authentication is used (no passwords). A host key is trusted on the first connection and pinned
+        afterwards. A user other than <code>root</code> needs passwordless <code>sudo</code>.
+      </p>
+    </div>
+  </section>
+
+  <!-- SSH keys -->
+  <section class="card section wide enter" style="--i: 1" aria-labelledby="keys-title">
+    <div class="section-head">
+      <span class="section-icon keys"><app-icon name="key" /></span>
+      <div class="section-title">
+        <h2 id="keys-title">SSH keys</h2>
+        <p>Named keys the hosts log in with – one for every machine or one per machine.</p>
+      </div>
+      <div class="head-actions">
+        <button type="button" class="btn btn-sm btn-secondary" (click)="keyDialog.set({ kind: 'add' })">
+          <app-icon name="plus" [size]="14" /> Add key
+        </button>
+        <button type="button" class="btn btn-sm" (click)="keyDialog.set({ kind: 'generate' })">
+          <app-icon name="key" [size]="14" /> Generate key
+        </button>
+      </div>
+    </div>
+
+    <div class="section-body">
+      @if (keys(); as list) {
+        @for (k of list; track k.id) {
+          <div class="row enter" [style.--i]="$index">
+            <div class="row-main">
+              <div class="row-title">
+                <span class="name">{{ k.name }}</span>
+                @if (k.hostCount > 0) {
+                  <span class="badge">Used by {{ k.hostCount }} host(s)</span>
+                } @else {
+                  <span class="badge">Unused</span>
+                }
+              </div>
+              <div class="row-meta">
+                <span class="mono">{{ k.fingerprint ?? 'Fingerprint unknown' }}</span>
+              </div>
+            </div>
+            <div class="row-actions">
+              @if (confirming() === 'delete-key-' + k.id) {
+                <span class="confirm-text">Remove key {{ k.name }}?</span>
+                <button type="button" class="btn btn-sm" (click)="deleteKey(k)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else {
+                <button type="button" class="btn btn-sm btn-secondary" (click)="copyPublicKey(k)" [disabled]="!k.publicKey">
+                  Copy public key
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="keyDialog.set({ kind: 'rename', key: k })">Rename</button>
+                <button
+                  type="button"
+                  class="btn btn-sm btn-danger-ghost"
+                  (click)="confirming.set('delete-key-' + k.id)"
+                  [disabled]="isBusy('key-' + k.id) || k.hostCount > 0"
+                  [title]="k.hostCount > 0 ? 'Choose another key for its hosts first' : 'Remove key'"
+                >
+                  Remove
+                </button>
+              }
+            </div>
+          </div>
+        } @empty {
+          <div class="empty-row">
+            <app-icon name="key" [size]="20" />
+            <p>
+              No keys yet. <strong>Generate key</strong> creates one here – copy its public key into
+              <code>~/.ssh/authorized_keys</code> of your machines – or <strong>Add key</strong> pastes an existing private key.
+            </p>
+          </div>
+        }
+      } @else {
+        <div class="skeleton row-skeleton"></div>
+      }
+      <p class="hint">Private keys are encrypted at rest and never shown again. Keys protected with a passphrase are not supported.</p>
+    </div>
+  </section>
+</div>
+
+<app-host-dialog [data]="editingHost()" [keys]="keys() ?? []" (saved)="hostSaved()" (closed)="editingHost.set(null)" />
+<app-ssh-key-dialog [mode]="keyDialog()" (saved)="keySaved()" (closed)="keyDialog.set(null)" />

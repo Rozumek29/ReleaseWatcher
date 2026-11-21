@@ -33,7 +33,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
   user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
-- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`. A feature folder owns its
+- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool). A feature folder owns its
   `domain.ts` (pure logic), `store.ts` (SQL), `service.ts` (orchestration), `routes.ts` (HTTP) – follow
   `src/proxmox/` as the template for any new large feature instead of growing `app.ts`.
 

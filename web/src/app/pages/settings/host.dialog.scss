@@ -1,0 +1,21 @@
+.dialog {
+  width: min(500px, calc(100vw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.form-row {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 480px) {
+  .form-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

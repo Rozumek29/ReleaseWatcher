@@ -486,6 +486,103 @@ code {
 
 /* ---------- Dialogs ---------- */
 
+/* Settings: cards with a head (icon, title, badge), a body and actions at the bottom. Used by the settings page
+ * and its panels (Connections). Cards in a row share their height; the actions sit at the bottom of each card. */
+.section {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.section-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border);
+
+  .badge {
+    margin-left: auto;
+    margin-top: 2px;
+  }
+}
+
+.section-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+}
+
+.section-title {
+  min-width: 0;
+
+  h2 {
+    margin: 0;
+    font-size: 1.02rem;
+    font-weight: 640;
+  }
+
+  p {
+    margin: 2px 0 0;
+    color: var(--text-muted);
+    font-size: 0.86rem;
+  }
+}
+
+.section-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 20px;
+}
+
+.section-actions {
+  margin-top: auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 4px;
+
+  .spacer {
+    flex: 1;
+  }
+}
+
+.node-test {
+  margin: 0;
+  max-height: 140px;
+  overflow: auto;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-family: ui-monospace, 'Cascadia Code', SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+
+  &.failed {
+    background: var(--danger-soft);
+    color: var(--danger);
+  }
+}
+
+/* A button that looks like a link (inline actions inside text). */
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
 /* Native <dialog> shell: .dialog > .dialog-card > .dialog-head / .dialog-body / .dialog-foot. Components set the width. */
 .dialog {
   width: min(560px, calc(100vw - 32px));

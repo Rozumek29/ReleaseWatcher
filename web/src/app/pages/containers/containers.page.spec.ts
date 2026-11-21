@@ -155,8 +155,8 @@ describe('ContainersPage', () => {
 
   it('shows a hint linking to Settings when the node is not configured', async () => {
     const { el } = await create([], false);
-    expect(el.querySelector('.callout')?.textContent).toContain('not configured');
-    expect(el.querySelector('.callout a')?.getAttribute('href')).toBe('/settings');
+    expect(el.querySelector('.callout')?.textContent).toContain('No Proxmox node is configured');
+    expect(el.querySelector('.callout a')?.getAttribute('href')).toBe('/settings?tab=connections');
   });
 
   it('asks before upgrading apt packages and opens the run log', async () => {

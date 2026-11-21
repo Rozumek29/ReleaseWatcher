@@ -389,6 +389,70 @@ const MIGRATIONS: readonly string[] = [
      WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2 WHEN 'moderate' THEN 2 WHEN 'low' THEN 1 ELSE 0 END;
    CREATE INDEX idx_repository_advisories_page
      ON repository_advisories (impact DESC, severity_rank DESC, published_at DESC, repository_id DESC, advisory_id DESC);`,
+  // Named SSH keys (private key encrypted) and the machines reached with them: Proxmox nodes and servers. Every
+  // target belongs to a host, so `containers` is rebuilt without the global UNIQUE on vmid (two nodes may both have
+  // CT 100); the old Proxmox settings are moved into a host at startup (`seedProxmoxHost`). Runs with foreign keys
+  // off (see migrate()), so dropping the old table does not cascade into container_apps / container_runs.
+  `CREATE TABLE ssh_keys (
+     id          INTEGER PRIMARY KEY AUTOINCREMENT,
+     name        TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+     private_key TEXT    NOT NULL,
+     public_key  TEXT,
+     fingerprint TEXT,
+     created_at  TEXT    NOT NULL
+   );
+
+   CREATE TABLE hosts (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     type       TEXT    NOT NULL,
+     name       TEXT    NOT NULL,
+     address    TEXT    NOT NULL,
+     port       INTEGER NOT NULL DEFAULT 22,
+     user       TEXT    NOT NULL DEFAULT 'root',
+     ssh_key_id INTEGER REFERENCES ssh_keys (id),
+     created_at TEXT    NOT NULL
+   );
+   CREATE INDEX idx_hosts_ssh_key ON hosts (ssh_key_id) WHERE ssh_key_id IS NOT NULL;
+
+   CREATE TABLE containers_new (
+     id                     INTEGER PRIMARY KEY AUTOINCREMENT,
+     host_id                INTEGER REFERENCES hosts (id),
+     kind                   TEXT    NOT NULL DEFAULT 'lxc',
+     vmid                   INTEGER NOT NULL,
+     name                   TEXT    NOT NULL,
+     is_enabled             INTEGER NOT NULL DEFAULT 1,
+     apt_enabled            INTEGER NOT NULL DEFAULT 1,
+     check_cron             TEXT,
+     status                 TEXT,
+     apt_upgradable         TEXT,
+     last_checked_at        TEXT,
+     last_error             TEXT,
+     notified_signature     TEXT,
+     created_at             TEXT    NOT NULL,
+     backup_before_update   INTEGER,
+     start_when_stopped     INTEGER NOT NULL DEFAULT 0,
+     update_cores           INTEGER,
+     update_memory_mb       INTEGER,
+     resources_to_restore   TEXT,
+     restart_reasons        TEXT,
+     home_assistant         TEXT,
+     home_assistant_url     TEXT,
+     home_assistant_token   TEXT,
+     home_assistant_install INTEGER NOT NULL DEFAULT 0
+   );
+   INSERT INTO containers_new (
+     id, kind, vmid, name, is_enabled, apt_enabled, check_cron, status, apt_upgradable, last_checked_at, last_error,
+     notified_signature, created_at, backup_before_update, start_when_stopped, update_cores, update_memory_mb,
+     resources_to_restore, restart_reasons, home_assistant, home_assistant_url, home_assistant_token, home_assistant_install)
+   SELECT
+     id, kind, vmid, name, is_enabled, apt_enabled, check_cron, status, apt_upgradable, last_checked_at, last_error,
+     notified_signature, created_at, backup_before_update, start_when_stopped, update_cores, update_memory_mb,
+     resources_to_restore, restart_reasons, home_assistant, home_assistant_url, home_assistant_token, home_assistant_install
+   FROM containers;
+   DROP TABLE containers;
+   ALTER TABLE containers_new RENAME TO containers;
+   CREATE UNIQUE INDEX idx_containers_host_vmid ON containers (host_id, kind, vmid);
+   CREATE INDEX idx_containers_enabled ON containers (is_enabled, vmid);`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -854,8 +918,22 @@ export class RepositoryStore {
       this.db.exec(MIGRATIONS[index]!);
       this.db.exec(`PRAGMA user_version = ${index + 1}`);
     });
-    for (let i = version; i < MIGRATIONS.length; i++) {
-      apply(i);
+    if (version >= MIGRATIONS.length) {
+      return;
+    }
+    // Foreign keys are off while migrating (the pragma cannot change inside a transaction): rebuilding a table
+    // (create new → copy → drop old → rename) must not cascade deletes into the tables that reference it.
+    this.db.run('PRAGMA foreign_keys = OFF');
+    try {
+      for (let i = version; i < MIGRATIONS.length; i++) {
+        apply(i);
+      }
+      const broken = this.db.query('PRAGMA foreign_key_check').all();
+      if (broken.length > 0) {
+        throw new Error(`Database migration left ${broken.length} broken foreign key reference(s).`);
+      }
+    } finally {
+      this.db.run('PRAGMA foreign_keys = ON');
     }
   }
 }

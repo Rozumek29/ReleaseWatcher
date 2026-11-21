@@ -94,6 +94,12 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   `capabilities` in the container DTO. Branch on `capabilities(kind)` / `c.capabilities` – not on `kind` – except
   for labels and transport details (`pct` vs `qm guest exec`). The SSH connection of a target comes from
   `ContainerService.shellFor(container)`, never from `deps.shell` directly.
+- SSH connections live in `src/hosts/`: named keys (`ssh_keys`) and hosts (`hosts`, `type` `proxmox` | `server`);
+  every target has a `host_id`. `ShellPool` keeps one `SshShell` per host and reads address, user and key from the
+  store for every command (edits apply without a restart). `ssh-keygen` (inspect, generate, forget host keys) is
+  behind `KeyTool` – tests use `FakeKeyTool` and `addProxmoxHost()` from `test/helpers.ts`; `deps.shell` in tests
+  answers for every host. The former Proxmox settings (`PROXMOX_*`, saved `proxmox*` settings) are only read once by
+  `seedProxmoxHost()` to create the first host.
 - Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),
   sessions in the `sessions` table (only a SHA-256 of the cookie token). `buildApp` guards every route except
   `PUBLIC_ROUTES` (`src/auth/routes.ts`) and refuses cross-site writes (Origin check). New routes are protected
@@ -112,8 +118,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 ### Secrets
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
-  Proxmox SSH private key, the Home Assistant access token of a VM, password hashes, session tokens and the setup code are secrets
-  (the key is exposed only as `sshKeyConfigured`, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
+  SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, password hashes, session tokens and the setup code are secrets
+  (a key is exposed only as its public key and fingerprint, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
   `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.

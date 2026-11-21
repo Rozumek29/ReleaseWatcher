@@ -1,0 +1,102 @@
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="host-dialog-title">
+  @if (data(); as d) {
+    <form class="dialog-card" (ngSubmit)="save()">
+      <header class="dialog-head">
+        <app-icon name="server" [size]="22" />
+        <div class="head-text">
+          <h2 id="host-dialog-title">{{ title(d) }}</h2>
+          <p>{{ d.type === 'proxmox' ? 'ReleaseWatcher runs pct and qm on the node over SSH.' : 'ReleaseWatcher runs apt and your update commands over SSH.' }}</p>
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <div class="field">
+          <label for="host-address">Address</label>
+          <input
+            id="host-address"
+            class="input mono"
+            name="address"
+            [(ngModel)]="address"
+            placeholder="pve.lan or 192.168.1.10"
+            autocomplete="off"
+            spellcheck="false"
+            required
+            [class.invalid]="errors()['address']"
+          />
+          @if (errors()['address']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="host-port">Port</label>
+            <input id="host-port" class="input" type="number" name="port" min="1" max="65535" [(ngModel)]="port" [class.invalid]="errors()['port']" />
+            @if (errors()['port']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+          </div>
+          <div class="field">
+            <label for="host-user">User</label>
+            <input
+              id="host-user"
+              class="input mono"
+              name="user"
+              [(ngModel)]="user"
+              placeholder="root"
+              autocomplete="off"
+              spellcheck="false"
+              [class.invalid]="errors()['user']"
+            />
+            @if (errors()['user']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="host-key">SSH key</label>
+          <select id="host-key" class="input" name="sshKeyId" [(ngModel)]="sshKeyId" [class.invalid]="errors()['sshKeyId']">
+            <option [ngValue]="null">– none yet –</option>
+            @for (k of keys(); track k.id) {
+              <option [ngValue]="k.id">{{ k.name }}</option>
+            }
+          </select>
+          @if (errors()['sshKeyId']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            Add or generate keys under SSH keys below. The host must accept its public key
+            (<code>~/.ssh/authorized_keys</code> of the user). A user other than <code>root</code> needs passwordless
+            <code>sudo</code>.
+          </span>
+        </div>
+
+        <div class="field">
+          <label for="host-name">Name <span class="optional">optional</span></label>
+          <input id="host-name" class="input" name="name" [(ngModel)]="name" [placeholder]="address || 'Shown in lists and notifications'" autocomplete="off" [class.invalid]="errors()['name']" />
+          @if (errors()['name']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+      </div>
+
+      <footer class="dialog-foot">
+        @if (saveError(); as e) {
+          <span class="save-error" role="alert">{{ e }}</span>
+        }
+        <button type="button" class="btn btn-ghost" (click)="close()">Cancel</button>
+        <button type="submit" class="btn" [disabled]="saving()">
+          @if (saving()) {
+            <app-icon name="refresh" [size]="16" class="spin" /> Saving…
+          } @else {
+            Save host
+          }
+        </button>
+      </footer>
+    </form>
+  }
+</dialog>

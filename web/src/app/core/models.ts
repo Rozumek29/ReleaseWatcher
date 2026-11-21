@@ -143,15 +143,8 @@ export interface AppSettings {
     advisoryCronSource: SettingSource;
   };
   proxmox: {
-    /** True when host and SSH key are set. */
+    /** True when a Proxmox node is added (Settings → Connections) and has an SSH key. */
     configured: boolean;
-    host: string | null;
-    hostSource: SettingSource;
-    port: number;
-    user: string;
-    /** The key itself is never returned. */
-    sshKeyConfigured: boolean;
-    sshKeySource: SettingSource;
     checkCron: string;
     checkCronSource: SettingSource;
     /** How many containers are checked at the same time. */
@@ -217,10 +210,6 @@ export interface SettingsPatch {
   githubToken?: string | null;
   releaseCheckCron?: string | null;
   advisoryCheckCron?: string | null;
-  proxmoxHost?: string | null;
-  proxmoxPort?: number | null;
-  proxmoxUser?: string | null;
-  proxmoxSshKey?: string | null;
   smtpHost?: string | null;
   smtpPort?: number | null;
   smtpSecurity?: SmtpSecurity | null;
@@ -585,4 +574,47 @@ export interface AccountUpdate {
   currentPassword: string;
   username?: string | null;
   newPassword?: string | null;
+}
+
+/** A named SSH key; the private part never leaves the server. */
+export interface SshKey {
+  id: number;
+  name: string;
+  /** `ssh-ed25519 AAAA… comment` – to add to `authorized_keys`; null when it could not be derived. */
+  publicKey: string | null;
+  /** `SHA256:…`; null when it could not be derived. */
+  fingerprint: string | null;
+  /** Hosts that log in with this key. */
+  hostCount: number;
+  createdAt: string;
+}
+
+/** `proxmox` = a Proxmox VE node; `server` = a plain Linux machine. */
+export type HostType = 'proxmox' | 'server';
+
+/** A machine reached over SSH. */
+export interface Host {
+  id: number;
+  type: HostType;
+  name: string;
+  address: string;
+  port: number;
+  user: string;
+  sshKeyId: number | null;
+  sshKeyName: string | null;
+  /** A key is chosen (whether the host answers shows "Test connection"). */
+  configured: boolean;
+  /** Containers, virtual machines and the node itself watched through this host. */
+  targetCount: number;
+  createdAt: string;
+}
+
+/** Body of `POST /api/hosts` / `PUT /api/hosts/:id` (omitted = keep on update). */
+export interface HostInput {
+  type?: HostType;
+  name?: string;
+  address?: string;
+  port?: number | null;
+  user?: string | null;
+  sshKeyId?: number | null;
 }
