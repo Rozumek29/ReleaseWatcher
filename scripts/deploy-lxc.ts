@@ -11,7 +11,9 @@
 //   --identity <file>  SSH private key; default: your normal ssh setup (~/.ssh, agent, ~/.ssh/config)
 //   --db               copy the local database (repositories, containers, settings) – only when the container has
 //                      none yet; add --force-db to replace an existing one
-//   --skip-build       reuse dist/releasewatcher-linux-x64
+//   --baseline         build for older x64 CPUs without AVX2 (the default build crashes there with
+//                      "Illegal instruction")
+//   --skip-build       reuse dist/releasewatcher-linux-x64 (or dist/releasewatcher-linux-x64-baseline)
 //   --database <path>  local database to read defaults from / copy (default: DATABASE_PATH or releasewatcher.db)
 
 import { Database } from 'bun:sqlite';
@@ -31,6 +33,7 @@ const { values } = parseArgs({
     identity: { type: 'string' },
     db: { type: 'boolean', default: false },
     'force-db': { type: 'boolean', default: false },
+    baseline: { type: 'boolean', default: false },
     'skip-build': { type: 'boolean', default: false },
     database: { type: 'string' },
   },
@@ -74,7 +77,8 @@ if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(node) || !/^[A-Za-z_][A-Za-z0-9_.-]*$/
 const staging = mkdtempSync(join(tmpdir(), 'releasewatcher-deploy-'));
 try {
   // 1. Build
-  const binary = join(root, 'dist', 'releasewatcher-linux-x64');
+  const buildTarget = values.baseline ? 'bun-linux-x64-baseline' : 'bun-linux-x64';
+  const binary = join(root, 'dist', `releasewatcher-${buildTarget.replace(/^bun-/, '')}`);
   if (!values['skip-build']) {
     step('Building the UI');
     // NG_CLI_ANALYTICS: never stop at the Angular CLI's interactive analytics question.
@@ -86,7 +90,7 @@ try {
     });
     if (build.exitCode !== 0) fail('UI build failed.');
     step('Compiling the Linux executable');
-    await compile({ outfile: binary, target: 'bun-linux-x64' });
+    await compile({ outfile: binary, target: buildTarget });
   } else if (!existsSync(binary)) {
     fail(`${binary} does not exist – run without --skip-build.`);
   }

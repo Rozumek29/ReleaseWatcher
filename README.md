@@ -277,6 +277,11 @@ Images are published to `ghcr.io/rozumek29/releasewatcher` for every release:
 | `<version>` | `1.3.0` | never (pinned) |
 | `beta-<version>` | `beta-1.3.0` | pre-releases only |
 
+Every tag also exists with a **`-baseline`** suffix (`latest-baseline`, `1.2-baseline`, `1.3.0-baseline`,
+`beta-1.3.0-baseline`) for older x64 CPUs without AVX2 (before Intel Haswell / AMD Excavator, about 2013). If the
+container exits with `Illegal instruction (core dumped)`, use the `-baseline` image – the default one is a little
+faster on newer CPUs. Check a host with `grep -o -m1 avx2 /proc/cpuinfo` (no output = use `-baseline`).
+
 `docker-compose.yml` with the published image:
 
 ```yaml
@@ -321,13 +326,15 @@ keeps the configuration, the account and the data.
 | `--identity <key file>` | SSH key for the node; default: your normal ssh setup (`~/.ssh`, agent, `~/.ssh/config`). On Windows the system OpenSSH client is used, so keys in the Windows ssh-agent work |
 | `--db` | also copy your local database when the container has none yet |
 | `--force-db` | replace an existing database in the container |
+| `--baseline` | build for older x64 CPUs without AVX2 (see [Docker](#docker)) |
 
 `deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
 
 ### Manual install (systemd)
 
 The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node
-or Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. As root:
+or Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. On older x64 CPUs without
+AVX2 download `releasewatcher-<version>-linux-x64-baseline.tar.xz` instead (see [Docker](#docker)). As root:
 
 ```bash
 # 1. Dependencies (the OpenSSH client reaches the Proxmox node)
@@ -685,8 +692,8 @@ Push a tag – `.github/workflows/release.yml` builds and publishes everything:
 
 | Tag | GitHub Release | Docker image |
 | --- | --- | --- |
-| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64.tar.xz` | `1.2.3`, `1.2`, `latest` |
-| `beta-1.2.3` | pre-release with the same files | `beta-1.2.3` |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64.tar.xz`, `releasewatcher-1.2.3-linux-x64-baseline.tar.xz` | `1.2.3`, `1.2`, `latest` (+ `-baseline`) |
+| `beta-1.2.3` | pre-release with the same files | `beta-1.2.3` (+ `-baseline`) |
 
 ```bash
 git tag v1.2.3 && git push origin v1.2.3
@@ -698,8 +705,11 @@ Release artifacts (`bun run package`):
 
 - **`releasewatcher-<version>-linux-x64.tar.xz`** – one self-contained executable (`bun build --compile --bytecode`,
   Bun runtime and UI embedded), packed with xz: ~40 MB to download, about 110 MB unpacked (almost all of it the Bun
-  runtime).
+  runtime). Needs a CPU with AVX2.
+- **`releasewatcher-<version>-linux-x64-baseline.tar.xz`** – the same with Bun's baseline runtime for older x64 CPUs
+  without AVX2.
 - **`releasewatcher-<version>.zip`** – server sources, production UI and runtime dependencies for an installed Bun
   (`bun start`, no `bun install` needed).
 
-Compile flags live in `scripts/compile.ts`; the target is `TARGET` in `scripts/package.ts`.
+Compile flags live in `scripts/compile.ts`; the targets are `TARGETS` in `scripts/package.ts` and the `TARGET`
+build argument of the `Dockerfile`.

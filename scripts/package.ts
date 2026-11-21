@@ -1,7 +1,10 @@
-// Creates the two release artifacts:
-//   release/releasewatcher-<version>/            ready-to-run folder (server sources + production UI + the runtime
-//                                                dependencies in node_modules) for Bun; no `bun install` needed
-//   release/releasewatcher-<version>-linux-x64   single self-contained executable (Bun runtime + UI embedded)
+// Creates the release artifacts:
+//   release/releasewatcher-<version>/                     ready-to-run folder (server sources + production UI + the
+//                                                         runtime dependencies in node_modules) for Bun; no
+//                                                         `bun install` needed
+//   release/releasewatcher-<version>-linux-x64            single self-contained executable (Bun runtime + UI
+//                                                         embedded) for x64 CPUs with AVX2 (Haswell, 2013, and newer)
+//   release/releasewatcher-<version>-linux-x64-baseline   the same for older x64 CPUs without AVX2
 //
 // Usage: bun scripts/package.ts [version] [--skip-build]   (version defaults to package.json "version")
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
@@ -9,15 +12,18 @@ import { join } from 'node:path';
 import pkg from '../package.json';
 import { compile } from './compile.ts';
 
-/** `bun build --compile` target of the executable; its file name uses it without the `bun-` prefix. */
-const TARGET = 'bun-linux-x64';
+/**
+ * `bun build --compile` targets of the executables; their file names use them without the `bun-` prefix. The
+ * default Bun build needs AVX2 and crashes with "Illegal instruction" on older CPUs – `-baseline` runs on any x64 CPU.
+ */
+const TARGETS = ['bun-linux-x64', 'bun-linux-x64-baseline'];
 
 const root = join(import.meta.dir, '..');
 const args = process.argv.slice(2);
 const version = (args.find((arg) => !arg.startsWith('--')) ?? pkg.version).replace(/^v/, '');
 const name = `releasewatcher-${version}`;
 const out = join(root, 'release', name);
-const binary = join(root, 'release', `${name}-${TARGET.replace(/^bun-/, '')}`);
+const binaryName = (target: string) => `${name}-${target.replace(/^bun-/, '')}`;
 
 if (!args.includes('--skip-build')) {
   const result = Bun.spawnSync([process.execPath, 'run', 'build'], { cwd: root, stdio: ['inherit', 'inherit', 'inherit'] });
@@ -49,10 +55,15 @@ const install = Bun.spawnSync([process.execPath, 'install', '--production', '--l
 });
 if (install.exitCode !== 0) process.exit(install.exitCode ?? 1);
 
-// 2. Self-contained executable.
-rmSync(binary, { force: true });
-await compile({ outfile: binary, target: TARGET, version });
+// 2. Self-contained executables.
+for (const target of TARGETS) {
+  const binary = join(root, 'release', binaryName(target));
+  rmSync(binary, { force: true });
+  await compile({ outfile: binary, target, version });
+}
 
 console.log(`\nRelease ready in release/:`);
-console.log(`  ${name}/                 run with: bun start   (needs Bun)`);
-console.log(`  ${name}-${TARGET.replace(/^bun-/, '')}    run with: ./${name}-${TARGET.replace(/^bun-/, '')}   (needs nothing)`);
+console.log(`  ${name}/    run with: bun start   (needs Bun)`);
+for (const target of TARGETS) {
+  console.log(`  ${binaryName(target)}    run with: ./${binaryName(target)}   (needs nothing)`);
+}

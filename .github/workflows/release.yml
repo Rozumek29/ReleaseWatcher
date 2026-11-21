@@ -1,8 +1,10 @@
 name: Release
 
 # Push a tag to publish a release:
-#   v1.2.3 / 1.2.3 -> GitHub Release (zip for Bun + Linux x64 executable as .tar.xz) + Docker image :1.2.3, :1.2 and :latest
+#   v1.2.3 / 1.2.3 -> GitHub Release (zip for Bun + Linux x64 executables as .tar.xz) + Docker image :1.2.3, :1.2 and :latest
 #   beta-1.2.3     -> GitHub pre-release + Docker image :beta-1.2.3 (no :latest)
+# Executables and images come twice: the default build needs a CPU with AVX2, the *-baseline one (image tags
+# :1.2.3-baseline, :latest-baseline …) runs on older x64 CPUs too.
 # Push the tag only – don't create the release on github.com first: this workflow creates it with the files.
 on:
   push:
@@ -38,10 +40,13 @@ jobs:
           bun run package "$VERSION"
           cd release
           zip -qr "releasewatcher-$VERSION.zip" "releasewatcher-$VERSION"
-          # The executable is ~110 MB (almost all Bun runtime); xz packs it to ~40 MB for downloads.
-          XZ_OPT='-9 -T0' tar -cJf "releasewatcher-$VERSION-linux-x64.tar.xz" "releasewatcher-$VERSION-linux-x64"
+          # Each executable is ~110 MB (almost all Bun runtime); xz packs it to ~40 MB for downloads.
+          for TARGET in linux-x64 linux-x64-baseline; do
+            XZ_OPT='-9 -T0' tar -cJf "releasewatcher-$VERSION-$TARGET.tar.xz" "releasewatcher-$VERSION-$TARGET"
+          done
           echo "file=release/releasewatcher-$VERSION.zip" >> "$GITHUB_OUTPUT"
           echo "archive=release/releasewatcher-$VERSION-linux-x64.tar.xz" >> "$GITHUB_OUTPUT"
+          echo "baseline=release/releasewatcher-$VERSION-linux-x64-baseline.tar.xz" >> "$GITHUB_OUTPUT"
 
       - name: Create GitHub Release
         env:
@@ -49,11 +54,18 @@ jobs:
         run: |
           PRERELEASE=""
           if [[ "$GITHUB_REF_NAME" == beta-* ]]; then PRERELEASE="--prerelease"; fi
-          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" "${{ steps.pkg.outputs.archive }}" \
+          gh release create "$GITHUB_REF_NAME" "${{ steps.pkg.outputs.file }}" "${{ steps.pkg.outputs.archive }}" "${{ steps.pkg.outputs.baseline }}" \
             --title "$GITHUB_REF_NAME" --generate-notes $PRERELEASE
 
   docker:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - target: bun-linux-x64          # CPUs with AVX2 (Haswell, 2013, and newer)
+            suffix: ''
+          - target: bun-linux-x64-baseline # older x64 CPUs – without it Bun crashes with "Illegal instruction"
+            suffix: '-baseline'
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -68,7 +80,10 @@ jobs:
         with:
           # metadata-action lowercases the name (GHCR requires lowercase)
           images: ${{ env.IMAGE }}
-          flavor: latest=false
+          # The suffix goes on every tag: 1.2.3-baseline, 1.2-baseline, latest-baseline, beta-1.2.3-baseline.
+          flavor: |
+            latest=false
+            suffix=${{ matrix.suffix }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
@@ -83,5 +98,6 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |
             VERSION=${{ github.ref_name }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            TARGET=${{ matrix.target }}
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}

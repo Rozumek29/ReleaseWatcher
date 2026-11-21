@@ -14,9 +14,12 @@ COPY scripts ./scripts
 COPY src ./src
 # Version shown in the UI (the release workflow passes the Git tag); empty = package.json.
 ARG VERSION=
+# Bun runtime embedded in the executable: bun-linux-x64 needs a CPU with AVX2 (Haswell, 2013, and newer);
+# bun-linux-x64-baseline runs on older x64 CPUs too (the release workflow publishes it as the *-baseline tags).
+ARG TARGET=bun-linux-x64
 # Debian (glibc) build stage on purpose: when the target matches the host, Bun embeds its own runtime,
 # so an Alpine stage would produce a musl binary that cannot start on the glibc Debian image below.
-RUN bun scripts/compile.ts --target=bun-linux-x64 --outfile=dist/releasewatcher ${VERSION:+--version=$VERSION} \
+RUN bun scripts/compile.ts --target=$TARGET --outfile=dist/releasewatcher ${VERSION:+--version=$VERSION} \
  && mkdir -p /data
 
 # --- Runtime: the executable + OpenSSH client (used to reach the Proxmox node) ---
