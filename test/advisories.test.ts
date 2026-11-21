@@ -4,6 +4,8 @@ import {
   advisoriesDue,
   ADVISORY_REFRESH_INTERVAL_MS,
   advisoryAffects,
+  advisoryImpact,
+  installedVersions,
   normalizeSeverity,
   sortAdvisories,
   summarizeAdvisories,
@@ -52,15 +54,32 @@ describe('advisoryAffects', () => {
   });
 });
 
+describe('installed versions', () => {
+  it('combines the own version with those of linked container apps', () => {
+    assert.deepEqual(installedVersions(null), []);
+    assert.deepEqual(installedVersions(' 1.0.0 ', ['1.0.0', null, '', '1.1.0']), ['1.0.0', '1.1.0']);
+    assert.deepEqual(installedVersions(null, ['2.0.0']), ['2.0.0']);
+  });
+
+  it('is affected when any version is, safe only when every version is known to be safe', () => {
+    const a = advisory('GHSA-a', 1, '< 2.0.0');
+    assert.deepEqual(advisoryImpact(a, []), { affects: null, affectedVersions: [] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', '1.5.0']), { affects: true, affectedVersions: ['1.5.0'] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', '3.0.0']), { affects: false, affectedVersions: [] });
+    assert.deepEqual(advisoryImpact(a, ['2.1.0', 'latest']), { affects: null, affectedVersions: [] });
+  });
+});
+
 describe('summaries', () => {
   it('counts affecting advisories and picks the highest relevant severity', () => {
     const list = [
       advisory('GHSA-crit', 1, '< 1.0.0', { severity: 'critical' }),
       advisory('GHSA-low', 2, '< 3.0.0', { severity: 'low' }),
     ];
-    assert.deepEqual(summarizeAdvisories(list, '2.0.0'), { total: 2, affecting: 1, highestSeverity: 'low' });
-    assert.deepEqual(summarizeAdvisories(list, '5.0.0'), { total: 2, affecting: 0, highestSeverity: 'critical' });
-    assert.deepEqual(summarizeAdvisories([], null), { total: 0, affecting: 0, highestSeverity: null });
+    assert.deepEqual(summarizeAdvisories(list, ['2.0.0']), { total: 2, affecting: 1, highestSeverity: 'low' });
+    assert.deepEqual(summarizeAdvisories(list, ['5.0.0']), { total: 2, affecting: 0, highestSeverity: 'critical' });
+    assert.deepEqual(summarizeAdvisories(list, ['5.0.0', '0.9.0']), { total: 2, affecting: 2, highestSeverity: 'critical' });
+    assert.deepEqual(summarizeAdvisories([], []), { total: 0, affecting: 0, highestSeverity: null });
   });
 
   it('sorts newest first', () => {

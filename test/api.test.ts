@@ -9,6 +9,7 @@ import { silentLogger } from '../src/log.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { loadConfig } from '../src/config.ts';
 import { SettingsService } from '../src/settings.ts';
+import { ContainerStore } from '../src/proxmox/store.ts';
 import { advisory, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
 describe('HTTP API', () => {
@@ -100,8 +101,51 @@ describe('HTTP API', () => {
       url: 'https://github.com/acme/widget',
       avatarUrl: 'https://avatars.githubusercontent.com/acme?s=64',
       installedVersion: '0.9.0',
+      installedVersions: ['0.9.0'],
     });
+    assert.deepEqual(all[0].affectedVersions, ['0.9.0']);
     assert.deepEqual((await inject('/api/status')).json().advisories, { total: 3, affecting: 2 });
+  });
+
+  it('compares advisories with the versions of linked container apps', async () => {
+    source.advisories = [advisory('GHSA-old1-0000-0000', 1, '< 0.5.0'), advisory('GHSA-new1-0000-0000', 2, '< 1.0.0')];
+    const created = (await add('acme/widget')).json();
+    assert.deepEqual(created.installedVersions, []);
+
+    const containers = new ContainerStore(store.database, store.secretBox);
+    const container = containers.add(101, 'widget');
+    for (const [name, version] of [['Widget', '0.4.0'], ['Widget (staging)', '1.2.0']] as const) {
+      const linked = containers.addApp(container.id, {
+        name,
+        versionCommand: 'cat /opt/widget/version',
+        latestSource: 'github',
+        repositoryId: created.id,
+        latestCommand: null,
+        updateCommand: null,
+        useTty: false,
+        timeoutSeconds: 60,
+      });
+      containers.saveApp({ ...linked, installedVersion: version });
+    }
+
+    const repo = (await inject(`/api/repositories/${created.id}`)).json();
+    assert.equal(repo.installedVersion, null);
+    assert.deepEqual(repo.installedVersions, ['0.4.0', '1.2.0']);
+    assert.equal(repo.advisories.affecting, 2);
+
+    const all = (await inject('/api/advisories')).json();
+    assert.deepEqual(
+      all.map((a: { id: string; affectsInstalled: boolean | null; affectedVersions: string[] }) => [a.id, a.affectsInstalled, a.affectedVersions]),
+      [['GHSA-new1-0000-0000', true, ['0.4.0']], ['GHSA-old1-0000-0000', true, ['0.4.0']]],
+    );
+    assert.deepEqual(all[0].repository.installedVersions, ['0.4.0', '1.2.0']);
+    assert.deepEqual((await inject('/api/status')).json().advisories, { total: 2, affecting: 2 });
+
+    // New advisories are notified with the affected container version.
+    source.advisories = [...source.advisories, advisory('GHSA-fresh-0000-0000', 3, '>= 1.0.0, < 1.3.0')];
+    await inject({ method: 'POST', url: `/api/repositories/${created.id}/check` });
+    assert.equal(notifier.vulnerabilitiesSent[0]?.affectsInstalled, true);
+    assert.equal(notifier.vulnerabilitiesSent[0]?.installedVersion, '1.2.0');
   });
 
   it('configures advisory sources and the OSV.dev package of a repository', async () => {

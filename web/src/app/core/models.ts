@@ -20,6 +20,8 @@ export interface WatchedRepository {
   installedVersion: string | null;
   installedVersionCheckedAt: string | null;
   installedVersionError: string | null;
+  /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
+  installedVersions: string[];
   /** True when the latest release is newer than the installed version; null when unknown. */
   updateAvailable: boolean | null;
   /** The repository uses its own token instead of the global one (the token itself is never returned). */
@@ -62,8 +64,10 @@ export interface SecurityAdvisory {
   publishedAt: string;
   updatedAt: string | null;
   vulnerabilities: { packageName: string | null; vulnerableRange: string | null; patchedVersions: string | null }[];
-  /** True/false when the installed version is known and comparable, otherwise null. */
+  /** True when an installed version is affected, false when all are known to be safe, otherwise null. */
   affectsInstalled: boolean | null;
+  /** Installed versions inside the vulnerable ranges. */
+  affectedVersions: string[];
 }
 
 export interface AddRepositoryRequest {
@@ -244,6 +248,8 @@ export interface RepositoryAdvisory extends SecurityAdvisory {
     url: string;
     avatarUrl: string;
     installedVersion: string | null;
+    /** Own installed version plus those of linked container apps. */
+    installedVersions: string[];
   };
 }
 

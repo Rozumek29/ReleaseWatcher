@@ -1,6 +1,13 @@
 import { resolve } from 'node:path';
 import { APP_VERSION } from './app-version.ts';
-import { advisoryAffects, OSV_ECOSYSTEMS, sortAdvisories, summarizeAdvisories, type SecurityAdvisory } from './advisories.ts';
+import {
+  advisoryImpact,
+  installedVersions,
+  OSV_ECOSYSTEMS,
+  sortAdvisories,
+  summarizeAdvisories,
+  type SecurityAdvisory,
+} from './advisories.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
@@ -146,8 +153,10 @@ export interface App {
   close(): Promise<void>;
 }
 
-/** Public shape of a security advisory, with its impact on the installed version. */
-export const advisoryDto = (a: SecurityAdvisory, installedVersion: string | null) => ({
+/** Public shape of a security advisory, with its impact on the installed versions. */
+export const advisoryDto = (a: SecurityAdvisory, versions: readonly string[]) => {
+  const impact = advisoryImpact(a, versions);
+  return {
   id: a.id,
   source: a.source,
   aliases: a.aliases,
@@ -163,12 +172,18 @@ export const advisoryDto = (a: SecurityAdvisory, installedVersion: string | null
     vulnerableRange: v.vulnerableRange,
     patchedVersions: v.patchedVersions,
   })),
-  /** True/false when the installed version is known and comparable, otherwise null. */
-  affectsInstalled: advisoryAffects(a, installedVersion),
-});
+  /** True when an installed version is affected, false when all are known to be safe, otherwise null. */
+  affectsInstalled: impact.affects,
+  affectedVersions: impact.affectedVersions,
+  };
+};
 
 /** Public shape of a watched repository (internal fields like the ETag are not exposed). */
-export const toDto = (r: WatchedRepository, advisories: readonly SecurityAdvisory[] = []) => ({
+export const toDto = (
+  r: WatchedRepository,
+  advisories: readonly SecurityAdvisory[] = [],
+  linkedVersions: readonly (string | null)[] = [],
+) => ({
   id: r.id,
   owner: r.owner,
   name: r.name,
@@ -189,6 +204,8 @@ export const toDto = (r: WatchedRepository, advisories: readonly SecurityAdvisor
   installedVersion: r.installedVersion,
   installedVersionCheckedAt: r.installedVersionCheckedAt,
   installedVersionError: r.installedVersionError,
+  /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
+  installedVersions: installedVersions(r.installedVersion, linkedVersions),
   // The repository's own token is a secret: only whether it is set and a masked hint.
   hasOwnToken: r.githubToken !== null,
   githubTokenMasked: maskSecret(r.githubToken, 4),
@@ -200,7 +217,7 @@ export const toDto = (r: WatchedRepository, advisories: readonly SecurityAdvisor
   osvEcosystem: r.osvEcosystem,
   osvPackage: r.osvPackage,
   advisories: {
-    ...summarizeAdvisories(advisories, r.installedVersion),
+    ...summarizeAdvisories(advisories, installedVersions(r.installedVersion, linkedVersions)),
     checkedAt: r.advisoriesCheckedAt,
     error: r.advisoriesError,
   },
@@ -304,6 +321,17 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       updateFailed: current.notifyUpdateFailed,
     };
   });
+  const containerStore = new ContainerStore(deps.store.database, deps.store.secretBox);
+  /** Installed versions of container apps per linked repository (compared with the repository's advisories). */
+  const linkedAppVersions = (): Map<number, (string | null)[]> => {
+    const byRepository = new Map<number, (string | null)[]>();
+    for (const app of containerStore.listApps()) {
+      if (app.repositoryId !== null) {
+        byRepository.set(app.repositoryId, [...(byRepository.get(app.repositoryId) ?? []), app.installedVersion]);
+      }
+    }
+    return byRepository;
+  };
   const checker = new ReleaseChecker({
     store: deps.store,
     source: deps.source,
@@ -312,6 +340,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.fetchInstalledVersion ? { fetchInstalledVersion: deps.fetchInstalledVersion } : {}),
     osv: deps.osv ?? null,
     advisorySources: () => ({ github: deps.settings.current.advisoriesGithub, osv: deps.settings.current.advisoriesOsv }),
+    linkedVersions: (repositoryId) => linkedAppVersions().get(repositoryId) ?? [],
   });
   const { store, source, settings } = deps;
   const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, log);
@@ -321,7 +350,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
   await auth.bootstrap(deps.auth?.bootstrap ?? null);
   auth.ensureSetupCode();
-  const containerStore = new ContainerStore(store.database, store.secretBox);
   const interrupted = containerStore.failInterruptedRuns();
   if (interrupted > 0) {
     log.warn({ count: interrupted }, 'Marked runs interrupted by a restart as failed');
@@ -436,10 +464,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       containers: containerStatus(containerStore),
       advisories: (() => {
         const all = store.listAllAdvisories();
+        const linked = linkedAppVersions();
         let total = 0;
         let affecting = 0;
         for (const repo of repositories) {
-          const summary = summarizeAdvisories(all.get(repo.id) ?? [], repo.installedVersion);
+          const summary = summarizeAdvisories(all.get(repo.id) ?? [], installedVersions(repo.installedVersion, linked.get(repo.id)));
           total += summary.total;
           affecting += summary.affecting;
         }
@@ -449,7 +478,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const findRepository = (rawId: string) => store.get(parseId(rawId));
-  const repositoryDto = (repo: WatchedRepository) => toDto(repo, store.listAdvisories(repo.id));
+  const repositoryDto = (repo: WatchedRepository) =>
+    toDto(repo, store.listAdvisories(repo.id), linkedAppVersions().get(repo.id));
+  const repositoryVersions = (repo: WatchedRepository, linked = linkedAppVersions()) =>
+    installedVersions(repo.installedVersion, linked.get(repo.id));
 
   const addRepository = async (req: Request) => {
     const body = await readBody<{ repository: string; includePrereleases?: boolean; githubToken?: string | null }>(
@@ -709,7 +741,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         '/api/repositories': {
           GET: () => {
             const advisories = store.listAllAdvisories();
-            return Response.json(store.list().map((r) => toDto(r, advisories.get(r.id))));
+            const linked = linkedAppVersions();
+            return Response.json(store.list().map((r) => toDto(r, advisories.get(r.id), linked.get(r.id))));
           },
           POST: addRepository,
         },
@@ -736,10 +769,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         '/api/advisories': {
           GET: () => {
             const all = store.listAllAdvisories();
+            const linked = linkedAppVersions();
             return Response.json(
-              store.list().flatMap((repo) =>
-                sortAdvisories(all.get(repo.id) ?? []).map((a) => ({
-                  ...advisoryDto(a, repo.installedVersion),
+              store.list().flatMap((repo) => {
+                const versions = repositoryVersions(repo, linked);
+                return sortAdvisories(all.get(repo.id) ?? []).map((a) => ({
+                  ...advisoryDto(a, versions),
                   repository: {
                     id: repo.id,
                     fullName: fullName(repo),
@@ -747,9 +782,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
                     url: `https://github.com/${fullName(repo)}`,
                     avatarUrl: ownerAvatarUrl(repo.owner),
                     installedVersion: repo.installedVersion,
+                    installedVersions: versions,
                   },
-                })),
-              ),
+                }));
+              }),
             );
           },
         },
@@ -760,7 +796,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             if (!repo) {
               return problem(404, 'Repository not found.');
             }
-            return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, repo.installedVersion)));
+            return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, repositoryVersions(repo))));
           },
         },
 

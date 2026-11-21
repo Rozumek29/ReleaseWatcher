@@ -19,6 +19,7 @@ const advisory = (id: string, extra: Partial<RepositoryAdvisory> = {}): Reposito
   updatedAt: null,
   vulnerabilities: [{ packageName: 'app', vulnerableRange: '< 2.0.0', patchedVersions: '2.0.0' }],
   affectsInstalled: null,
+  affectedVersions: [],
   repository: {
     id: 1,
     fullName: 'acme/app',
@@ -26,6 +27,7 @@ const advisory = (id: string, extra: Partial<RepositoryAdvisory> = {}): Reposito
     url: 'https://github.com/acme/app',
     avatarUrl: 'https://avatars.githubusercontent.com/acme?s=64',
     installedVersion: null,
+    installedVersions: [],
   },
   ...extra,
 });
@@ -50,13 +52,13 @@ describe('VulnerabilitiesPage', () => {
     return { el: fixture.nativeElement as HTMLElement, fixture };
   }
 
-  const vault = { id: 2, fullName: 'dani-garcia/vaultwarden', owner: 'dani-garcia', url: 'https://github.com/dani-garcia/vaultwarden', avatarUrl: '', installedVersion: '1.30.0' };
+  const vault = { id: 2, fullName: 'dani-garcia/vaultwarden', owner: 'dani-garcia', url: 'https://github.com/dani-garcia/vaultwarden', avatarUrl: '', installedVersion: '1.30.0', installedVersions: ['1.30.0'] };
 
   it('lists advisories affecting the installed version first and filters them', async () => {
     const { el, fixture } = await render([
       advisory('GHSA-low', { severity: 'low', affectsInstalled: false, repository: vault }),
       advisory('GHSA-unknown'),
-      advisory('GHSA-crit', { severity: 'critical', cvssScore: 9.8, affectsInstalled: true, repository: vault, vulnerabilities: [{ packageName: null, vulnerableRange: '< 1.31.0', patchedVersions: null }] }),
+      advisory('GHSA-crit', { severity: 'critical', cvssScore: 9.8, affectsInstalled: true, affectedVersions: ['1.30.0'], repository: vault, vulnerabilities: [{ packageName: null, vulnerableRange: '< 1.31.0', patchedVersions: null }] }),
     ]);
     const summaries = () => [...el.querySelectorAll('.advisory .summary')].map((s) => s.textContent);
     expect(summaries()).toEqual(['Problem GHSA-crit', 'Problem GHSA-unknown', 'Problem GHSA-low']);
@@ -86,6 +88,19 @@ describe('VulnerabilitiesPage', () => {
     search.dispatchEvent(new Event('input'));
     await settle(fixture);
     expect(summaries()).toEqual(['Problem GHSA-crit', 'Problem GHSA-low']);
+  });
+
+  it('names the affected versions of linked container apps', async () => {
+    const containers = { ...vault, installedVersion: null, installedVersions: ['1.29.0', '1.32.0'] };
+    const { el } = await render([
+      advisory('GHSA-crit', { severity: 'critical', affectsInstalled: true, affectedVersions: ['1.29.0'], repository: containers }),
+      advisory('GHSA-low', { severity: 'low', affectsInstalled: false, repository: containers }),
+      advisory('GHSA-unknown'),
+    ]);
+    const rows = [...el.querySelectorAll<HTMLElement>('.advisory')].map((r) => r.textContent);
+    expect(rows[0]).toContain('Affects 1.29.0');
+    expect(rows[1]).toContain('Installed version unknown');
+    expect(rows[2]).toContain('1.29.0, 1.32.0 not affected');
   });
 
   it('shows an empty state without advisories', async () => {

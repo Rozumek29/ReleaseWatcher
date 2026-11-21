@@ -137,7 +137,10 @@ reads them). **Settings → General → Vulnerability sources** switches each so
 
 - Vulnerabilities reported by both sources (same GHSA/CVE id) are listed once. Withdrawn ones are dropped; switching a
   source off removes its entries.
-- The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed version**. The **Vulnerabilities**
+- The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed versions**: the one read from the
+  repository's installed-version URL plus those read by the *version command* of every container app linked to the
+  repository (*latest version from* a watched GitHub repository). A vulnerability affects the installation when any of
+  these versions is in range; without any version its impact is shown as *Installed version unknown*. The **Vulnerabilities**
   page lists all of them – affecting the installed version first – with severity, CVSS score, ids, vulnerable and
   patched versions, filters (impact, severity, source) and search; the sidebar counts those affecting an installed
   version. Each repository also shows a badge (red *N vulnerabilities affect installed* / grey *N advisories*) that
@@ -506,8 +509,8 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `githubToken` and the OSV.dev package: omit = keep, `null` = remove |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately (including security advisories) |
-| `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`) and `affectsInstalled` (`true`/`false`/`null` when unknown) |
-| `GET` | `/api/advisories` | Vulnerabilities of all repositories, each with its `repository` (Vulnerabilities page) |
+| `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`), `affectsInstalled` (`true` when any installed version is affected, `false` when all are safe, `null` when unknown) and `affectedVersions` |
+| `GET` | `/api/advisories` | Vulnerabilities of all repositories, each with its `repository` (incl. `installedVersions`: own version + linked container apps) (Vulnerabilities page) |
 | `POST` | `/api/installed-version/test` | `{ "url", "field": null, "headers": [], "repositoryId"? }` → detected version and response preview |
 | `POST` | `/api/check-all` | Check all active repositories now |
 | `GET` | `/api/notifiers` | Registered notifiers (`discord`, `email`) and whether they are configured |

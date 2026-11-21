@@ -146,6 +146,36 @@ export function advisoryAffects(advisory: Pick<SecurityAdvisory, 'vulnerabilitie
   return compared && !unknown ? false : null;
 }
 
+/**
+ * Installed versions an advisory is compared with: the repository's own installed version (installed-version URL)
+ * plus the versions read from container apps linked to the repository. Trimmed, without blanks and duplicates.
+ */
+export function installedVersions(own: string | null, linked: readonly (string | null)[] = []): string[] {
+  const versions = new Set<string>();
+  for (const version of [own, ...linked]) {
+    const trimmed = version?.trim();
+    if (trimmed) {
+      versions.add(trimmed);
+    }
+  }
+  return [...versions];
+}
+
+/** Impact of an advisory on every installed version of a repository. */
+export interface AdvisoryImpact {
+  /** True when any installed version is affected, false when all are known to be safe, otherwise null. */
+  affects: boolean | null;
+  affectedVersions: string[];
+}
+
+export function advisoryImpact(advisory: Pick<SecurityAdvisory, 'vulnerabilities'>, versions: readonly string[]): AdvisoryImpact {
+  const results = versions.map((version) => ({ version, affects: advisoryAffects(advisory, version) }));
+  const affectedVersions = results.filter((r) => r.affects === true).map((r) => r.version);
+  const affects =
+    affectedVersions.length > 0 ? true : results.length > 0 && results.every((r) => r.affects === false) ? false : null;
+  return { affects, affectedVersions };
+}
+
 /** Aggregate shown next to a repository. */
 export interface AdvisorySummary {
   total: number;
@@ -155,8 +185,8 @@ export interface AdvisorySummary {
   highestSeverity: AdvisorySeverity | null;
 }
 
-export function summarizeAdvisories(advisories: readonly SecurityAdvisory[], installedVersion: string | null): AdvisorySummary {
-  const affecting = advisories.filter((a) => advisoryAffects(a, installedVersion) === true);
+export function summarizeAdvisories(advisories: readonly SecurityAdvisory[], versions: readonly string[]): AdvisorySummary {
+  const affecting = advisories.filter((a) => advisoryImpact(a, versions).affects === true);
   const relevant = affecting.length > 0 ? affecting : advisories;
   const highestSeverity = relevant.reduce<AdvisorySeverity | null>(
     (highest, a) => (highest === null || compareSeverity(a.severity, highest) > 0 ? a.severity : highest),

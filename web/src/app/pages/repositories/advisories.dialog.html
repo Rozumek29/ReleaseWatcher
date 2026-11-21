@@ -14,10 +14,13 @@
 
       <div class="dialog-body">
         <p class="intro">
-          @if (repo.installedVersion) {
-            Compared with the installed version <span class="mono">{{ repo.installedVersion }}</span>.
+          @if (repo.installedVersions.length > 1) {
+            Compared with the installed versions <span class="mono">{{ repo.installedVersions.join(', ') }}</span>.
+          } @else if (repo.installedVersions.length === 1) {
+            Compared with the installed version <span class="mono">{{ repo.installedVersions[0] }}</span>.
           } @else {
-            Set an installed-version URL in the repository settings to see which advisories affect your installation.
+            Set an installed-version URL in the repository settings or link the repository to a container app to see
+            which advisories affect your installation.
           }
           @if (repo.advisories.checkedAt) {
             <span class="muted">Fetched {{ repo.advisories.checkedAt | relativeTime }}.</span>

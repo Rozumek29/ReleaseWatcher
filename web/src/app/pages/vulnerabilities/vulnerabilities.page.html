@@ -97,12 +97,12 @@
               {{ severityLabels[a.severity] }}@if (a.cvssScore !== null) { · {{ a.cvssScore.toFixed(1) }} }
             </span>
             @if (a.affectsInstalled === true) {
-              <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Affects {{ a.repository.installedVersion }}</span>
+              <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Affects {{ a.affectedVersions.join(', ') }}</span>
             } @else if (a.affectsInstalled === false) {
-              <span class="badge badge-success"><app-icon name="check" [size]="12" /> {{ a.repository.installedVersion }} not affected</span>
+              <span class="badge badge-success"><app-icon name="check" [size]="12" /> {{ a.repository.installedVersions.join(', ') }} not affected</span>
             } @else {
-              <span class="badge" [title]="a.repository.installedVersion ? 'The version ranges could not be compared' : 'No installed-version URL is set for this repository'">
-                {{ a.repository.installedVersion ? 'Impact unknown' : 'Installed version unknown' }}
+              <span class="badge" [title]="a.repository.installedVersions.length ? 'The version ranges could not be compared with ' + a.repository.installedVersions.join(', ') : 'Set an installed-version URL for this repository or link it to a container app'">
+                {{ a.repository.installedVersions.length ? 'Impact unknown' : 'Installed version unknown' }}
               </span>
             }
           </div>

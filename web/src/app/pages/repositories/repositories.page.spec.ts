@@ -28,6 +28,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     installedVersion: null,
     installedVersionCheckedAt: null,
     installedVersionError: null,
+    installedVersions: [],
     updateAvailable: null,
     hasOwnToken: false,
     githubTokenMasked: null,
@@ -125,6 +126,7 @@ describe('RepositoriesPage', () => {
       repo(1, 'angular/angular', { advisories: { total: 2, affecting: 0, highestSeverity: 'low', checkedAt: null, error: null } }),
       repo(2, 'dani-garcia/vaultwarden', {
         installedVersion: '1.30.0',
+        installedVersions: ['1.30.0', '1.29.0'],
         advisories: { total: 3, affecting: 1, highestSeverity: 'critical', checkedAt: '2026-01-02T00:00:00Z', error: null },
       }),
       repo(3, 'nodejs/node'),
@@ -155,6 +157,7 @@ describe('RepositoriesPage', () => {
         updatedAt: null,
         vulnerabilities: [{ packageName: 'vaultwarden', vulnerableRange: '< 1.0.0', patchedVersions: '1.0.0' }],
         affectsInstalled: false,
+        affectedVersions: [],
       },
       {
         id: 'GHSA-xss',
@@ -169,6 +172,7 @@ describe('RepositoriesPage', () => {
         updatedAt: null,
         vulnerabilities: [{ packageName: 'vaultwarden', vulnerableRange: '< 1.31.0', patchedVersions: null }],
         affectsInstalled: true,
+        affectedVersions: ['1.30.0', '1.29.0'],
       },
     ]);
     await settle(fixture);
@@ -180,6 +184,6 @@ describe('RepositoriesPage', () => {
     expect(items[0]?.textContent).toContain('Affects installed version');
     expect(items[0]?.textContent).toContain('No fix yet');
     expect(items[1]?.textContent).toContain('Not affected');
-    expect(el.querySelector('app-advisories-dialog .intro')?.textContent).toContain('1.30.0');
+    expect(el.querySelector('app-advisories-dialog .intro')?.textContent).toContain('installed versions 1.30.0, 1.29.0');
   });
 });

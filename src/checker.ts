@@ -1,7 +1,8 @@
 import {
   advisoriesDue,
-  advisoryAffects,
+  advisoryImpact,
   advisoryKeys,
+  installedVersions,
   sourceKey,
   type AdvisorySource,
   type SecurityAdvisory,
@@ -45,6 +46,7 @@ export class ReleaseChecker {
   private readonly fetchInstalled: InstalledVersionFetcher;
   private readonly osv: OsvClient | null;
   private readonly advisorySources: () => AdvisorySourceSettings;
+  private readonly linkedVersions: (repositoryId: number) => (string | null)[];
 
   constructor(deps: {
     store: RepositoryStore;
@@ -57,6 +59,8 @@ export class ReleaseChecker {
     osv?: OsvClient | null;
     /** Enabled advisory sources (Settings); read on every check. Default: all. */
     advisorySources?: () => AdvisorySourceSettings;
+    /** Installed versions of container apps linked to a repository; compared with its advisories. Default: none. */
+    linkedVersions?: (repositoryId: number) => (string | null)[];
   }) {
     this.store = deps.store;
     this.source = deps.source;
@@ -66,6 +70,7 @@ export class ReleaseChecker {
     this.fetchInstalled = deps.fetchInstalledVersion ?? ((url, field, headers) => fetchInstalledVersion(url, field, headers));
     this.osv = deps.osv ?? null;
     this.advisorySources = deps.advisorySources ?? (() => ({ github: true, osv: true }));
+    this.linkedVersions = deps.linkedVersions ?? (() => []);
   }
 
   /**
@@ -190,9 +195,11 @@ export class ReleaseChecker {
     const isBaseline = !repo.advisoryBaselines.includes(key);
     const known = new Set(this.store.listAdvisories(repo.id).map((a) => a.id));
     let notified = 0;
+    const versions = installedVersions(repo.installedVersion, this.linkedVersions(repo.id));
     // Oldest first, so notifications arrive in publication order.
     for (const advisory of advisories.toSorted((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt))) {
-      const affectsInstalled = advisoryAffects(advisory, repo.installedVersion);
+      const { affects: affectsInstalled, affectedVersions } = advisoryImpact(advisory, versions);
+      const shownVersions = affectsInstalled === true ? affectedVersions : versions;
       // Not news when the running version is known to be outside the vulnerable ranges.
       if (
         !known.has(advisory.id) &&
@@ -204,7 +211,7 @@ export class ReleaseChecker {
           owner: repo.owner,
           repository: repo.name,
           advisory,
-          installedVersion: repo.installedVersion,
+          installedVersion: shownVersions.length > 0 ? shownVersions.join(', ') : null,
           affectsInstalled,
         });
         notified++;

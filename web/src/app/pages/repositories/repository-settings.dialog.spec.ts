@@ -25,6 +25,7 @@ const repo: WatchedRepository = {
   installedVersion: null,
   installedVersionCheckedAt: null,
   installedVersionError: null,
+  installedVersions: [],
   updateAvailable: null,
   hasOwnToken: false,
   githubTokenMasked: null,
