@@ -9,7 +9,7 @@ import { SettingsPage } from './settings.page';
 const settings: AppSettings = {
   discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: 'ReleaseWatcher' },
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
-  polling: { intervalMinutes: 15, intervalSource: 'env', minIntervalMinutes: 1, maxIntervalMinutes: 1440 },
+  polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured: true,
     host: 'pve.lan',
@@ -98,6 +98,50 @@ describe('SettingsPage', () => {
     await settle(fixture);
 
     expect(el.querySelector('.error')?.textContent).toContain('valid URL');
+  });
+
+  it('saves the release and vulnerability check schedules', async () => {
+    await TestBed.configureTestingModule({
+      imports: [SettingsPage],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(SettingsPage);
+    fixture.detectChanges();
+    http.expectOne('/api/settings').flush(settings);
+    await settle(fixture);
+    http.expectOne('/api/github/rate-limit').flush(null);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const section = el.querySelector<HTMLElement>('[aria-labelledby=polling-title]')!;
+    expect(section.textContent).toContain('Every 15 min');
+    const submit = section.querySelector<HTMLButtonElement>('button[type=submit]')!;
+    expect(submit.disabled).toBe(true);
+
+    const hourly = [...section.querySelectorAll<HTMLButtonElement>('[aria-label="Release check schedule"] .preset')].find(
+      (b) => b.textContent?.trim() === 'Hourly',
+    )!;
+    hourly.click();
+    await settle(fixture);
+    expect(hourly.getAttribute('aria-checked')).toBe('true');
+    expect(section.querySelector<HTMLInputElement>('#release-cron')!.value).toBe('0 * * * *');
+
+    const advisory = section.querySelector<HTMLInputElement>('#advisory-cron')!;
+    advisory.value = '30 4 * * *';
+    advisory.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    submit.click();
+
+    const save = http.expectOne('/api/settings');
+    expect(save.request.method).toBe('PUT');
+    expect(save.request.body).toEqual({ releaseCheckCron: '0 * * * *', advisoryCheckCron: '30 4 * * *' });
+    save.flush(
+      { status: 400, errors: { advisoryCheckCron: ['minute must be between 0 and 59, got 61.'] } },
+      { status: 400, statusText: 'Bad Request' },
+    );
+    await settle(fixture);
+    expect(section.querySelector('.error')?.textContent).toContain('minute must be between');
   });
 
   it('saves the Proxmox node without sending an untouched SSH key and tests the connection', async () => {

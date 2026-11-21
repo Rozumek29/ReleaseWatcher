@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { parseCron, validateCron } from '../src/cron.ts';
+import { intervalToCron, parseCron, validateCron } from '../src/cron.ts';
 
 const at = (y: number, mo: number, d: number, h: number, mi: number) => new Date(y, mo - 1, d, h, mi);
 
@@ -39,5 +39,20 @@ describe('cron', () => {
     assert.match(validateCron('*/0 * * * *') ?? '', /Step/);
     assert.match(validateCron('5-1 * * * *') ?? '', /range/);
     assert.equal(validateCron('*/15 * * * *'), null);
+  });
+
+  it('converts former polling intervals, rounding to a more frequent schedule when needed', () => {
+    assert.equal(intervalToCron(1), '* * * * *');
+    assert.equal(intervalToCron(15), '*/15 * * * *');
+    assert.equal(intervalToCron(45), '*/30 * * * *');
+    assert.equal(intervalToCron(60), '0 * * * *');
+    assert.equal(intervalToCron(90), '0 * * * *');
+    assert.equal(intervalToCron(360), '0 */6 * * *');
+    assert.equal(intervalToCron(300), '0 */4 * * *');
+    assert.equal(intervalToCron(1440), '0 0 * * *');
+    assert.equal(intervalToCron(5000), '0 0 * * *');
+    for (const minutes of [1, 7, 15, 45, 90, 300, 1440]) {
+      assert.equal(validateCron(intervalToCron(minutes)), null);
+    }
   });
 });

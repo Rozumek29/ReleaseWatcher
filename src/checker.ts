@@ -7,6 +7,7 @@ import {
   type AdvisorySource,
   type SecurityAdvisory,
 } from './advisories.ts';
+import { type CronSchedule, parseCron } from './cron.ts';
 import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, type WatchedRepository } from './domain.ts';
@@ -47,6 +48,8 @@ export class ReleaseChecker {
   private readonly osv: OsvClient | null;
   private readonly advisorySources: () => AdvisorySourceSettings;
   private readonly linkedVersions: (repositoryId: number) => (string | null)[];
+  private readonly advisoryCron: () => string;
+  private advisorySchedule: { expression: string; schedule: CronSchedule | null } | null = null;
 
   constructor(deps: {
     store: RepositoryStore;
@@ -61,6 +64,8 @@ export class ReleaseChecker {
     advisorySources?: () => AdvisorySourceSettings;
     /** Installed versions of container apps linked to a repository; compared with its advisories. Default: none. */
     linkedVersions?: (repositoryId: number) => (string | null)[];
+    /** Cron schedule of vulnerability checks (Settings); decides which advisories are due. Default: every 6 hours. */
+    advisoryCron?: () => string;
   }) {
     this.store = deps.store;
     this.source = deps.source;
@@ -71,6 +76,22 @@ export class ReleaseChecker {
     this.osv = deps.osv ?? null;
     this.advisorySources = deps.advisorySources ?? (() => ({ github: true, osv: true }));
     this.linkedVersions = deps.linkedVersions ?? (() => []);
+    this.advisoryCron = deps.advisoryCron ?? (() => '0 */6 * * *');
+  }
+
+  /** Parsed vulnerability check schedule (null when the expression is invalid). */
+  private currentAdvisorySchedule(): CronSchedule | null {
+    const expression = this.advisoryCron();
+    if (this.advisorySchedule?.expression !== expression) {
+      let schedule: CronSchedule | null = null;
+      try {
+        schedule = parseCron(expression);
+      } catch (error) {
+        this.log.warn({ err: error, expression }, 'Invalid vulnerability check schedule');
+      }
+      this.advisorySchedule = { expression, schedule };
+    }
+    return this.advisorySchedule.schedule;
   }
 
   /**
@@ -99,6 +120,25 @@ export class ReleaseChecker {
     repo.installedVersionCheckedAt = this.now().toISOString();
   }
 
+  /**
+   * Refreshes the security advisories of all enabled repositories that are due (a scheduled time of the vulnerability
+   * check schedule passed since their last read) as one run. Missed runs are caught up, e.g. after a restart.
+   */
+  async checkAllAdvisories(signal?: AbortSignal): Promise<void> {
+    await this.dispatcher.batch(async () => {
+      const schedule = this.currentAdvisorySchedule();
+      for (const repo of this.store.listEnabled()) {
+        if (signal?.aborted) {
+          return;
+        }
+        if (advisoriesDue(repo.advisoriesCheckedAt, schedule, this.now())) {
+          await this.refreshAdvisories(repo);
+          this.store.save(repo);
+        }
+      }
+    });
+  }
+
   /** Checks all enabled repositories as one run (in digest mode its notifications go out as one summary). */
   async checkAll(signal?: AbortSignal): Promise<void> {
     await this.dispatcher.batch(async () => {
@@ -112,15 +152,12 @@ export class ReleaseChecker {
   }
 
   /**
-   * Reads the security advisories of a repository from the enabled sources (when due or forced), stores them and
+   * Reads the security advisories of a repository from the enabled sources, stores them and
    * notifies about new ones that may affect the installed version. The first read of each source (GitHub, an OSV.dev
    * package) only establishes a baseline. A disabled source drops its advisories. Failures are stored in
    * `advisoriesError` and never fail the release check. Returns the number of notifications.
    */
-  async refreshAdvisories(repo: WatchedRepository, force = false): Promise<number> {
-    if (!force && !advisoriesDue(repo.advisoriesCheckedAt, this.now())) {
-      return 0;
-    }
+  async refreshAdvisories(repo: WatchedRepository): Promise<number> {
     const enabled = this.advisorySources();
     const errors: string[] = [];
     const baselines = new Set<string>();
@@ -224,8 +261,8 @@ export class ReleaseChecker {
   }
 
   /**
-   * Checks a single repository. Mutates and persists the passed entity. Security advisories are fetched when due,
-   * or always with `forceAdvisories` (manual check).
+   * Checks a single repository. Mutates and persists the passed entity. Security advisories are fetched on the first
+   * check and with `forceAdvisories` (manual check); otherwise they follow their own schedule ({@link checkAllAdvisories}).
    */
   async check(repo: WatchedRepository, options: { forceAdvisories?: boolean } = {}): Promise<CheckResult> {
     let notifiedCount = 0;
@@ -272,7 +309,8 @@ export class ReleaseChecker {
       this.log.warn({ err: error, repo: fullName(repo) }, 'Checking repository failed');
       repo.lastError = message.slice(0, 1000);
     }
-    const advisoryCount = await this.refreshAdvisories(repo, options.forceAdvisories ?? false);
+    const advisoryCount =
+      options.forceAdvisories || repo.advisoriesCheckedAt === null ? await this.refreshAdvisories(repo) : 0;
 
     this.store.save(repo);
     return { notifiedCount, advisoryCount, error: repo.lastError };

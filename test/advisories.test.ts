@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
 import {
   advisoriesDue,
-  ADVISORY_REFRESH_INTERVAL_MS,
   advisoryAffects,
   advisoryImpact,
   effectiveRange,
@@ -13,6 +12,7 @@ import {
   summarizeAdvisories,
   versionInRange,
 } from '../src/advisories.ts';
+import { parseCron } from '../src/cron.ts';
 import { GitHubReleaseSource } from '../src/github.ts';
 import { fromOsv, OsvApiClient, rangeFromEvents } from '../src/osv.ts';
 import { advisory } from './helpers.ts';
@@ -153,11 +153,18 @@ describe('summaries', () => {
     assert.equal(normalizeSeverity('weird'), 'unknown');
   });
 
-  it('is due without a previous fetch or after the refresh interval', () => {
-    const now = new Date('2026-11-20T12:00:00Z');
-    assert.equal(advisoriesDue(null, now), true);
-    assert.equal(advisoriesDue(new Date(now.getTime() - 1000).toISOString(), now), false);
-    assert.equal(advisoriesDue(new Date(now.getTime() - ADVISORY_REFRESH_INTERVAL_MS).toISOString(), now), true);
+  it('is due without a previous fetch or when a scheduled time passed since the last one', () => {
+    const everySixHours = parseCron('0 */6 * * *');
+    const now = new Date(2026, 10, 20, 12, 0, 30);
+    assert.equal(advisoriesDue(null, everySixHours, now), true);
+    // Fetched at 11:00 – the 12:00 run has come.
+    assert.equal(advisoriesDue(new Date(2026, 10, 20, 11, 0).toISOString(), everySixHours, now), true);
+    // Fetched at 12:00:10 (by this run or a manual check) – next run at 18:00.
+    assert.equal(advisoriesDue(new Date(2026, 10, 20, 12, 0, 10).toISOString(), everySixHours, now), false);
+    // Missed runs (e.g. the app was down) are caught up.
+    assert.equal(advisoriesDue(new Date(2026, 10, 19, 1, 0).toISOString(), everySixHours, new Date(2026, 10, 20, 9, 0)), true);
+    // An invalid schedule never makes them due.
+    assert.equal(advisoriesDue(new Date(2026, 10, 1).toISOString(), null, now), false);
   });
 });
 

@@ -327,8 +327,14 @@
   }
 }
 
-.interval-field {
+.cron-input {
   max-width: 320px;
+}
+
+.cron-note {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
 }
 
 .skeleton {

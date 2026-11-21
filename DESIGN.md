@@ -20,7 +20,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  │   ├─ proxmox/routes.ts  /api/containers…, /api/proxmox…, /api/runs/:id         │
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
-                 │ Poller (interval) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub │
+                 │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub   │
                  │                            ├─▶ OsvClient (osv.ts) ─▶ OSV.dev (vulnerabilities)           │
                  │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord/SMTP│
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
@@ -43,7 +43,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 | --- | --- | --- | --- |
 | Domain | `domain.ts`, `version.ts`, `advisories.ts`, `cron.ts`, `proxmox/domain.ts` | nothing with I/O | touch DB, network, clock (`Date.now()` is passed in) |
 | Store | `db.ts`, `proxmox/store.ts` | domain types | contain business rules |
-| Service | `checker.ts`, `poller.ts`, `proxmox/service.ts`, `proxmox/scheduler.ts` | domain, stores, interfaces (`ReleaseSource`, `Notifier`, `NodeShell`) | know about HTTP |
+| Service | `checker.ts`, `cron-job.ts`, `proxmox/service.ts`, `proxmox/scheduler.ts` | domain, stores, interfaces (`ReleaseSource`, `Notifier`, `NodeShell`) | know about HTTP |
 | HTTP | `app.ts`, `proxmox/routes.ts`, `http.ts`, `validation.ts` | everything above | hold logic beyond validation, mapping and status codes |
 
 ### Background work
@@ -58,6 +58,9 @@ This file does not repeat those; it describes the **shape** of the system, the *
 - State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
   cleared after undoing it, so a restart can finish the job.
 - At most one task per container at a time (`ContainerService`); schedulers only check, never update.
+- **Every schedule is a cron expression** (server time zone): release checks (`releaseCheckCron`) and vulnerability
+  checks (`advisoryCheckCron`) run as `CronJob`s (`src/cron-job.ts`, no overlapping runs), container checks per
+  container in `ContainerScheduler`. New periodic work gets a cron setting too – no fixed intervals.
 - Release notifications advance the baseline after **each** dispatched release (no duplicates after a crash).
 - Notifications go through `NotificationDispatcher` only: it applies the notification types from the settings and,
   in digest mode, collects everything raised inside `dispatcher.batch()` (a run of all repositories, scheduled or

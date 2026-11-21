@@ -20,7 +20,7 @@ import { createLogger, type Logger } from './log.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
 import type { OsvClient } from './osv.ts';
-import { Poller } from './poller.ts';
+import { CronJob } from './cron-job.ts';
 import { containerRoutes, containerStatus } from './proxmox/routes.ts';
 import { ContainerScheduler } from './proxmox/scheduler.ts';
 import { ContainerUpdater } from './proxmox/updater.ts';
@@ -28,8 +28,6 @@ import { ContainerService } from './proxmox/service.ts';
 import type { NodeShell } from './proxmox/ssh.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import {
-  MAX_POLL_INTERVAL_MINUTES,
-  MIN_POLL_INTERVAL_MINUTES,
   MAX_CHECK_CONCURRENCY,
   maskSecret,
   MIN_CHECK_CONCURRENCY,
@@ -138,8 +136,10 @@ const unconfiguredShell: NodeShell = {
 
 export interface App {
   checker: ReleaseChecker;
-  /** Created but not started – call `poller.start()`. */
-  poller: Poller;
+  /** Release checks on `releaseCheckCron`. Created but not started – call `releaseJob.start()`. */
+  releaseJob: CronJob;
+  /** Vulnerability checks on `advisoryCheckCron`. Created but not started – call `advisoryJob.start()`. */
+  advisoryJob: CronJob;
   /** Created but not started – call `scheduler.start()`. */
   scheduler: ContainerScheduler;
   /** "Update all" of the containers page. */
@@ -266,7 +266,8 @@ const settingsSchema: ObjectSchema = {
     discordMention: { type: 'string', nullable: true },
     discordUsername: { type: 'string', nullable: true },
     githubToken: { type: 'string', nullable: true },
-    pollIntervalMinutes: { type: 'number', nullable: true },
+    releaseCheckCron: { type: 'string', nullable: true, maxLength: 200 },
+    advisoryCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     proxmoxHost: { type: 'string', nullable: true, maxLength: 253 },
     proxmoxPort: { type: 'number', nullable: true },
     proxmoxUser: { type: 'string', nullable: true, maxLength: 32 },
@@ -341,10 +342,25 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     osv: deps.osv ?? null,
     advisorySources: () => ({ github: deps.settings.current.advisoriesGithub, osv: deps.settings.current.advisoriesOsv }),
     linkedVersions: (repositoryId) => linkedAppVersions().get(repositoryId) ?? [],
+    advisoryCron: () => deps.settings.current.advisoryCheckCron,
   });
   const { store, source, settings } = deps;
-  const poller = new Poller(checker, () => settings.current.pollIntervalMinutes * 60_000, log);
-  settings.onChange(() => poller.reschedule());
+  const releaseJob = new CronJob({
+    name: 'releases',
+    task: (signal) => checker.checkAll(signal),
+    cron: () => settings.current.releaseCheckCron,
+    log,
+  });
+  const advisoryJob = new CronJob({
+    name: 'vulnerabilities',
+    task: (signal) => checker.checkAllAdvisories(signal),
+    cron: () => settings.current.advisoryCheckCron,
+    log,
+  });
+  settings.onChange(() => {
+    releaseJob.reschedule();
+    advisoryJob.reschedule();
+  });
 
   const shell = deps.shell ?? unconfiguredShell;
   const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
@@ -393,10 +409,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         tokenSource: settings.sourceOf('githubToken'),
       },
       polling: {
-        intervalMinutes: current.pollIntervalMinutes,
-        intervalSource: settings.sourceOf('pollIntervalMinutes'),
-        minIntervalMinutes: MIN_POLL_INTERVAL_MINUTES,
-        maxIntervalMinutes: MAX_POLL_INTERVAL_MINUTES,
+        releaseCron: current.releaseCheckCron,
+        releaseCronSource: settings.sourceOf('releaseCheckCron'),
+        advisoryCron: current.advisoryCheckCron,
+        advisoryCronSource: settings.sourceOf('advisoryCheckCron'),
       },
       proxmox: {
         configured: shell.isConfigured,
@@ -454,7 +470,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const repositories = store.listStatusFields();
     return {
       version: APP_VERSION,
-      poller: poller.status,
+      poller: releaseJob.status,
+      advisoryPoller: advisoryJob.status,
       repositories: {
         total: repositories.length,
         enabled: repositories.filter((r) => r.isEnabled).length,
@@ -600,7 +617,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     if (osvChanged) {
       // Read the new package right away (its first read only sets the baseline).
-      await checker.refreshAdvisories(repo, true);
+      await checker.refreshAdvisories(repo);
     }
 
     store.save(repo);
@@ -845,7 +862,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         // Checks all enabled repositories right away.
         '/api/check-all': {
           POST: async () => {
-            await poller.runNow();
+            await releaseJob.runNow();
             return Response.json(statusDto());
           },
         },
@@ -873,7 +890,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const close = async () => {
-    poller.stop();
+    await Promise.all([releaseJob.stop(), advisoryJob.stop()]);
     await scheduler.stop();
     await updater.stop();
     await server?.stop();
@@ -881,7 +898,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     await containers.idle();
   };
 
-  return { checker, poller, scheduler, updater, containers, auth, log, listen, close };
+  return { checker, releaseJob, advisoryJob, scheduler, updater, containers, auth, log, listen, close };
 }
 
 function parseJson(text: string): unknown {

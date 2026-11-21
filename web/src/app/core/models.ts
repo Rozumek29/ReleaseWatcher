@@ -133,11 +133,12 @@ export interface AppSettings {
     tokenMasked: string | null;
     tokenSource: SettingSource;
   };
+  /** Cron schedules (server time zone) of the scheduled release and vulnerability checks. */
   polling: {
-    intervalMinutes: number;
-    intervalSource: SettingSource;
-    minIntervalMinutes: number;
-    maxIntervalMinutes: number;
+    releaseCron: string;
+    releaseCronSource: SettingSource;
+    advisoryCron: string;
+    advisoryCronSource: SettingSource;
   };
   proxmox: {
     /** True when host and SSH key are set. */
@@ -212,7 +213,8 @@ export interface SettingsPatch {
   discordMention?: string | null;
   discordUsername?: string | null;
   githubToken?: string | null;
-  pollIntervalMinutes?: number | null;
+  releaseCheckCron?: string | null;
+  advisoryCheckCron?: string | null;
   proxmoxHost?: string | null;
   proxmoxPort?: number | null;
   proxmoxUser?: string | null;
@@ -253,16 +255,23 @@ export interface RepositoryAdvisory extends SecurityAdvisory {
   };
 }
 
+/** A job that runs on a cron schedule. */
+export interface JobStatus {
+  cron: string;
+  isRunning: boolean;
+  lastRunStartedAt: string | null;
+  lastRunFinishedAt: string | null;
+  /** Null while running or when the cron expression is invalid. */
+  nextRunAt: string | null;
+}
+
 export interface AppStatus {
   /** Version of the running server, e.g. "1.2.3". */
   version: string;
-  poller: {
-    intervalMinutes: number;
-    isRunning: boolean;
-    lastRunStartedAt: string | null;
-    lastRunFinishedAt: string | null;
-    nextRunAt: string | null;
-  };
+  /** Scheduled release checks. */
+  poller: JobStatus;
+  /** Scheduled vulnerability checks. */
+  advisoryPoller: JobStatus;
   repositories: {
     total: number;
     enabled: number;

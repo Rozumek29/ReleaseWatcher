@@ -4,7 +4,7 @@ import { AppSettings, Container, HomeAssistantInfo } from '../../core/models';
 export const proxmoxSettings = (configured: boolean): AppSettings => ({
   discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: null },
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
-  polling: { intervalMinutes: 15, intervalSource: 'env', minIntervalMinutes: 1, maxIntervalMinutes: 1440 },
+  polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured,
     host: configured ? 'pve.lan' : null,

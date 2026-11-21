@@ -1,5 +1,5 @@
 import type { Config } from './config.ts';
-import { validateCron } from './cron.ts';
+import { intervalToCron, validateCron } from './cron.ts';
 import { STORAGE_ID_PATTERN } from './proxmox/domain.ts';
 import type { RepositoryStore } from './db.ts';
 import { DEFAULT_NOTIFICATION_PREFERENCES } from './notifiers/dispatcher.ts';
@@ -12,7 +12,10 @@ export interface Settings {
   discordMention: string | null;
   discordUsername: string | null;
   githubToken: string | null;
-  pollIntervalMinutes: number;
+  /** Cron schedule of release checks. */
+  releaseCheckCron: string;
+  /** Cron schedule of vulnerability (security advisory) checks. */
+  advisoryCheckCron: string;
   proxmoxHost: string | null;
   proxmoxPort: number;
   proxmoxUser: string;
@@ -70,9 +73,6 @@ export const MAX_CHECK_CONCURRENCY = 10;
 export type SettingKey = keyof Settings;
 export type SettingsPatch = { [K in SettingKey]?: Settings[K] | null };
 
-export const MIN_POLL_INTERVAL_MINUTES = 1;
-export const MAX_POLL_INTERVAL_MINUTES = 24 * 60;
-
 export class SettingsValidationError extends Error {
   readonly field: SettingKey;
 
@@ -99,7 +99,8 @@ export class SettingsService {
       discordMention: config.discord.mention,
       discordUsername: config.discord.username,
       githubToken: config.github.token,
-      pollIntervalMinutes: config.pollIntervalMs / 60_000,
+      releaseCheckCron: config.releaseCheckCron,
+      advisoryCheckCron: config.advisoryCheckCron,
       proxmoxHost: config.proxmox.host,
       proxmoxPort: config.proxmox.port,
       proxmoxUser: config.proxmox.user,
@@ -126,6 +127,20 @@ export class SettingsService {
       advisoriesOsv: true,
     };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
+    this.migrateLegacySettings();
+  }
+
+  /** Converts a polling interval saved by an older version into a release check cron expression. */
+  private migrateLegacySettings(): void {
+    const legacy = (this.overrides as Record<string, string | undefined>)['pollIntervalMinutes'];
+    if (legacy === undefined) {
+      return;
+    }
+    if (this.overrides.releaseCheckCron === undefined) {
+      this.store.writeSetting('releaseCheckCron', intervalToCron(Number(legacy)));
+    }
+    this.store.writeSetting('pollIntervalMinutes', null);
+    this.overrides = this.store.readSettings() as Partial<Record<SettingKey, string>>;
   }
 
   get current(): Settings {
@@ -137,7 +152,8 @@ export class SettingsService {
       discordMention: o.discordMention ?? this.defaults.discordMention,
       discordUsername: o.discordUsername ?? this.defaults.discordUsername,
       githubToken: o.githubToken ?? this.defaults.githubToken,
-      pollIntervalMinutes: o.pollIntervalMinutes !== undefined ? Number(o.pollIntervalMinutes) : this.defaults.pollIntervalMinutes,
+      releaseCheckCron: o.releaseCheckCron ?? this.defaults.releaseCheckCron,
+      advisoryCheckCron: o.advisoryCheckCron ?? this.defaults.advisoryCheckCron,
       proxmoxHost: o.proxmoxHost ?? this.defaults.proxmoxHost,
       proxmoxPort: o.proxmoxPort !== undefined ? Number(o.proxmoxPort) : this.defaults.proxmoxPort,
       proxmoxUser: o.proxmoxUser ?? this.defaults.proxmoxUser,
@@ -233,16 +249,6 @@ function validate(key: SettingKey, value: string): void {
       }
       return;
     }
-    case 'pollIntervalMinutes': {
-      const minutes = Number(value);
-      if (!Number.isFinite(minutes) || minutes < MIN_POLL_INTERVAL_MINUTES || minutes > MAX_POLL_INTERVAL_MINUTES) {
-        throw new SettingsValidationError(
-          key,
-          `Interval must be between ${MIN_POLL_INTERVAL_MINUTES} and ${MAX_POLL_INTERVAL_MINUTES} minutes.`,
-        );
-      }
-      return;
-    }
     case 'discordMention':
       if (value.length > 200) {
         throw new SettingsValidationError(key, 'Mention is too long.');
@@ -335,6 +341,8 @@ function validate(key: SettingKey, value: string): void {
       }
       return;
     }
+    case 'releaseCheckCron':
+    case 'advisoryCheckCron':
     case 'containerCheckCron': {
       const error = validateCron(value);
       if (error) {

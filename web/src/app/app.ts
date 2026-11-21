@@ -4,6 +4,7 @@ import { filter } from 'rxjs';
 import { AuthService } from './core/auth.service';
 import { StatusService } from './core/status.service';
 import { ToastService } from './core/toast.service';
+import { describeCron } from './shared/cron';
 import { Icon, IconName } from './shared/icon';
 import { RelativeTimePipe } from './shared/relative-time.pipe';
 
@@ -44,6 +45,7 @@ export class App {
   protected readonly sidebarOpen = signal(false);
   /** Ticks every 30 s so relative times ("in 5 minutes") stay current. */
   protected readonly now = signal(Date.now());
+  protected readonly describeCron = describeCron;
   private readonly url = signal(this.router.url);
   /** Sign-in and setup pages: no sidebar. */
   protected readonly authLayout = computed(() => /^\/(login|setup)(\/|\?|$)/.test(this.url()));

@@ -2,6 +2,16 @@
   <div>
     <h1>Vulnerabilities</h1>
     <p>Security advisories of your watched repositories, compared with the installed versions.</p>
+    @if (statusService.status()?.advisoryPoller; as job) {
+      <p class="schedule">
+        Checked {{ describeCron(job.cron).toLowerCase() }}
+        @if (job.isRunning) {
+          · checking now…
+        } @else if (job.nextRunAt) {
+          · next {{ job.nextRunAt | relativeTime }}
+        }
+      </p>
+    }
   </div>
 </header>
 

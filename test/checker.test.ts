@@ -155,13 +155,44 @@ describe('ReleaseChecker', () => {
       assert.equal(store.listAdvisories(repo.id).length, 4);
     });
 
-    it('fetches advisories only when due unless forced', async () => {
+    it('fetches advisories on the first release check and when forced, otherwise only on their schedule', async () => {
       const repo = store.add('acme', 'widget', false);
       await checker.check(repo);
       await checker.check(repo);
       assert.equal(source.advisoryCalls, 1);
       await checker.check(repo, { forceAdvisories: true });
       assert.equal(source.advisoryCalls, 2);
+    });
+
+    it('refreshes only the repositories whose scheduled vulnerability check is due', async () => {
+      let now = new Date(2026, 10, 20, 12, 0, 5);
+      const scheduled = new ReleaseChecker({
+        store,
+        source,
+        dispatcher: new NotificationDispatcher([notifier], silentLog),
+        log: silentLog,
+        now: () => now,
+        advisoryCron: () => '0 */6 * * *',
+      });
+      const due = store.add('acme', 'due', false);
+      due.advisoriesCheckedAt = new Date(2026, 10, 20, 6, 0, 5).toISOString();
+      store.save(due);
+      const fresh = store.add('acme', 'fresh', false);
+      fresh.advisoriesCheckedAt = new Date(2026, 10, 20, 12, 0, 1).toISOString();
+      store.save(fresh);
+      const disabled = store.add('acme', 'disabled', false);
+      disabled.isEnabled = false;
+      store.save(disabled);
+
+      await scheduled.checkAllAdvisories();
+
+      assert.equal(source.advisoryCalls, 1);
+      assert.equal(store.get(due.id)?.advisoriesCheckedAt, now.toISOString());
+      assert.equal(store.get(disabled.id)?.advisoriesCheckedAt, null);
+
+      now = new Date(2026, 10, 20, 18, 0, 5);
+      await scheduled.checkAllAdvisories();
+      assert.equal(source.advisoryCalls, 3);
     });
 
     it('removes withdrawn advisories and keeps errors apart from release errors', async () => {

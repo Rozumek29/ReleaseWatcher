@@ -280,14 +280,22 @@ describe('HTTP API', () => {
   it('reads and updates settings, masking secrets', async () => {
     const initial = (await inject('/api/settings')).json();
     assert.equal(initial.discord.webhookConfigured, false);
-    assert.equal(initial.polling.intervalMinutes, 15);
-    assert.equal(initial.polling.intervalSource, 'env');
+    // The former POLL_INTERVAL_MINUTES (15) is converted into a release check schedule.
+    assert.equal(initial.polling.releaseCron, '*/15 * * * *');
+    assert.equal(initial.polling.releaseCronSource, 'env');
+    assert.equal(initial.polling.advisoryCron, '0 */6 * * *');
+    assert.equal(initial.polling.advisoryCronSource, 'env');
 
     const webhook = 'https://discord.com/api/webhooks/123456789/secret-token-value';
     const updated = await inject({
       method: 'PUT',
       url: '/api/settings',
-      payload: { discordWebhookUrl: webhook, githubToken: 'ghp_abcdefghijklmnop', pollIntervalMinutes: 5 },
+      payload: {
+        discordWebhookUrl: webhook,
+        githubToken: 'ghp_abcdefghijklmnop',
+        releaseCheckCron: '*/5 * * * *',
+        advisoryCheckCron: '@daily',
+      },
     });
     assert.equal(updated.statusCode, 200);
     const body = updated.json();
@@ -295,10 +303,26 @@ describe('HTTP API', () => {
     assert.equal(body.discord.webhookSource, 'ui');
     assert.ok(!JSON.stringify(body).includes('secret-token-value'));
     assert.ok(!JSON.stringify(body).includes('ghp_abcdefghijklmnop'));
-    assert.equal(body.polling.intervalMinutes, 5);
+    assert.equal(body.polling.releaseCron, '*/5 * * * *');
+    assert.equal(body.polling.releaseCronSource, 'ui');
+    assert.equal(body.polling.advisoryCron, '@daily');
+    const status = (await inject('/api/status')).json();
+    assert.equal(status.poller.cron, '*/5 * * * *');
+    assert.equal(status.advisoryPoller.cron, '@daily');
 
-    const cleared = await inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: null } });
-    assert.equal(cleared.json().polling.intervalMinutes, 15);
+    const cleared = await inject({ method: 'PUT', url: '/api/settings', payload: { releaseCheckCron: null, advisoryCheckCron: null } });
+    assert.equal(cleared.json().polling.releaseCron, '*/15 * * * *');
+    assert.equal(cleared.json().polling.advisoryCron, '0 */6 * * *');
+  });
+
+  it('converts a polling interval saved by an older version into a release check schedule', () => {
+    const legacy = new RepositoryStore(':memory:');
+    legacy.writeSetting('pollIntervalMinutes', '30');
+    const migrated = new SettingsService(legacy, loadConfig({}));
+    assert.equal(migrated.current.releaseCheckCron, '*/30 * * * *');
+    assert.equal(migrated.sourceOf('releaseCheckCron'), 'ui');
+    assert.equal(legacy.readSettings()['pollIntervalMinutes'], undefined);
+    assert.equal(new SettingsService(new RepositoryStore(':memory:'), loadConfig({})).current.releaseCheckCron, '*/15 * * * *');
   });
 
   it('validates settings', async () => {
@@ -306,8 +330,13 @@ describe('HTTP API', () => {
     assert.equal(badUrl.statusCode, 400);
     assert.ok(badUrl.json().errors.discordWebhookUrl);
 
-    const badInterval = await inject({ method: 'PUT', url: '/api/settings', payload: { pollIntervalMinutes: 0 } });
-    assert.ok(badInterval.json().errors.pollIntervalMinutes);
+    const badCron = await inject({
+      method: 'PUT',
+      url: '/api/settings',
+      payload: { releaseCheckCron: 'often', advisoryCheckCron: '61 * * * *' },
+    });
+    assert.equal(badCron.statusCode, 400);
+    assert.ok(badCron.json().errors.releaseCheckCron);
   });
 
   it('saves e-mail and notification settings without returning the SMTP password', async () => {
@@ -488,9 +517,9 @@ describe('HTTP API', () => {
   });
 
   it('ignores unknown settings properties', async () => {
-    const response = await inject({ method: 'PUT', url: '/api/settings', payload: { unknown: 1, pollIntervalMinutes: 7 } });
+    const response = await inject({ method: 'PUT', url: '/api/settings', payload: { unknown: 1, releaseCheckCron: '*/7 * * * *' } });
     assert.equal(response.statusCode, 200);
-    assert.equal(response.json().polling.intervalMinutes, 7);
+    assert.equal(response.json().polling.releaseCron, '*/7 * * * *');
   });
 
   it('answers unknown routes with a 404 problem when no UI is built', async () => {

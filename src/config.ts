@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { intervalToCron } from './cron.ts';
 import type { LogFileOptions } from './log.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
 
@@ -10,7 +11,11 @@ export interface Config {
   databasePath: string;
   /** Key for secrets stored in the database (base64/hex, 32 bytes); null = key file next to the database. */
   encryptionKey: string | null;
-  pollIntervalMs: number;
+  /** Cron schedule of release checks (falls back to the former POLL_INTERVAL_MINUTES, converted). */
+  releaseCheckCron: string;
+  /** Cron schedule of vulnerability (security advisory) checks. */
+  advisoryCheckCron: string;
+  /** Delay of the first release check (and vulnerability catch-up) after startup. */
   initialDelayMs: number;
   github: {
     apiBaseUrl: string;
@@ -77,7 +82,10 @@ export function loadConfig(env: Env = process.env): Config {
     host: str(env, 'HOST') ?? '0.0.0.0',
     databasePath,
     encryptionKey: str(env, 'ENCRYPTION_KEY'),
-    pollIntervalMs: int(env, 'POLL_INTERVAL_MINUTES', 15) * 60_000,
+    releaseCheckCron:
+      str(env, 'RELEASE_CHECK_CRON') ??
+      (str(env, 'POLL_INTERVAL_MINUTES') ? intervalToCron(int(env, 'POLL_INTERVAL_MINUTES', 15)) : '*/15 * * * *'),
+    advisoryCheckCron: str(env, 'ADVISORY_CHECK_CRON') ?? '0 */6 * * *',
     initialDelayMs: int(env, 'POLL_INITIAL_DELAY_SECONDS', 10) * 1000,
     github: {
       apiBaseUrl: str(env, 'GITHUB_API_URL') ?? 'https://api.github.com',

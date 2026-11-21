@@ -121,6 +121,30 @@ export function parseCron(expression: string): CronSchedule {
   };
 }
 
+/**
+ * Converts a former fixed interval (minutes) into a cron expression. Intervals that cron cannot express exactly
+ * (e.g. 45 or 90 minutes) are rounded down to the nearest one it can, so checks never get less frequent.
+ */
+export function intervalToCron(minutes: number): string {
+  const largestDivisor = (of: number, atMost: number): number => {
+    for (let d = Math.max(1, Math.floor(atMost)); d > 1; d--) {
+      if (of % d === 0) {
+        return d;
+      }
+    }
+    return 1;
+  };
+  if (!Number.isFinite(minutes) || minutes < 60) {
+    const step = largestDivisor(60, Number.isFinite(minutes) ? minutes : 1);
+    return step === 1 ? '* * * * *' : `*/${step} * * * *`;
+  }
+  if (minutes >= 24 * 60) {
+    return '0 0 * * *';
+  }
+  const hours = largestDivisor(24, minutes / 60);
+  return hours === 1 ? '0 * * * *' : `0 */${hours} * * *`;
+}
+
 /** Returns an error message for an invalid expression, or null. */
 export function validateCron(expression: string): string | null {
   try {

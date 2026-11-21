@@ -131,52 +131,91 @@
       <div class="section-head">
         <span class="section-icon polling"><app-icon name="timer" /></span>
         <div class="section-title">
-          <h2 id="polling-title">Polling</h2>
-          <p>How often all active repositories are checked for new releases.</p>
+          <h2 id="polling-title">Check schedules</h2>
+          <p>When active repositories are checked for new releases and new vulnerabilities.</p>
         </div>
-        <span class="badge">{{ sourceLabel(s.polling.intervalSource) }}</span>
       </div>
 
       <form class="section-body" (ngSubmit)="savePolling()">
-        <div class="presets" role="radiogroup" aria-label="Check interval">
-          @for (p of presets; track p) {
-            <button
-              type="button"
-              role="radio"
-              class="preset"
-              [class.active]="+intervalMinutes === p"
-              [attr.aria-checked]="+intervalMinutes === p"
-              (click)="intervalMinutes = p"
-            >
-              {{ formatInterval(p) }}
-            </button>
-          }
-        </div>
-
-        <div class="field interval-field">
-          <label for="interval">Custom interval (minutes)</label>
+        <div class="field">
+          <label for="release-cron">Releases (cron)</label>
+          <div class="presets" role="radiogroup" aria-label="Release check schedule">
+            @for (p of releasePresets; track p) {
+              <button
+                type="button"
+                role="radio"
+                class="preset"
+                [class.active]="releaseCron.trim() === p"
+                [attr.aria-checked]="releaseCron.trim() === p"
+                (click)="releaseCron = p"
+              >
+                {{ describeCron(p) }}
+              </button>
+            }
+          </div>
           <input
-            id="interval"
-            class="input"
-            name="interval"
-            type="number"
-            [min]="s.polling.minIntervalMinutes"
-            [max]="s.polling.maxIntervalMinutes"
-            [(ngModel)]="intervalMinutes"
-            [class.invalid]="errors()['pollIntervalMinutes']"
+            id="release-cron"
+            class="input mono cron-input"
+            name="releaseCheckCron"
+            [(ngModel)]="releaseCron"
+            placeholder="*/15 * * * *"
+            autocomplete="off"
+            spellcheck="false"
+            [class.invalid]="errors()['releaseCheckCron']"
           />
-          @if (errors()['pollIntervalMinutes']; as e) {
+          @if (errors()['releaseCheckCron']; as e) {
             <span class="error">{{ e }}</span>
           }
           <span class="hint">
-            Each active repository costs up to {{ checksPerHour() }} request(s) per hour
-            (unchanged repositories are answered from cache and don't count).
+            {{ sourceLabel(s.polling.releaseCronSource) }} · {{ describeCron(s.polling.releaseCron) }}. Each active
+            repository costs one request per run (unchanged repositories are answered from cache and don't count).
           </span>
         </div>
 
+        <div class="field">
+          <label for="advisory-cron">Vulnerabilities (cron)</label>
+          <div class="presets" role="radiogroup" aria-label="Vulnerability check schedule">
+            @for (p of advisoryPresets; track p) {
+              <button
+                type="button"
+                role="radio"
+                class="preset"
+                [class.active]="advisoryCron.trim() === p"
+                [attr.aria-checked]="advisoryCron.trim() === p"
+                (click)="advisoryCron = p"
+              >
+                {{ describeCron(p) }}
+              </button>
+            }
+          </div>
+          <input
+            id="advisory-cron"
+            class="input mono cron-input"
+            name="advisoryCheckCron"
+            [(ngModel)]="advisoryCron"
+            placeholder="0 */6 * * *"
+            autocomplete="off"
+            spellcheck="false"
+            [class.invalid]="errors()['advisoryCheckCron']"
+          />
+          @if (errors()['advisoryCheckCron']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.polling.advisoryCronSource) }} · {{ describeCron(s.polling.advisoryCron) }}. Security
+            advisories from the sources below; runs missed while the app was stopped are caught up after a start.
+          </span>
+        </div>
+
+        <p class="cron-note">
+          <code>minute hour day month weekday</code> in the server's time zone, e.g. <code>0 */6 * * *</code> (every 6
+          hours). Empty a field to use the environment default. Container checks have their own schedule in the
+          Proxmox section.
+        </p>
+
         <div class="section-actions">
           <span class="spacer"></span>
-          <button type="submit" class="btn" [disabled]="saving() === 'polling' || +intervalMinutes === s.polling.intervalMinutes">
+          <button type="submit" class="btn" [disabled]="saving() === 'polling' || !pollingChanged(s)">
             {{ saving() === 'polling' ? 'Saving…' : 'Save' }}
           </button>
         </div>

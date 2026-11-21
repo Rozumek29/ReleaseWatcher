@@ -7,6 +7,7 @@ import { AdvisorySeverity, AdvisorySource, RepositoryAdvisory } from '../../core
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
+import { describeCron } from '../../shared/cron';
 import { Icon } from '../../shared/icon';
 import { InView } from '../../shared/in-view';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
@@ -26,7 +27,8 @@ const PAGE_SIZE = 50;
 export class VulnerabilitiesPage {
   private readonly api = inject(ApiService);
   private readonly toast = inject(ToastService);
-  private readonly statusService = inject(StatusService);
+  protected readonly statusService = inject(StatusService);
+  protected readonly describeCron = describeCron;
 
   protected readonly advisories = signal<RepositoryAdvisory[]>([]);
   protected readonly loading = signal(true);

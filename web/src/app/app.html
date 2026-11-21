@@ -61,7 +61,7 @@
           </span>
         </div>
         <div class="poller-meta">
-          Every {{ s.poller.intervalMinutes }} min
+          {{ describeCron(s.poller.cron) }}
           @if (s.poller.lastRunFinishedAt) {
             · last {{ s.poller.lastRunFinishedAt | relativeTime: now() }}
           }

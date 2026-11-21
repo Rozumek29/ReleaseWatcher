@@ -1,6 +1,7 @@
 /**
  * Security advisories of watched repositories (GitHub repository advisories and OSV.dev) – pure logic only.
  */
+import type { CronSchedule } from './cron.ts';
 import { compareVersions } from './version.ts';
 
 /** Where advisories come from; each can be switched off in the settings. */
@@ -52,12 +53,21 @@ export interface SecurityAdvisory {
   vulnerabilities: AdvisoryVulnerability[];
 }
 
-/** Advisories are fetched at most this often by scheduled checks (a manual check always fetches them). */
-export const ADVISORY_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
-
-/** True when the advisories of a repository should be fetched again. */
-export function advisoriesDue(checkedAt: string | null, now: Date): boolean {
-  return checkedAt === null || now.getTime() - Date.parse(checkedAt) >= ADVISORY_REFRESH_INTERVAL_MS;
+/**
+ * True when the advisories of a repository should be fetched again: never fetched, or a scheduled time of the
+ * vulnerability check schedule has passed since the last fetch (so a missed run, e.g. during a restart, is caught
+ * up). An invalid schedule (null) never makes them due.
+ */
+export function advisoriesDue(checkedAt: string | null, schedule: Pick<CronSchedule, 'next'> | null, now: Date): boolean {
+  if (checkedAt === null) {
+    return true;
+  }
+  const last = Date.parse(checkedAt);
+  if (Number.isNaN(last)) {
+    return true;
+  }
+  const next = schedule?.next(new Date(last));
+  return next != null && next.getTime() <= now.getTime();
 }
 
 export const normalizeSeverity = (value: string | null | undefined): AdvisorySeverity => {

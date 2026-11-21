@@ -109,8 +109,9 @@ Open <http://localhost:8080>, create the account with the setup code, then:
    (`rozumek29/releasewatcher`, stable releases only, with its own `/api/version` as the installed-version URL), so
    the UI tells you when an update is available. Remove it like any other repository – it is not added again.
 2. The first check only stores a **baseline** (the newest existing release), so you are not spammed with history.
-3. Every `POLL_INTERVAL_MINUTES` (default 15) the poller fetches recent releases using conditional requests
-   (`If-None-Match` / ETag – a `304` does not count against GitHub's rate limit).
+3. On the `RELEASE_CHECK_CRON` schedule (default `*/15 * * * *` – every 15 minutes, server time zone) and once shortly
+   after a start, the poller fetches recent releases using conditional requests (`If-None-Match` / ETag – a `304`
+   does not count against GitHub's rate limit).
 4. Releases newer than the baseline are sent to every enabled notifier (oldest first, max 5 per check), then the
    baseline moves forward. Drafts are ignored; pre-releases are opt-in per repository.
 5. **Settings → Notifications** chooses what is sent (new releases, new vulnerabilities, application updates, apt updates, finished and
@@ -127,8 +128,10 @@ run (installed ≥ release) are not announced, and Discord messages include the 
 
 ### Vulnerabilities
 
-Each check also reads the known vulnerabilities of a repository – at most every 6 hours (a manual **Check** always
-reads them). **Settings → General → Vulnerability sources** switches each source on or off:
+Known vulnerabilities are read on their own schedule, `ADVISORY_CHECK_CRON` (default `0 */6 * * *` – every 6 hours),
+and on the first check of a new repository; a manual **Check** always reads them. Runs missed while the app was stopped
+are caught up shortly after a start. All schedules (releases, vulnerabilities, containers) are cron expressions and can
+be changed under **Settings → General → Check schedules**. **Settings → General → Vulnerability sources** switches each source on or off:
 
 | Source | What it reads | Setup |
 | --- | --- | --- |
@@ -443,16 +446,18 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 </details>
 
 <details open>
-<summary><b>GitHub and polling</b></summary>
+<summary><b>GitHub and check schedules</b></summary>
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `GITHUB_TOKEN` | – | Optional PAT – raises the limit from 60 to 5000 requests/hour and allows private repositories (fine-grained: **Contents: Read-only**, plus **Repository security advisories: Read-only** for advisories of private repositories; classic: `repo`). A repository can have its own token, e.g. for a repository of another user. |
-| `POLL_INTERVAL_MINUTES` | `15` | Time between checks. |
-| `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first check after start. |
+| `RELEASE_CHECK_CRON` | `*/15 * * * *` | When repositories are checked for new releases (5-field cron, `@hourly`, …; server time zone – set `TZ`). |
+| `ADVISORY_CHECK_CRON` | `0 */6 * * *` | When the vulnerabilities (security advisories) of repositories are read. |
+| `POLL_INTERVAL_MINUTES` | – | Deprecated: used only when `RELEASE_CHECK_CRON` is not set, converted to the nearest cron schedule (e.g. `15` → `*/15 * * * *`, `90` → hourly). |
+| `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first release check (and the vulnerability catch-up) after start. |
 
 > Without a token GitHub allows 60 requests/hour per IP. Each repository costs one request per check (fewer with ETag
-> hits), so for more than ~10 repositories at a 15-minute interval add a token.
+> hits), so for more than ~10 repositories checked every 15 minutes add a token.
 
 </details>
 
@@ -521,7 +526,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/notifiers/test` | Send a test release to all enabled notifiers, or only to `{ "notifier": "email" }` (`409` when not configured) |
 | `GET` | `/api/settings` | Effective settings (secrets masked) and where each value comes from |
 | `PUT` | `/api/settings` | Partial update; omitted = keep, `null` = reset to the environment value |
-| `GET` | `/api/status` | App version, poller state, repository and container counts |
+| `GET` | `/api/status` | App version, state of the scheduled release (`poller`) and vulnerability (`advisoryPoller`) checks – cron, running, last and next run –, repository and container counts |
 | `GET` | `/api/github/rate-limit` | Remaining GitHub API quota |
 | `GET` | `/api/version` | Running version, e.g. `{ "version": "1.3.0" }` (public) |
 | `GET` | `/health` | Liveness (public) |
@@ -626,7 +631,7 @@ src/
   osv.ts             OSV.dev client and mapping of OSV records
   version.ts         version parsing/comparison, installed-version reading
   checker.ts         checks repositories, dispatches notifications
-  poller.ts          interval scheduler (interval can change at runtime)
+  cron-job.ts        runs a task on a cron schedule (release and vulnerability checks; schedule can change at runtime)
   github.ts          GitHub REST client (ETag aware)
   db.ts              bun:sqlite store with versioned migrations
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars

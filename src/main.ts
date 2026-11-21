@@ -80,7 +80,7 @@ const app = await buildApp({
 
 const shutdown = async (signal: string) => {
   log.info({ signal }, 'Shutting down');
-  await app.close(); // also stops the poller and the container scheduler
+  await app.close(); // also stops the scheduled jobs and the container scheduler
   shell.dispose();
   store.close();
   log.close();
@@ -90,7 +90,9 @@ process.once('SIGINT', () => void shutdown('SIGINT'));
 process.once('SIGTERM', () => void shutdown('SIGTERM'));
 
 const server = app.listen({ port: config.port, hostname: config.host });
-app.poller.start(config.initialDelayMs);
+app.releaseJob.start(config.initialDelayMs);
+// Catches up vulnerability checks missed while the app was not running (only repositories that are due).
+app.advisoryJob.start(config.initialDelayMs + 5_000);
 app.scheduler.start();
 // Updates keep running on the node while ReleaseWatcher restarts – re-attach to them and restore raised resources.
 app.containers.recover().catch((err: unknown) => log.error({ err }, 'Re-attaching to running updates failed'));
@@ -101,7 +103,8 @@ log.info(
   {
     version: APP_VERSION,
     url: server.url.href,
-    intervalMinutes: settings.current.pollIntervalMinutes,
+    releaseCheckCron: settings.current.releaseCheckCron,
+    advisoryCheckCron: settings.current.advisoryCheckCron,
     notifiers: notifiers.filter((n) => n.isEnabled).map((n) => n.name),
     proxmox: shell.isConfigured ? settings.current.proxmoxHost : null,
     containerCheckCron: settings.current.containerCheckCron,

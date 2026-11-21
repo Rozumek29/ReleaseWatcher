@@ -2,7 +2,8 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { RepositoryAdvisory } from '../../core/models';
+import { AppStatus, RepositoryAdvisory } from '../../core/models';
+import { StatusService } from '../../core/status.service';
 import { settle } from '../../testing';
 import { VulnerabilitiesPage } from './vulnerabilities.page';
 
@@ -53,6 +54,15 @@ describe('VulnerabilitiesPage', () => {
   }
 
   const vault = { id: 2, fullName: 'dani-garcia/vaultwarden', owner: 'dani-garcia', url: 'https://github.com/dani-garcia/vaultwarden', avatarUrl: '', installedVersion: '1.30.0', installedVersions: ['1.30.0'] };
+
+  it('shows the vulnerability check schedule', async () => {
+    const job = { cron: '0 */6 * * *', isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null };
+    TestBed.inject(StatusService).status.set({
+      advisoryPoller: { ...job, nextRunAt: new Date(Date.now() + 2 * 3_600_000).toISOString() },
+    } as AppStatus);
+    const { el } = await render([]);
+    expect(el.querySelector('.page-header .schedule')?.textContent).toMatch(/Checked every 6 hours\s+· next in 2 hours/);
+  });
 
   it('lists advisories affecting the installed version first and filters them', async () => {
     const { el, fixture } = await render([

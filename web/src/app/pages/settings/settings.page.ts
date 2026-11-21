@@ -15,6 +15,7 @@ import {
 } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
+import { describeCron } from '../../shared/cron';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
@@ -39,7 +40,9 @@ const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'
   { key: 'updateFailed', label: 'Update failed', hint: 'An update or apt upgrade started here failed.' },
 ];
 
-const INTERVAL_PRESETS = [5, 15, 30, 60, 180, 360, 1440];
+/** Quick picks for the check schedules (cron expressions). */
+const RELEASE_PRESETS = ['*/5 * * * *', '*/15 * * * *', '*/30 * * * *', '0 * * * *', '0 */3 * * *', '0 */6 * * *'];
+const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * * *', '0 3 * * *'];
 
 @Component({
   selector: 'app-settings-page',
@@ -82,7 +85,8 @@ export class SettingsPage implements OnInit {
   protected token = '';
   protected advisoriesGithub = true;
   protected advisoriesOsv = true;
-  protected intervalMinutes = 15;
+  protected releaseCron = '';
+  protected advisoryCron = '';
   protected proxmoxHost = '';
   protected proxmoxPort: number | null = 22;
   protected proxmoxUser = '';
@@ -110,7 +114,9 @@ export class SettingsPage implements OnInit {
 
   protected readonly kinds = NOTIFICATION_KINDS;
 
-  protected readonly presets = INTERVAL_PRESETS;
+  protected readonly releasePresets = RELEASE_PRESETS;
+  protected readonly advisoryPresets = ADVISORY_PRESETS;
+  protected readonly describeCron = describeCron;
 
   protected readonly rateLimitPercent = computed(() => {
     const rl = this.rateLimit();
@@ -234,7 +240,12 @@ export class SettingsPage implements OnInit {
   }
 
   protected async savePolling(): Promise<void> {
-    if (await this.save('polling', { pollIntervalMinutes: Number(this.intervalMinutes) }, 'Polling interval saved.')) {
+    const patch: SettingsPatch = {
+      // Empty values reset to the environment default.
+      releaseCheckCron: this.releaseCron.trim() || null,
+      advisoryCheckCron: this.advisoryCron.trim() || null,
+    };
+    if (await this.save('polling', patch, 'Check schedules saved.')) {
       void this.statusService.refresh();
     }
   }
@@ -347,19 +358,9 @@ export class SettingsPage implements OnInit {
     return source === 'ui' ? 'Saved here' : source === 'env' ? 'From environment' : 'Not set';
   }
 
-  protected formatInterval(minutes: number): string {
-    if (minutes % 1440 === 0) {
-      return minutes === 1440 ? '1 day' : `${minutes / 1440} days`;
-    }
-    if (minutes % 60 === 0) {
-      return minutes === 60 ? '1 hour' : `${minutes / 60} hours`;
-    }
-    return `${minutes} min`;
-  }
-
-  protected checksPerHour(): number {
-    const minutes = Number(this.intervalMinutes) || 1;
-    return Math.ceil(60 / minutes);
+  /** Whether the schedule fields differ from the saved values. */
+  protected pollingChanged(s: AppSettings): boolean {
+    return this.releaseCron.trim() !== s.polling.releaseCron || this.advisoryCron.trim() !== s.polling.advisoryCron;
   }
 
   private async save(section: Section, patch: SettingsPatch, successText: string): Promise<boolean> {
@@ -390,7 +391,8 @@ export class SettingsPage implements OnInit {
     this.advisoriesOsv = settings.advisories.osv;
     this.mention = settings.discord.mention ?? '';
     this.username = settings.discord.username ?? '';
-    this.intervalMinutes = settings.polling.intervalMinutes;
+    this.releaseCron = settings.polling.releaseCron;
+    this.advisoryCron = settings.polling.advisoryCron;
     this.proxmoxHost = settings.proxmox.host ?? '';
     this.proxmoxPort = settings.proxmox.port;
     this.proxmoxUser = settings.proxmox.user;
