@@ -10,7 +10,7 @@ import { RepositoryStore } from '../src/db.ts';
 import { loadConfig } from '../src/config.ts';
 import { SettingsService } from '../src/settings.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
-import { advisory, FakeSource, RecordingNotifier, release } from './helpers.ts';
+import { addProxmoxHost, advisory, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
 describe('HTTP API', () => {
   let app: App;
@@ -188,7 +188,7 @@ describe('HTTP API', () => {
     assert.deepEqual(created.installedVersions, []);
 
     const containers = new ContainerStore(store.database, store.secretBox);
-    const container = containers.add(101, 'widget');
+    const container = containers.add(addProxmoxHost(store).id, 101, 'widget');
     for (const [name, version] of [['Widget', '0.4.0'], ['Widget (staging)', '1.2.0']] as const) {
       const linked = containers.addApp(container.id, {
         name,

@@ -1,0 +1,109 @@
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="key-dialog-title">
+  @if (mode(); as m) {
+    @if (generated(); as key) {
+      <div class="dialog-card">
+        <header class="dialog-head">
+          <app-icon name="key" [size]="22" />
+          <div class="head-text">
+            <h2 id="key-dialog-title">Key {{ key.name }} generated</h2>
+            <p>Add the public key to every machine that should accept it.</p>
+          </div>
+          <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+            <app-icon name="close" />
+          </button>
+        </header>
+        <div class="dialog-body">
+          <div class="field">
+            <label for="key-public">Public key</label>
+            <textarea id="key-public" class="input mono public-key" rows="3" readonly [value]="key.publicKey ?? ''"></textarea>
+            <span class="hint">
+              Append it to <code>~/.ssh/authorized_keys</code> of the login user, e.g.
+              <code>echo '…' &gt;&gt; ~/.ssh/authorized_keys</code>. You can copy it again later from the key list.
+            </span>
+          </div>
+        </div>
+        <footer class="dialog-foot">
+          @if (key.publicKey; as pub) {
+            <button type="button" class="btn btn-secondary" (click)="copy(pub)">Copy public key</button>
+          }
+          <button type="button" class="btn" (click)="close()">Done</button>
+        </footer>
+      </div>
+    } @else {
+      <form class="dialog-card" (ngSubmit)="save()">
+        <header class="dialog-head">
+          <app-icon name="key" [size]="22" />
+          <div class="head-text">
+            <h2 id="key-dialog-title">{{ title(m) }}</h2>
+            @if (m.kind === 'generate') {
+              <p>A new Ed25519 key pair is created on the server – the private key never leaves it.</p>
+            } @else if (m.kind === 'add') {
+              <p>Paste a private key the hosts already accept.</p>
+            }
+          </div>
+          <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+            <app-icon name="close" />
+          </button>
+        </header>
+
+        <div class="dialog-body">
+          <div class="field">
+            <label for="key-name">Name</label>
+            <input
+              id="key-name"
+              class="input"
+              name="name"
+              [(ngModel)]="name"
+              placeholder="e.g. Homelab or Hetzner VPS"
+              autocomplete="off"
+              required
+              [class.invalid]="errors()['name']"
+            />
+            @if (errors()['name']; as e) {
+              <span class="error">{{ e }}</span>
+            }
+          </div>
+
+          @if (m.kind === 'add') {
+            <div class="field">
+              <label for="key-private">Private key</label>
+              <textarea
+                id="key-private"
+                class="input mono private-key"
+                name="privateKey"
+                rows="6"
+                [(ngModel)]="privateKey"
+                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
+                autocomplete="off"
+                spellcheck="false"
+                required
+                [class.invalid]="errors()['privateKey']"
+              ></textarea>
+              @if (errors()['privateKey']; as e) {
+                <span class="error">{{ e }}</span>
+              }
+              <span class="hint">
+                The whole file, e.g. <code>~/.ssh/id_ed25519</code>. It is encrypted at rest and never shown again;
+                keys protected with a passphrase are not supported.
+              </span>
+            </div>
+          }
+        </div>
+
+        <footer class="dialog-foot">
+          @if (saveError(); as e) {
+            <span class="save-error" role="alert">{{ e }}</span>
+          }
+          <button type="button" class="btn btn-ghost" (click)="close()">Cancel</button>
+          <button type="submit" class="btn" [disabled]="saving()">
+            @if (saving()) {
+              <app-icon name="refresh" [size]="16" class="spin" /> {{ m.kind === 'generate' ? 'Generating…' : 'Saving…' }}
+            } @else {
+              {{ m.kind === 'generate' ? 'Generate' : 'Save key' }}
+            }
+          </button>
+        </footer>
+      </form>
+    }
+  }
+</dialog>

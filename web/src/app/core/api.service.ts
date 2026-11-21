@@ -15,6 +15,8 @@ import {
   DetectedApp,
   DiscoveredContainer,
   HeaderInput,
+  Host,
+  HostInput,
   InstalledVersionTestResult,
   Notifier,
   RateLimit,
@@ -23,6 +25,7 @@ import {
   RunSummary,
   SecurityAdvisory,
   SettingsPatch,
+  SshKey,
   TestNotificationResult,
   UpdateContainerRequest,
   UpdateRepositoryRequest,
@@ -112,11 +115,54 @@ export class ApiService {
     return this.http.get<RateLimit | null>(`${this.baseUrl}/github/rate-limit`);
   }
 
-  /* ---------- Proxmox containers ---------- */
+  /* ---------- SSH keys and hosts ---------- */
 
-  testProxmoxConnection(): Observable<{ output: string }> {
-    return this.http.post<{ output: string }>(`${this.baseUrl}/proxmox/test`, {});
+  getSshKeys(): Observable<SshKey[]> {
+    return this.http.get<SshKey[]>(`${this.baseUrl}/ssh-keys`);
   }
+
+  addSshKey(name: string, privateKey: string): Observable<SshKey> {
+    return this.http.post<SshKey>(`${this.baseUrl}/ssh-keys`, { name, privateKey });
+  }
+
+  /** Creates a new Ed25519 key pair on the server; only the public key is returned. */
+  generateSshKey(name: string): Observable<SshKey> {
+    return this.http.post<SshKey>(`${this.baseUrl}/ssh-keys/generate`, { name });
+  }
+
+  renameSshKey(id: number, name: string): Observable<SshKey> {
+    return this.http.put<SshKey>(`${this.baseUrl}/ssh-keys/${id}`, { name });
+  }
+
+  deleteSshKey(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/ssh-keys/${id}`);
+  }
+
+  getHosts(): Observable<Host[]> {
+    return this.http.get<Host[]>(`${this.baseUrl}/hosts`);
+  }
+
+  addHost(input: HostInput): Observable<Host> {
+    return this.http.post<Host>(`${this.baseUrl}/hosts`, input);
+  }
+
+  updateHost(id: number, input: HostInput): Observable<Host> {
+    return this.http.put<Host>(`${this.baseUrl}/hosts/${id}`, input);
+  }
+
+  deleteHost(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/hosts/${id}`);
+  }
+
+  testHost(id: number): Observable<{ output: string }> {
+    return this.http.post<{ output: string }>(`${this.baseUrl}/hosts/${id}/test`, {});
+  }
+
+  forgetHostKey(id: number): Observable<void> {
+    return this.http.post<void>(`${this.baseUrl}/hosts/${id}/forget-host-key`, {});
+  }
+
+  /* ---------- Proxmox containers ---------- */
 
   discoverContainers(): Observable<DiscoveredContainer[]> {
     return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers`);

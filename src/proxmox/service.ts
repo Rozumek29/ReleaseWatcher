@@ -267,10 +267,18 @@ class RunLog {
   }
 }
 
+/** SSH shells per host (`ShellPool`). */
+export interface ShellLookup {
+  /** Shell of a host; an unconfigured one for null or an unknown host. */
+  forHost(hostId: number | null): NodeShell;
+}
+
 export interface ContainerServiceDeps {
   containers: ContainerStore;
   repositories: RepositoryStore;
-  shell: NodeShell;
+  shells: ShellLookup;
+  /** The Proxmox node the Containers page works with (discovery, adding guests); null = none configured. */
+  nodeHostId: () => number | null;
   dispatcher: NotificationDispatcher;
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
   now?: () => Date;
@@ -326,14 +334,19 @@ export class ContainerService {
     this.homeAssistantPollMs = deps.homeAssistantPollMs ?? 5000;
   }
 
+  /** The Proxmox node the Containers page works with; null = none configured. */
+  nodeHostId(): number | null {
+    return this.deps.nodeHostId();
+  }
+
   /** SSH connection to the Proxmox node (discovery, storages, connection test). */
   get shell(): NodeShell {
-    return this.deps.shell;
+    return this.deps.shells.forHost(this.deps.nodeHostId());
   }
 
   /** SSH connection that reaches a target: the node of a guest, or the machine itself. */
-  shellFor(_container: Pick<Container, 'kind'>): NodeShell {
-    return this.deps.shell;
+  shellFor(container: Pick<Container, 'hostId'>): NodeShell {
+    return this.deps.shells.forHost(container.hostId);
   }
 
   isBusy(containerId: number): boolean {
@@ -361,7 +374,7 @@ export class ContainerService {
 
   /** Connects to the node and returns `pveversion` output. */
   async testConnection(): Promise<string> {
-    const result = await this.deps.shell.run('pveversion 2>/dev/null || uname -a', { timeoutMs: NODE_TIMEOUT_MS });
+    const result = await this.shell.run('pveversion 2>/dev/null || uname -a', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -370,7 +383,7 @@ export class ContainerService {
 
   /** Host name of the node (`hostname`). */
   async nodeHostname(): Promise<string> {
-    const result = await this.deps.shell.run('hostname', { timeoutMs: NODE_TIMEOUT_MS });
+    const result = await this.shell.run('hostname', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -379,7 +392,7 @@ export class ContainerService {
 
   /** Lists containers and virtual machines on the node (`pct list`, `qm list`). */
   async discover(): Promise<DiscoveredContainer[]> {
-    const result = await this.deps.shell.run(DISCOVER_COMMAND, { timeoutMs: NODE_TIMEOUT_MS });
+    const result = await this.shell.run(DISCOVER_COMMAND, { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }
@@ -1078,7 +1091,7 @@ export class ContainerService {
 
   /** Lists storages on the node that accept backups. */
   async backupStorages(): Promise<BackupStorage[]> {
-    const result = await this.deps.shell.run('pvesm status --content backup', { timeoutMs: NODE_TIMEOUT_MS });
+    const result = await this.shell.run('pvesm status --content backup', { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(describeSshFailure(result));
     }

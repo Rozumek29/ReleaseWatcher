@@ -95,7 +95,8 @@ docker logs releasewatcher 2>&1 | grep setupCode    # one-time code to create yo
 Open <http://localhost:8080>, create the account with the setup code, then:
 
 1. **Settings → Notifications** – add a Discord webhook and/or SMTP server and send a test message.
-2. **Settings → General** – add a GitHub token (recommended) and, for containers, your Proxmox node.
+2. **Settings → General** – add a GitHub token (recommended); for containers add an SSH key and your Proxmox node
+   under **Settings → Connections**.
 3. **Repositories** – add the repositories you want to watch.
 
 > [!NOTE]
@@ -164,10 +165,19 @@ digest mode they send one summary together. **Settings → General → Vulnerabi
 <details>
 <summary><b>Connecting the node</b></summary>
 
-In **Settings → General → Proxmox node** enter the host, SSH user (`root`, or a user allowed to run `pct` through
-passwordless `sudo`) and the **private key**. Only public-key authentication is used (no passwords, no agent, no
-keys with a passphrase). The node's host key is trusted on the first connection and pinned in `known_hosts` next to
-the database. **Test connection** verifies the setup.
+Connections live in **Settings → Connections**:
+
+- **SSH keys** – named private keys, shared by any number of hosts (one key for every machine, or one per machine).
+  **Generate key** creates an Ed25519 key pair on the server and shows its public key to copy into
+  `~/.ssh/authorized_keys`; **Add key** pastes an existing private key. Private keys are encrypted at rest and never
+  returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
+- **Hosts** – **Add Proxmox node** with its address, port, SSH user (`root`, or a user allowed to run `pct`/`qm`
+  through passwordless `sudo`) and one of the keys. **Test connection** runs `pveversion` on it. A host key is trusted
+  on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
+  after the machine was reinstalled.
+
+Only public-key authentication is used (no passwords, no agent). A Proxmox node configured by an older version (in
+Settings or through `PROXMOX_*` variables) is moved into a host with a key named *Proxmox node* on the first start.
 
 Tip: restrict the key on the node to ReleaseWatcher's IP (`from="<ip>"` in `authorized_keys`) and use a key
 dedicated to it.
@@ -325,7 +335,7 @@ keeps the configuration, the account and the data.
 
 | Option | Description |
 | --- | --- |
-| `--node <host>`, `--user`, `--port` | the node to connect to; default to **Settings → Proxmox node** of your local instance |
+| `--node <host>`, `--user`, `--port` | the node to connect to; default to the Proxmox host in **Settings → Connections** of your local instance |
 | `--identity <key file>` | SSH key for the node; default: your normal ssh setup (`~/.ssh`, agent, `~/.ssh/config`). On Windows the system OpenSSH client is used, so keys in the Windows ssh-agent work |
 | `--db` | also copy your local database when the container has none yet |
 | `--force-db` | replace an existing database in the container |
@@ -482,10 +492,10 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `PROXMOX_HOST` | – | Proxmox node. Empty = containers disabled. |
-| `PROXMOX_SSH_PORT` | `22` | SSH port of the node. |
-| `PROXMOX_SSH_USER` | `root` | SSH user; non-root users need passwordless `sudo` for `pct`. |
-| `PROXMOX_SSH_KEY_FILE` | – | Path to the private key (read at start; the key can also be pasted in the UI). |
+| `PROXMOX_HOST` | – | Proxmox node, read **once** on the first start of a database: it becomes a host in **Settings → Connections** (edited there afterwards). |
+| `PROXMOX_SSH_PORT` | `22` | SSH port of that node (first start only). |
+| `PROXMOX_SSH_USER` | `root` | SSH user of that node (first start only); non-root users need passwordless `sudo` for `pct`. |
+| `PROXMOX_SSH_KEY_FILE` | – | Private key of that node (first start only; saved as the key *Proxmox node*). |
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
 | `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default check schedule (5-field cron, `@daily`, …). |
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | Containers checked at the same time (1–10). |
@@ -554,7 +564,17 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `POST` | `/api/proxmox/test` | Connect to the node, returns `pveversion` output |
+| `GET` | `/api/ssh-keys` | Named SSH keys: name, public key, fingerprint, `hostCount` (never the private key) |
+| `POST` | `/api/ssh-keys` | Add a key `{ name, privateKey }` (checked with `ssh-keygen`) |
+| `POST` | `/api/ssh-keys/generate` | Create an Ed25519 key pair `{ name }`; returns the public key |
+| `PUT` | `/api/ssh-keys/:id` | Rename `{ name }` |
+| `DELETE` | `/api/ssh-keys/:id` | Remove a key (`409` while a host uses it) |
+| `GET` | `/api/hosts` | Hosts (`type`: `proxmox` / `server`) with address, port, user, key, `configured`, `targetCount` |
+| `POST` | `/api/hosts` | Add a host `{ type, name?, address, port?, user?, sshKeyId? }` |
+| `GET` / `PUT` / `DELETE` | `/api/hosts/:id` | One host; partial update (omitted = keep); delete (`409` while it has watched machines) |
+| `POST` | `/api/hosts/:id/test` | Connect and return `pveversion` (Proxmox) or `uname -a` |
+| `POST` | `/api/hosts/:id/forget-host-key` | Remove the pinned SSH host key (after a reinstall) |
+| `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages that accept backups |
 | `GET` | `/api/containers` | Added containers with applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |

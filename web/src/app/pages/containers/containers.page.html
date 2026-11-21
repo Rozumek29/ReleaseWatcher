@@ -57,9 +57,9 @@
   <div class="callout">
     <app-icon name="alert" />
     <div>
-      <strong>The Proxmox node is not configured.</strong>
-      Containers cannot be checked or updated until a host and an SSH key are set.
-      <a routerLink="/settings">Configure the node in Settings</a>.
+      <strong>No Proxmox node is configured.</strong>
+      Containers cannot be checked or updated until the node is added with an SSH key.
+      <a routerLink="/settings" [queryParams]="{ tab: 'connections' }">Add it under Settings → Connections</a>.
     </div>
   </div>
 }
@@ -129,7 +129,7 @@
   <div class="card empty">
     <span class="empty-icon"><app-icon name="box" [size]="22" /></span>
     <h2>No containers yet</h2>
-    <p>Configure the Proxmox node in Settings, then add the containers you want to keep up to date.</p>
+    <p>Add the Proxmox node under Settings → Connections, then add the containers you want to keep up to date.</p>
   </div>
 } @else {
   <div class="toolbar">

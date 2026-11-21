@@ -7,12 +7,6 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured,
-    host: configured ? 'pve.lan' : null,
-    hostSource: configured ? 'ui' : null,
-    port: 22,
-    user: 'root',
-    sshKeyConfigured: configured,
-    sshKeySource: configured ? 'ui' : null,
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,

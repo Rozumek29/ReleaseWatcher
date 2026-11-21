@@ -90,6 +90,8 @@ export const NODE_VMID = 0;
 /** An LXC container on the Proxmox node, managed through `pct exec` – or the node itself (`kind: 'node'`). */
 export interface Container {
   id: number;
+  /** Host (Proxmox node) the target is reached through; null = saved before hosts existed and not assigned yet. */
+  hostId: number | null;
   kind: TargetKind;
   /** Proxmox container ID (e.g. 101); {@link NODE_VMID} for the host. */
   vmid: number;
