@@ -4,7 +4,7 @@ import { ApiService, describeError } from '../../core/api.service';
 import { Host, HostType, SshKey } from '../../core/models';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
-import { HostDialog, HostDialogData } from './host.dialog';
+import { HostDialog, HostDialogData } from '../../shared/host.dialog';
 import { SshKeyDialog, SshKeyDialogMode } from './ssh-key.dialog';
 
 /** Settings → Connections: the hosts ReleaseWatcher reaches over SSH and the named keys they log in with. */

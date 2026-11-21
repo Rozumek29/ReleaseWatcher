@@ -5,7 +5,7 @@
         <span class="head-icon"><app-icon name="box" /></span>
         <div class="head-text">
           <h2 id="ct-settings-title">
-            {{ c.kind === 'node' ? 'Host settings' : c.kind === 'vm' ? 'Virtual machine settings' : 'Container settings' }}
+            {{ c.kind === 'node' ? 'Host settings' : c.kind === 'server' ? 'Server settings' : c.kind === 'vm' ? 'Virtual machine settings' : 'Container settings' }}
           </h2>
           <p class="mono">{{ label(c) }}</p>
         </div>
@@ -33,6 +33,13 @@
               The host is checked with <code>apt list --upgradable</code> and upgraded with
               <code>apt-get dist-upgrade</code> (required for Proxmox VE). There is no backup before host upgrades,
               and the host is never rebooted automatically – the Containers page offers a restart when one is needed.
+            </p>
+          } @else if (c.kind === 'server') {
+            <p class="group-hint">
+              Commands run directly on the server over SSH ({{ c.hostName }} – address and key under Settings →
+              Connections). apt is checked with <code>apt list --upgradable</code> and upgraded with
+              <code>apt-get upgrade</code>, without a backup. The server is never rebooted automatically – a restart is
+              offered when one is needed.
             </p>
           } @else {
             @if (c.kind === 'vm') {
@@ -211,8 +218,13 @@
               Applications
             </legend>
             <p class="group-hint">
-              Commands run inside the container (<code>pct exec … -- sh -lc</code>). The version command prints the
-              installed version (first line), e.g. <code>cat /opt/vaultwarden_version.txt</code>.
+              @if (c.kind === 'server') {
+                Commands run on the server (<code>sh -lc</code> over SSH).
+              } @else {
+                Commands run inside the container (<code>pct exec … -- sh -lc</code>).
+              }
+              The version command prints the installed version (first line), e.g.
+              <code>cat /opt/vaultwarden_version.txt</code>.
             </p>
 
             @if (apps().length > 0) {

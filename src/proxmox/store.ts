@@ -224,6 +224,22 @@ export class ContainerStore {
     return this.get(Number(result.lastInsertRowid))!;
   }
 
+  /** The target of the server `hostId` (a server host has exactly one). */
+  getServer(hostId: number): Container | null {
+    const row = this.db
+      .query<ContainerRow, [number]>("SELECT * FROM containers WHERE host_id = ? AND kind = 'server'")
+      .get(hostId);
+    return row ? this.toContainer(row) : null;
+  }
+
+  /** Adds the target of the server `hostId` (apt and applications, commands run directly on it). */
+  addServer(hostId: number, name: string): Container {
+    const result = this.db
+      .query("INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, 'server', ?, ?, ?)")
+      .run(hostId, NODE_VMID, name, new Date().toISOString());
+    return this.get(Number(result.lastInsertRowid))!;
+  }
+
   /** Adds a container or virtual machine of the node `hostId`. */
   add(hostId: number, vmid: number, name: string, kind: GuestKind = 'lxc'): Container {
     const result = this.db

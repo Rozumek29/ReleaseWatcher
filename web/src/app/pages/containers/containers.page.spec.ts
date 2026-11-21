@@ -153,6 +153,48 @@ describe('ContainersPage', () => {
     await settle(fixture);
   });
 
+  it('works with servers only – without a Proxmox node', async () => {
+    const server = container({
+      id: 7,
+      kind: 'server',
+      vmid: 0,
+      name: 'Hetzner VPS',
+      hostId: 3,
+      hostName: 'Hetzner VPS',
+      apps: [],
+      restartReasons: ['Kernel 6.12.57 is installed, 6.12.48 is running'],
+    });
+    const { fixture, el } = await create([server], false);
+    expect(el.querySelector('.callout')).toBeNull();
+    expect(el.querySelector('.ct-item')?.textContent).toContain('Server');
+    expect(el.querySelector('.ct-item')?.textContent).toContain('Hetzner VPS');
+    const buttons = [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')];
+    expect(buttons.find((b) => b.textContent?.includes('Check all'))!.disabled).toBe(false);
+    expect(buttons.find((b) => b.textContent?.includes('Add container'))!.disabled).toBe(true);
+
+    await select(fixture, el, 'Hetzner VPS');
+    expect(el.querySelector('.title-line')?.textContent).toContain('Server');
+    const restart = [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Restart server'))!;
+    expect(restart.disabled).toBe(false);
+
+    buttons.find((b) => b.textContent?.includes('Add server'))!.click();
+    await settle(fixture);
+    http.expectOne('/api/ssh-keys').flush([]);
+    await settle(fixture);
+    expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add server');
+  });
+
+  it('disables the actions of a target whose host has no SSH key', async () => {
+    const { fixture, el } = await create([container({ configured: false })]);
+    await select(fixture, el, 'vaultwarden');
+    const check = [...el.querySelectorAll<HTMLButtonElement>('.row-head button, .actions button')].find(
+      (b) => b.textContent?.trim() === 'Check',
+    );
+    expect(check?.disabled).toBe(true);
+    const all = [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')];
+    expect(all.find((b) => b.textContent?.includes('Check all'))!.disabled).toBe(true);
+  });
+
   it('shows a hint linking to Settings when the node is not configured', async () => {
     const { el } = await create([], false);
     expect(el.querySelector('.callout')?.textContent).toContain('No Proxmox node is configured');
@@ -439,7 +481,7 @@ describe('ContainersPage', () => {
   it('adds a container picked from the node', async () => {
     const { fixture, el } = await create([]);
 
-    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
     http.expectOne('/api/proxmox/containers').flush([
       { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: true },
       { kind: 'lxc', vmid: 102, status: 'running', name: 'jellyfin', added: false },
@@ -465,7 +507,7 @@ describe('ContainersPage', () => {
   it('adds a virtual machine with a hint about the guest agent and labels it as a VM', async () => {
     const { fixture, el } = await create([]);
 
-    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
     http.expectOne('/api/proxmox/containers').flush([{ kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false }]);
     await settle(fixture);
 
@@ -486,7 +528,7 @@ describe('ContainersPage', () => {
   it('adds all containers of the node at once', async () => {
     const { fixture, el } = await create([]);
 
-    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
     http.expectOne('/api/proxmox/containers').flush([
       { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: false },
       { kind: 'lxc', vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
@@ -534,7 +576,7 @@ describe('ContainersPage', () => {
   it('adds the Proxmox host and upgrades it without a backup', async () => {
     const { fixture, el } = await create([container()]);
 
-    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add'))!.click();
+    [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
     http.expectOne('/api/proxmox/containers').flush([{ vmid: 101, status: 'running', name: 'vaultwarden', added: true }]);
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('.node-row button')!.click();

@@ -130,6 +130,9 @@ export interface AppDeps {
   homeAssistantFetch?: (input: string, init?: RequestInit) => Promise<Response>;
   /** Pause between polls of Home Assistant during updates (tests use 0). */
   homeAssistantPollMs?: number;
+  /** Wait after scheduling a machine reboot before polling it again, and the polling interval (tests use 0). */
+  machineRestartWaitMs?: number;
+  machinePollMs?: number;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -499,6 +502,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.fetchAppScript === undefined ? {} : { fetchAppScript: deps.fetchAppScript }),
     ...(deps.homeAssistantFetch === undefined ? {} : { homeAssistantFetch: deps.homeAssistantFetch }),
     ...(deps.homeAssistantPollMs === undefined ? {} : { homeAssistantPollMs: deps.homeAssistantPollMs }),
+    ...(deps.machineRestartWaitMs === undefined ? {} : { machineRestartWaitMs: deps.machineRestartWaitMs }),
+    ...(deps.machinePollMs === undefined ? {} : { machinePollMs: deps.machinePollMs }),
   });
   const scheduler = new ContainerScheduler({
     store: containerStore,
@@ -902,6 +907,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           scheduler,
           updater,
           backupDefaults: () => ({ storage: settings.current.backupStorage, enabled: settings.current.backupBeforeUpdate }),
+          hostName: (hostId) => hostStore.getHost(hostId)?.name ?? null,
+          // A server's host exists only for its one target: removing the server removes the connection too.
+          onTargetDeleted: (container) => {
+            if (container.kind === 'server' && container.hostId !== null) {
+              hostStore.deleteHost(container.hostId);
+              shells.remove(container.hostId);
+            }
+          },
         }),
         ...hostRoutes({
           hosts: hostStore,
@@ -914,6 +927,27 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             if (host.type === 'proxmox' && hostStore.firstProxmoxHost()?.id === host.id) {
               hostStore.adoptUnassignedTargets(host.id);
             }
+            // A server is watched as soon as it is added (checked right away when it has a key).
+            if (host.type === 'server') {
+              const target = containerStore.addServer(host.id, host.name);
+              if (containers.shellFor(target).isConfigured) containers.startCheck(target, 'manual');
+            }
+          },
+          onHostUpdated: (host, previous) => {
+            const target = host.type === 'server' ? containerStore.getServer(host.id) : null;
+            if (target && target.name === previous.name && host.name !== previous.name) {
+              target.name = host.name;
+              containerStore.save(target);
+            }
+          },
+          beforeDeleteHost: (host) => {
+            const target = host.type === 'server' ? containerStore.getServer(host.id) : null;
+            if (!target) return null;
+            if (containers.isBusy(target.id) || updater.isQueued(target.id)) {
+              return `A task is running on ${host.name} – wait for it to finish.`;
+            }
+            containerStore.delete(target.id);
+            return null;
           },
         }),
 

@@ -76,10 +76,23 @@ export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities
     updateAll: false,
     restart: 'machine',
   },
+  server: {
+    backup: null,
+    power: false,
+    aptOptional: true,
+    updateResources: false,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
+    restart: 'machine',
+  },
 };
 
 export const container = (overrides: Partial<Container> = {}): Container => ({
   id: 1,
+  hostId: 1,
+  hostName: 'pve',
+  configured: true,
   kind: 'lxc',
   capabilities: CAPABILITIES[overrides.kind ?? 'lxc'],
   vmid: 101,

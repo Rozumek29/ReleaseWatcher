@@ -7,11 +7,16 @@
         <h2 id="hosts-title">Hosts</h2>
         <p>Machines ReleaseWatcher connects to over SSH.</p>
       </div>
-      @if (!hasProxmoxHost()) {
-        <button type="button" class="btn btn-sm head-action" (click)="addHost('proxmox')" [disabled]="hosts() === null">
-          <app-icon name="plus" [size]="14" /> Add Proxmox node
+      <div class="head-actions">
+        <button type="button" class="btn btn-sm btn-secondary" (click)="addHost('server')" [disabled]="hosts() === null">
+          <app-icon name="plus" [size]="14" /> Add server
         </button>
-      }
+        @if (!hasProxmoxHost()) {
+          <button type="button" class="btn btn-sm" (click)="addHost('proxmox')" [disabled]="hosts() === null">
+            <app-icon name="plus" [size]="14" /> Add Proxmox node
+          </button>
+        }
+      </div>
     </div>
 
     <div class="section-body">
@@ -77,8 +82,8 @@
           <div class="empty-row">
             <app-icon name="server" [size]="20" />
             <p>
-              No hosts yet. Add your Proxmox node to check and update its containers – first add or generate the SSH key
-              it accepts below.
+              No hosts yet. Add your Proxmox node to check and update its containers, or a server to watch its apt
+              packages and applications – first add or generate the SSH key it accepts below.
             </p>
           </div>
         }
@@ -166,5 +171,5 @@
   </section>
 </div>
 
-<app-host-dialog [data]="editingHost()" [keys]="keys() ?? []" (saved)="hostSaved()" (closed)="editingHost.set(null)" />
+<app-host-dialog [data]="editingHost()" (saved)="hostSaved()" (closed)="editingHost.set(null)" />
 <app-ssh-key-dialog [mode]="keyDialog()" (saved)="keySaved()" (closed)="keyDialog.set(null)" />

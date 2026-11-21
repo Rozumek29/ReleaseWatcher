@@ -11,10 +11,10 @@ import {
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
-import { ApiService, describeError, fieldErrors } from '../../core/api.service';
-import { Host, HostInput, HostType, SshKey } from '../../core/models';
-import { BackdropClose } from '../../shared/backdrop-close';
-import { Icon } from '../../shared/icon';
+import { ApiService, describeError, fieldErrors } from '../core/api.service';
+import { Host, HostInput, HostType, SshKey } from '../core/models';
+import { BackdropClose } from './backdrop-close';
+import { Icon } from './icon';
 
 /** What the dialog edits: a new host of `type` (host null) or an existing host. */
 export interface HostDialogData {
@@ -22,7 +22,10 @@ export interface HostDialogData {
   host: Host | null;
 }
 
-/** Adds or edits a host: address, login user and the SSH key it accepts. */
+/**
+ * Adds or edits a host: address, login user and the SSH key it accepts. Used by Settings → Connections and by the
+ * Containers page ("Add server"); it loads the saved keys itself when it opens.
+ */
 @Component({
   selector: 'app-host-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -35,8 +38,6 @@ export class HostDialog {
 
   /** Host to add or edit; null closes the dialog. */
   readonly data = input<HostDialogData | null>(null);
-  /** Saved keys to choose from. */
-  readonly keys = input<SshKey[]>([]);
   readonly saved = output<Host>();
   readonly closed = output<void>();
 
@@ -48,6 +49,8 @@ export class HostDialog {
   protected user = 'root';
   protected sshKeyId: number | null = null;
 
+  /** Saved keys to choose from (null while loading). */
+  protected readonly keys = signal<SshKey[] | null>(null);
   protected readonly saving = signal(false);
   protected readonly errors = signal<Record<string, string>>({});
   protected readonly saveError = signal<string | null>(null);
@@ -62,8 +65,8 @@ export class HostDialog {
         this.address = host?.address ?? '';
         this.port = host?.port ?? 22;
         this.user = host?.user ?? 'root';
-        // A new host starts with the only key, if there is exactly one.
-        this.sshKeyId = host ? host.sshKeyId : this.keys().length === 1 ? this.keys()[0]!.id : null;
+        this.sshKeyId = host?.sshKeyId ?? null;
+        void this.loadKeys(host === null);
         this.errors.set({});
         this.saveError.set(null);
         if (!dialog.open) {
@@ -73,6 +76,21 @@ export class HostDialog {
         dialog.close();
       }
     });
+  }
+
+  /** Loads the keys; a new host starts with the only key, if there is exactly one. */
+  private async loadKeys(preselect: boolean): Promise<void> {
+    this.keys.set(null);
+    try {
+      const keys = await firstValueFrom(this.api.getSshKeys());
+      if (preselect && keys.length === 1 && this.sshKeyId === null) {
+        this.sshKeyId = keys[0]!.id;
+      }
+      this.keys.set(keys);
+    } catch (error) {
+      this.keys.set([]);
+      this.saveError.set(describeError(error));
+    }
   }
 
   protected title(data: HostDialogData): string {

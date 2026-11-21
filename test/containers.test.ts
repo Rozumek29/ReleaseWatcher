@@ -66,6 +66,8 @@ describe('containers API', () => {
       promptIdleMs: 40,
       homeAssistantFetch: (url, init) => haFetch(url, init),
       homeAssistantPollMs: 0,
+      machineRestartWaitMs: 0,
+      machinePollMs: 0,
       auth: { requireAuth: false },
     });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
@@ -1173,14 +1175,19 @@ describe('containers API', () => {
     await app.containers.wait(container.id);
 
     shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
+    shell.on(/^true$/, { output: '' });
     shell.commands.length = 0;
     assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 202);
     const run = await app.containers.wait(node.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Restart scheduled/);
-    assert.deepEqual(shell.commands, [
+    // Then it waits until the host answers again and checks it.
+    assert.match(run?.output ?? '', /The Proxmox host is back[\s\S]*Checking the Proxmox host again/);
+    assert.deepEqual(shell.commands.slice(0, 2), [
       'systemd-run --quiet --unit=releasewatcher-host-restart --on-active=15 --timer-property=AccuracySec=1s systemctl reboot',
+      'true',
     ]);
+    assert.ok(shell.commands.length > 2); // + the check
   });
 
   it('refuses container actions until the node is configured', async () => {

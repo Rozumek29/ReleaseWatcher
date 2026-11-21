@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
     <h1>Containers</h1>
-    <p>LXC containers on your Proxmox node: pending apt packages and application updates.</p>
+    <p>Proxmox guests and servers: pending apt packages and application updates.</p>
   </div>
   <div class="header-actions">
     @if (picked() !== null) {
@@ -31,7 +31,7 @@
         <app-icon name="arrowUp" [size]="14" /> Update {{ pickedUpdatable().length }}
       </button>
     } @else {
-      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !configured() || containers().length === 0">
+      <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || !anyConfigured()">
         <app-icon name="refresh" [size]="16" [class.spin]="checkingAll()" />
         Check all
       </button>
@@ -39,11 +39,15 @@
         type="button"
         class="btn btn-secondary"
         (click)="startPicking()"
-        [disabled]="updatingAll() || !configured() || updatable().length === 0"
+        [disabled]="updatingAll() || !anyConfigured() || updatable().length === 0"
         [title]="updatable().length === 0 ? 'No container has pending updates' : 'Choose containers for apt upgrade and application updates (not the Proxmox host)'"
       >
         <app-icon [name]="updatingAll() ? 'refresh' : 'arrowUp'" [size]="16" [class.spin]="updatingAll()" />
         {{ updatingAll() ? 'Updating…' : 'Update' }}
+      </button>
+      <button type="button" class="btn btn-secondary" (click)="addingServer.set({ type: 'server', host: null })">
+        <app-icon name="plus" [size]="16" />
+        Add server
       </button>
       <button type="button" class="btn" (click)="openAdd()" [disabled]="!configured()">
         <app-icon name="plus" [size]="16" />
@@ -53,7 +57,7 @@
   </div>
 </header>
 
-@if (!loading() && !configured()) {
+@if (!loading() && !configured() && needsNode()) {
   <div class="callout">
     <app-icon name="alert" />
     <div>
@@ -129,7 +133,10 @@
   <div class="card empty">
     <span class="empty-icon"><app-icon name="box" [size]="22" /></span>
     <h2>No containers yet</h2>
-    <p>Add the Proxmox node under Settings → Connections, then add the containers you want to keep up to date.</p>
+    <p>
+      Add the Proxmox node under Settings → Connections and then its containers, or add a server to watch its apt
+      packages and applications.
+    </p>
   </div>
 } @else {
   <div class="toolbar">
@@ -223,6 +230,8 @@
                       <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Host</span>
                     } @else if (c.kind === 'vm') {
                       <span class="ct-id mono" title="Virtual machine">VM {{ c.vmid }}</span>
+                    } @else if (c.kind === 'server') {
+                      <span class="ct-id ct-host"><app-icon name="server" [size]="12" /> Server</span>
                     } @else {
                       <span class="ct-id mono">{{ c.vmid }}</span>
                     }
@@ -281,6 +290,8 @@
               <div class="title-line">
                 @if (c.kind === 'node') {
                   <span class="badge badge-accent"><app-icon name="server" [size]="12" /> Host</span>
+                } @else if (c.kind === 'server') {
+                  <span class="badge badge-accent" [title]="c.hostName ?? ''"><app-icon name="server" [size]="12" /> Server</span>
                 } @else {
                   <span class="vmid mono">{{ c.vmid }}</span>
                 }
@@ -354,14 +365,14 @@
                     type="button"
                     class="btn btn-sm"
                     (click)="ask('update-' + c.id, c)"
-                    [disabled]="isBusy(c) || !configured()"
+                    [disabled]="isBusy(c) || !c.configured"
                     title="apt upgrade and all application updates of this container, one after another"
                   >
                     <app-icon name="arrowUp" [size]="14" />
                     Update all ({{ pendingCount(c) }})
                   </button>
                 }
-                <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !configured()">
+                <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="isBusy(c) || !c.configured">
                   <app-icon name="refresh" [size]="14" />
                   Check
                 </button>
@@ -414,6 +425,8 @@
                   <span class="confirm-text warn">
                     @if (c.kind === 'node') {
                       Restart the Proxmox host? All its guests stop for a few minutes – ReleaseWatcher too, if it runs there.
+                    } @else if (c.kind === 'server') {
+                      Restart {{ c.name }}? It is unavailable for a few minutes – ReleaseWatcher too, if it runs there.
                     } @else {
                       Restart {{ label(c) }}? Its services are unavailable for a moment.
                     }
@@ -425,10 +438,10 @@
                     type="button"
                     class="btn btn-sm btn-secondary"
                     (click)="confirming.set('restart-' + c.id)"
-                    [disabled]="isBusy(c) || !configured()"
-                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : (c.kind === 'vm' ? 'qm' : 'pct') + ' reboot – clean shutdown and start'"
+                    [disabled]="isBusy(c) || !c.configured"
+                    [title]="c.kind === 'node' ? 'Reboot the Proxmox host' : c.kind === 'server' ? 'Reboot the server (systemctl reboot)' : (c.kind === 'vm' ? 'qm' : 'pct') + ' reboot – clean shutdown and start'"
                   >
-                    <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : 'Restart' }}
+                    <app-icon name="power" [size]="14" /> {{ c.kind === 'node' ? 'Restart host' : c.kind === 'server' ? 'Restart server' : 'Restart' }}
                   </button>
                 }
               </div>
@@ -453,7 +466,7 @@
                     @if (confirming() === 'apt-' + c.id) {
                       <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
                       @if (!c.capabilities.backup) {
-                        <span class="muted small">apt-get dist-upgrade, no backup</span>
+                        <span class="muted small">apt-get {{ c.kind === 'node' ? 'dist-upgrade' : 'upgrade' }}, no backup</span>
                       } @else {
                       <label class="backup-check" [class.disabled]="!backupStorage()">
                       <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!backupStorage()" />
@@ -468,7 +481,7 @@
                     <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
                         <app-icon name="arrowUp" [size]="14" /> Upgrade
                       </button>
                     }
@@ -520,7 +533,7 @@
                       <button type="button" class="btn btn-sm" (click)="updateHomeAssistant(c, null)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm" (click)="ask('ha-' + c.id, c)" [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)" title="Integrations and apps first, Home Assistant Core last">
+                      <button type="button" class="btn btn-sm" (click)="ask('ha-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" title="Integrations and apps first, Home Assistant Core last">
                         <app-icon name="arrowUp" [size]="14" /> Update all
                       </button>
                     }
@@ -563,7 +576,7 @@
                         type="button"
                         class="btn btn-sm"
                         (click)="ask('ha-' + c.id + '-' + u.id, c)"
-                        [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                        [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
                         [title]="u.source === 'entity' ? 'update.install through the Home Assistant API' : 'ha CLI on the Home Assistant OS host'"
                       >
                         <app-icon name="arrowUp" [size]="14" /> Update
@@ -619,7 +632,7 @@
                       class="btn btn-sm"
                       [class.btn-secondary]="!a.updateAvailable"
                       (click)="ask('app-' + c.id + '-' + a.id, c)"
-                      [disabled]="isBusy(c) || !configured() || blockedWhileStopped(c)"
+                      [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
                       [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
                     >
                       <app-icon name="arrowUp" [size]="14" /> Update
@@ -656,3 +669,5 @@
 />
 
 <app-run-log-dialog [target]="runTarget()" (finished)="onRunFinished($event)" (closed)="runTarget.set(null)" />
+
+<app-host-dialog [data]="addingServer()" (saved)="serverAdded($event)" (closed)="addingServer.set(null)" />

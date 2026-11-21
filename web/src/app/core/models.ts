@@ -430,11 +430,16 @@ export interface TargetCapabilities {
 
 export interface Container {
   id: number;
+  /** Host the target is reached through (its Proxmox node, or the server itself); null = not assigned. */
+  hostId: number | null;
+  hostName: string | null;
+  /** Its host has an SSH key, so checks and updates can run. */
+  configured: boolean;
   /**
    * `lxc` = a container, `vm` = a virtual machine (commands through the QEMU guest agent),
-   * `node` = the Proxmox host itself (apt only, vmid 0).
+   * `node` = the Proxmox host itself (apt only, vmid 0), `server` = a plain Linux machine reached over SSH.
    */
-  kind: 'lxc' | 'vm' | 'node';
+  kind: 'lxc' | 'vm' | 'node' | 'server';
   capabilities: TargetCapabilities;
   vmid: number;
   name: string;

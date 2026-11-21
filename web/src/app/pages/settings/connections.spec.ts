@@ -75,6 +75,8 @@ describe('ConnectionsPanel', () => {
     expect(el.textContent).toContain('No hosts yet');
     button('Add Proxmox node').click();
     await settle(fixture);
+    http.expectOne('/api/ssh-keys').flush([key(1)]);
+    await settle(fixture);
     const address = el.querySelector<HTMLInputElement>('#host-address')!;
     address.value = 'pve.lan';
     address.dispatchEvent(new Event('input'));
@@ -96,12 +98,32 @@ describe('ConnectionsPanel', () => {
     const { http, fixture, el, button } = await setup([], []);
     button('Add Proxmox node').click();
     await settle(fixture);
+    http.expectOne('/api/ssh-keys').flush([]);
+    await settle(fixture);
+    expect(el.querySelector('app-host-dialog')?.textContent).toContain('No SSH keys yet');
     el.querySelector<HTMLFormElement>('app-host-dialog form')!.dispatchEvent(new Event('submit'));
     http
       .expectOne('/api/hosts')
       .flush({ status: 400, errors: { address: ['Enter a host name or IP address.'] } }, { status: 400, statusText: 'Bad Request' });
     await settle(fixture);
     expect(el.querySelector('app-host-dialog .error')?.textContent).toContain('Enter a host name or IP address.');
+  });
+
+  it('adds a server', async () => {
+    const { http, fixture, el, button } = await setup([host(1)], [key(1, { hostCount: 1 })]);
+    button('Add server').click();
+    await settle(fixture);
+    http.expectOne('/api/ssh-keys').flush([key(1, { hostCount: 1 })]);
+    await settle(fixture);
+    expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add server');
+    const address = el.querySelector<HTMLInputElement>('#host-address')!;
+    address.value = 'vps.example.com';
+    address.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    el.querySelector<HTMLFormElement>('app-host-dialog form')!.dispatchEvent(new Event('submit'));
+    const add = http.expectOne('/api/hosts');
+    expect(add.request.body.type).toBe('server');
+    expect(add.request.body.sshKeyId).toBe(1);
   });
 
   it('generates a key and shows its public key', async () => {

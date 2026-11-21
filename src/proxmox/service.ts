@@ -33,7 +33,6 @@ import {
   DISCOVER_COMMAND,
   parsePctStatus,
   parsePvesmStatus,
-  NODE_APT_UPGRADE_SCRIPT,
   NODE_RESTART_COMMAND,
   NODE_RESTART_DELAY_SECONDS,
   parseGuestExecResult,
@@ -42,6 +41,7 @@ import {
   restartCheckScript,
   restartGuestCommand,
   targetLabel,
+  targetTitle,
   SHUTDOWN_TIMEOUT_SECONDS,
   shutdownGuestCommand,
   startGuestCommand,
@@ -51,6 +51,8 @@ import {
   guestCli,
   guestOf,
   guestExec,
+  machineAptUpgradeScript,
+  machineExec,
   hasHomeAssistantApi,
   homeAssistantInstallContext,
   vzdumpCommand,
@@ -297,7 +299,16 @@ export interface ContainerServiceDeps {
   homeAssistantFetch?: FetchLike;
   /** Pause between polls of Home Assistant while an update installs or Core restarts (default 5 s). */
   homeAssistantPollMs?: number;
+  /**
+   * After a machine (server, Proxmox node) was told to reboot: wait this long before trying to reach it again
+   * (default: the scheduled delay plus a minute), then poll every `machinePollMs` (default 10 s).
+   */
+  machineRestartWaitMs?: number;
+  machinePollMs?: number;
 }
+
+/** How long a rebooting machine may take to answer over SSH again. */
+const MACHINE_BACK_TIMEOUT_MS = 15 * 60_000;
 
 /** Extra time to wait for a detached command after its own timeout (systemd stops it at the timeout). */
 const FOLLOW_GRACE_MS = 60_000;
@@ -316,6 +327,8 @@ export class ContainerService {
   private readonly resourcePollMs: number;
   private readonly promptIdleMs: number;
   private readonly homeAssistantPollMs: number;
+  private readonly machineRestartWaitMs: number;
+  private readonly machinePollMs: number;
   /** Running task per container ID – at most one check/update per container at a time. */
   private readonly active = new Map<number, Promise<Run>>();
   /** Most recent task per container (kept after it finished, for {@link wait}). */
@@ -332,6 +345,8 @@ export class ContainerService {
     this.resourcePollMs = deps.resourcePollMs ?? 2000;
     this.promptIdleMs = deps.promptIdleMs ?? 45_000;
     this.homeAssistantPollMs = deps.homeAssistantPollMs ?? 5000;
+    this.machineRestartWaitMs = deps.machineRestartWaitMs ?? (NODE_RESTART_DELAY_SECONDS + 60) * 1000;
+    this.machinePollMs = deps.machinePollMs ?? 10_000;
   }
 
   /** The Proxmox node the Containers page works with; null = none configured. */
@@ -472,8 +487,9 @@ export class ContainerService {
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
     if (!guestOf(container)) {
       return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
-        log.note(`apt-get update && apt-get dist-upgrade on ${targetLabel(container)} (no backup)`);
-        const result = await this.execDetached(this.shellFor(container), log, 'update', NODE_APT_UPGRADE_SCRIPT, {
+        const upgrade = container.kind === 'node' ? 'dist-upgrade' : 'upgrade';
+        log.note(`apt-get update && apt-get ${upgrade} on ${targetLabel(container)} (no backup)`);
+        const result = await this.execDetached(this.shellFor(container), log, 'update', machineAptUpgradeScript(container.kind), {
           timeoutMs: APT_UPGRADE_TIMEOUT_MS,
           startedContainer: false,
         });
@@ -684,8 +700,12 @@ export class ContainerService {
           log.note(`Restart failed – ${describeSshFailure(result)}`);
           return { ok: false, exitCode: result.exitCode };
         }
-        log.note('Restart scheduled – the host and its guests are unavailable for a few minutes; the next check confirms it');
-        return { ok: true, exitCode: 0 };
+        log.note(
+          container.kind === 'node'
+            ? 'Restart scheduled – the host and its guests are unavailable for a few minutes'
+            : `Restart scheduled – ${targetLabel(container)} is unavailable for a few minutes`,
+        );
+        return this.waitUntilBack(container, log);
       });
     }
     return this.start(container, null, 'restart', 'manual', async (log) => {
@@ -699,9 +719,36 @@ export class ContainerService {
     });
   }
 
-  /** True while any check or update runs (the host must not be restarted under it). */
-  hasActiveTasks(): boolean {
-    return this.active.size > 0;
+  /** True while a check or update runs on a target reached through `hostId` (the machine must not reboot under it). */
+  hasActiveTasksOn(hostId: number | null): boolean {
+    for (const id of this.active.keys()) {
+      if (this.deps.containers.get(id)?.hostId === hostId) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Waits until a machine told to reboot answers over SSH again and checks it. When ReleaseWatcher itself runs on it,
+   * this process stops first – the run is then marked as interrupted on the next start.
+   */
+  private async waitUntilBack(container: Container, log: RunLog): Promise<TaskResult> {
+    await Bun.sleep(this.machineRestartWaitMs);
+    log.note(`Waiting for ${targetLabel(container)} to answer again…`);
+    const shell = this.shellFor(container);
+    const deadline = Date.now() + MACHINE_BACK_TIMEOUT_MS;
+    for (;;) {
+      const result = await shell.run('true', { timeoutMs: NODE_TIMEOUT_MS }).catch(() => null);
+      if (result?.exitCode === 0) break;
+      if (Date.now() >= deadline) {
+        log.note(`${targetTitle(container)} did not answer within ${MACHINE_BACK_TIMEOUT_MS / 60_000} minutes – check it by hand`);
+        return { ok: false, exitCode: null };
+      }
+      await Bun.sleep(this.machinePollMs);
+    }
+    log.note(`${targetTitle(container)} is back`);
+    log.note(`Checking ${targetLabel(container)} again`);
+    await this.check(container, log, false);
+    return { ok: true, exitCode: 0 };
   }
 
   /** Logs the result of a container restart and checks it again (clears the restart reasons). */
@@ -870,7 +917,11 @@ export class ContainerService {
     script: string,
     options: { timeoutMs: number; tty?: boolean; startedContainer: boolean },
   ): Promise<CommandResult> {
-    const guest = requireGuest(container);
+    const guest = guestOf(container);
+    if (!guest) {
+      // A server: the command runs directly on the machine (a pseudo-terminal works there).
+      return this.execDetached(this.shellFor(container), log, 'update', machineExec(script), { ...options, guest: false });
+    }
     const timeoutSeconds = Math.ceil(options.timeoutMs / 1000);
     if (guest.kind === 'vm') {
       log.note('Virtual machines run commands through the QEMU guest agent – the output appears when the command has finished');
@@ -1104,6 +1155,9 @@ export class ContainerService {
     log: RunLog,
     task: (startedContainer: boolean) => Promise<TaskResult>,
   ): Promise<TaskResult> {
+    if (!capabilities(container.kind).power) {
+      return task(false);
+    }
     const started = await this.prepare(container, log, true);
     try {
       return await task(started);

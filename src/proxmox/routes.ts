@@ -45,6 +45,10 @@ export interface ContainerRoutesDeps {
   updater: ContainerUpdater;
   /** Global backup settings: storage for backups and whether to back up before updates by default. */
   backupDefaults: () => { storage: string | null; enabled: boolean };
+  /** Name of a host (shown next to its targets); null when unknown. */
+  hostName: (hostId: number) => string | null;
+  /** Called after a target was removed (a server's host goes with it). */
+  onTargetDeleted?: (container: Container) => void;
 }
 
 const COMMAND_MAX_LENGTH = 4000;
@@ -211,6 +215,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     const appDtos = apps.map(appDto);
     return {
       id: c.id,
+      hostId: c.hostId,
+      hostName: c.hostId === null ? null : deps.hostName(c.hostId),
+      /** Its host has an SSH key, so checks and updates can run. */
+      configured: service.shellFor(c).isConfigured,
       kind: c.kind,
       /** What can be done with this target (the UI shows only the matching settings and actions). */
       capabilities: capabilities(c.kind),
@@ -461,11 +469,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/check-all': {
       POST: () =>
         guard(() => {
-          if (!service.shell.isConfigured) {
+          const queued = containers.listEnabled().filter((c) => service.shellFor(c).isConfigured).length;
+          if (queued === 0 && containers.listEnabled().length > 0) {
             throw new ShellNotConfiguredError();
           }
           void scheduler.checkAll();
-          return Response.json({ queued: containers.listEnabled().length }, { status: 202 });
+          return Response.json({ queued }, { status: 202 });
         }),
     },
     // Updates every container with pending updates (or those in `ids`: apt, then applications), one after another.
@@ -474,13 +483,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       POST: (req: Request) =>
         guard(async () => {
           const options = await readUpdateOptions<{ backup: boolean | null; ids: number[] | null }>(req, updateAllSchema);
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
-          }
           const ids = options.ids ? new Set(options.ids) : null;
           const plan = updater
             .plan()
-            .filter(({ container }) => (ids === null || ids.has(container.id)) && !updater.isQueued(container.id));
+            .filter(
+              ({ container }) =>
+                (ids === null || ids.has(container.id)) &&
+                !updater.isQueued(container.id) &&
+                service.shellFor(container).isConfigured,
+            );
           if (plan.length === 0 && updater.isRunning) {
             throw new UpdateAllRunningError();
           }
@@ -576,6 +587,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return problem(409, 'A task is running in this container – wait for it to finish.');
         }
         containers.delete(container.id);
+        deps.onTargetDeleted?.(container);
         return new Response(null, { status: 204 });
       },
     },
@@ -625,7 +637,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             : accepted(service.startHomeAssistantUpdate(container, options.ids ?? null, backup));
         }),
     },
-    // Restarts a running container (`pct reboot`) or schedules a restart of the Proxmox host.
+    // Restarts a running container (`pct reboot`) or schedules a restart of a machine (the Proxmox host, a server).
     '/api/containers/:id/restart': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/restart'>) =>
         guard(() => {
@@ -640,7 +652,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             return problem(409, `Updates of ${targetLabel(container)} are running – restart it when they have finished.`);
           }
           if (capabilities(container.kind).restart === 'machine') {
-            if (service.hasActiveTasks() || containers.list().some((c) => updater.isQueued(c.id))) {
+            // Everything reached through this machine stops with it (a node's guests too).
+            const onHost = containers.list().filter((c) => c.hostId === container.hostId);
+            if (service.hasActiveTasksOn(container.hostId) || onHost.some((c) => updater.isQueued(c.id))) {
               return problem(409, `Checks or updates are running – restart ${targetLabel(container)} when they have finished.`);
             }
           } else if (container.status === 'stopped') {

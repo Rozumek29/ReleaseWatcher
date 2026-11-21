@@ -58,11 +58,11 @@ export const notificationFullName = (n: Pick<ReleaseNotification, 'owner' | 'rep
 export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string =>
   `https://github.com/${n.owner}/${n.repository}`;
 
-/** "CT 105 (nextcloud)", "VM 137 (debian)" or "Proxmox host (pve)". */
+/** "CT 105 (nextcloud)", "VM 137 (debian)", "Proxmox host (pve)" or a server's own name. */
 export const targetName = (n: { vmid: number; targetKind: TargetKind; containerName: string }): string =>
-  `${TARGET_PREFIX[n.targetKind](n.vmid)} (${n.containerName})`;
+  n.targetKind === 'server' ? n.containerName : `${TARGET_PREFIX[n.targetKind](n.vmid)} (${n.containerName})`;
 
-const TARGET_PREFIX: Readonly<Record<TargetKind, (vmid: number) => string>> = {
+const TARGET_PREFIX: Readonly<Record<Exclude<TargetKind, 'server'>, (vmid: number) => string>> = {
   lxc: (vmid) => `CT ${vmid}`,
   vm: (vmid) => `VM ${vmid}`,
   node: () => 'Proxmox host',
