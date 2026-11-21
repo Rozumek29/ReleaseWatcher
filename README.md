@@ -131,7 +131,9 @@ run (installed ≥ release) are not announced, and Discord messages include the 
 Known vulnerabilities are read on their own schedule, `ADVISORY_CHECK_CRON` (default `0 */6 * * *` – every 6 hours),
 and on the first check of a new repository; a manual **Check** always reads them. Runs missed while the app was stopped
 are caught up shortly after a start. All schedules (releases, vulnerabilities, containers) are cron expressions and can
-be changed under **Settings → General → Check schedules**. **Settings → General → Vulnerability sources** switches each source on or off:
+be changed under **Settings → General → Check schedules**. Runs that fall into the same minute are chained in this
+order – releases, then vulnerabilities, then containers – each starting when the previous one has finished, and in
+digest mode they send one summary together. **Settings → General → Vulnerability sources** switches each source on or off:
 
 | Source | What it reads | Setup |
 | --- | --- | --- |
@@ -632,6 +634,7 @@ src/
   version.ts         version parsing/comparison, installed-version reading
   checker.ts         checks repositories, dispatches notifications
   cron-job.ts        runs a task on a cron schedule (release and vulnerability checks; schedule can change at runtime)
+  run-sequencer.ts   chains scheduled runs of the same minute: releases → vulnerabilities → containers
   github.ts          GitHub REST client (ETag aware)
   db.ts              bun:sqlite store with versioned migrations
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars

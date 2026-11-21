@@ -1,5 +1,6 @@
 import { type CronSchedule, parseCron } from '../cron.ts';
 import type { Logger } from '../log.ts';
+import type { Sequence } from '../run-sequencer.ts';
 import type { Container, RunTrigger } from './domain.ts';
 import type { ContainerService } from './service.ts';
 import type { ContainerStore } from './store.ts';
@@ -23,6 +24,7 @@ export class ContainerScheduler {
   private readonly log: Pick<Logger, 'warn' | 'error'>;
   private readonly batch: <T>(task: () => Promise<T>) => Promise<T>;
   private readonly cache = new Map<string, CronSchedule | null>();
+  private readonly sequence: Sequence;
 
   constructor(deps: {
     store: ContainerStore;
@@ -33,6 +35,8 @@ export class ContainerScheduler {
     log: Pick<Logger, 'warn' | 'error'>;
     /** Groups the checks queued together into one run of notifications (digest mode). */
     batch?: <T>(task: () => Promise<T>) => Promise<T>;
+    /** Orders the scheduled checks of a minute after other jobs due in the same minute. */
+    sequence?: Sequence;
   }) {
     this.store = deps.store;
     this.service = deps.service;
@@ -40,6 +44,7 @@ export class ContainerScheduler {
     this.concurrency = deps.concurrency ?? (() => 1);
     this.log = deps.log;
     this.batch = deps.batch ?? ((task) => task());
+    this.sequence = deps.sequence ?? ((_, task) => task());
   }
 
   /** Schedule of a container (null when its expression is invalid). */
@@ -80,7 +85,8 @@ export class ContainerScheduler {
     const due = this.service.shell.isConfigured
       ? this.store.listEnabled().filter((container) => this.scheduleOf(container)?.matches(now))
       : [];
-    return due.length === 0 ? this.idle() : this.queueAll(due.map((c) => c.id), 'schedule');
+    // Nothing due: resolve right away instead of waiting for manual checks (keeps the run sequence moving).
+    return due.length === 0 ? Promise.resolve() : this.queueAll(due.map((c) => c.id), 'schedule');
   }
 
   /** Queues a check of all enabled containers (manual "check all"). Resolves when the queue is empty. */
@@ -157,7 +163,8 @@ export class ContainerScheduler {
     const delay = 60_000 - (Date.now() % 60_000) + 50;
     this.timer = setTimeout(() => {
       this.timer = null;
-      this.tick(new Date()).catch((error: unknown) => this.log.error({ err: error }, 'Container scheduler failed'));
+      const now = new Date();
+      this.sequence(now, () => this.tick(now)).catch((error: unknown) => this.log.error({ err: error }, 'Container scheduler failed'));
       this.arm();
     }, delay);
   }

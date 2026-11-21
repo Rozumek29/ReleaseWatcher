@@ -21,6 +21,7 @@ import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { Notifier } from './notifiers/notifier.ts';
 import type { OsvClient } from './osv.ts';
 import { CronJob } from './cron-job.ts';
+import { RunSequencer } from './run-sequencer.ts';
 import { containerRoutes, containerStatus } from './proxmox/routes.ts';
 import { ContainerScheduler } from './proxmox/scheduler.ts';
 import { ContainerUpdater } from './proxmox/updater.ts';
@@ -345,17 +346,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     advisoryCron: () => deps.settings.current.advisoryCheckCron,
   });
   const { store, source, settings } = deps;
+  // Scheduled runs due in the same minute run one after another, as one digest: releases → vulnerabilities → containers.
+  const sequencer = new RunSequencer({ batch: (task) => dispatcher.batch(task) });
   const releaseJob = new CronJob({
     name: 'releases',
     task: (signal) => checker.checkAll(signal),
     cron: () => settings.current.releaseCheckCron,
     log,
+    sequence: sequencer.slot(1),
   });
   const advisoryJob = new CronJob({
     name: 'vulnerabilities',
     task: (signal) => checker.checkAllAdvisories(signal),
     cron: () => settings.current.advisoryCheckCron,
     log,
+    sequence: sequencer.slot(2),
   });
   settings.onChange(() => {
     releaseJob.reschedule();
@@ -389,6 +394,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     defaultCron: () => settings.current.containerCheckCron,
     concurrency: () => settings.current.containerCheckConcurrency,
     batch: (task) => dispatcher.batch(task),
+    sequence: sequencer.slot(3),
     log,
   });
   const updater = new ContainerUpdater({ store: containerStore, service: containers, log });

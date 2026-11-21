@@ -98,6 +98,35 @@ describe('CronJob', () => {
     assert.equal(job.status.nextRunAt, at(12, 5).toISOString());
   });
 
+  it('passes scheduled runs (not manual ones) through the sequence', async () => {
+    const sequenced: string[] = [];
+    let runs = 0;
+    let scheduledRan!: () => void;
+    const done = new Promise<void>((resolve) => (scheduledRan = resolve));
+    const job = new CronJob({
+      name: 'test',
+      task: async () => {
+        if (++runs === 2) {
+          scheduledRan();
+        }
+      },
+      cron: () => '* * * * *',
+      log: silentLog,
+      // 30 ms before the next minute, so the scheduled run comes right away.
+      now: () => new Date(2026, 10, 20, 12, 0, 59, 970),
+      sequence: (scheduledAt, task) => {
+        sequenced.push(scheduledAt.toISOString());
+        return task();
+      },
+    });
+    jobs.push(job);
+    await job.runNow();
+    assert.deepEqual(sequenced, []);
+    job.start();
+    await done;
+    assert.deepEqual(sequenced, [at(12, 1).toISOString()]);
+  });
+
   it('stops: no next run and the running task is awaited', async () => {
     let finished = false;
     const job = create({

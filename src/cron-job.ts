@@ -1,5 +1,6 @@
 import { type CronSchedule, parseCron } from './cron.ts';
 import type { Logger } from './log.ts';
+import type { Sequence } from './run-sequencer.ts';
 
 export interface CronJobStatus {
   /** Cron expression the job runs on (as configured, also when invalid). */
@@ -27,6 +28,7 @@ export class CronJob {
   private readonly log: Pick<Logger, 'warn' | 'error'>;
   private readonly name: string;
   private readonly now: () => Date;
+  private readonly sequence: Sequence | null;
   private schedule: CronSchedule | null = null;
   private lastRunStartedAt: Date | null = null;
   private lastRunFinishedAt: Date | null = null;
@@ -38,12 +40,15 @@ export class CronJob {
     cron: () => string;
     log: Pick<Logger, 'warn' | 'error'>;
     now?: () => Date;
+    /** Orders scheduled runs against other jobs due in the same minute (manual and startup runs skip it). */
+    sequence?: Sequence;
   }) {
     this.name = deps.name;
     this.task = deps.task;
     this.cron = deps.cron;
     this.log = deps.log;
     this.now = deps.now ?? (() => new Date());
+    this.sequence = deps.sequence ?? null;
   }
 
   get status(): CronJobStatus {
@@ -122,23 +127,28 @@ export class CronJob {
   private wait(): void {
     const delay = (this.nextRunAt?.getTime() ?? 0) - this.now().getTime();
     this.timer = setTimeout(
-      () => (delay > MAX_TIMER_MS ? this.wait() : this.run()),
+      () => (delay > MAX_TIMER_MS ? this.wait() : this.run(this.nextRunAt ?? undefined)),
       Math.max(0, Math.min(delay, MAX_TIMER_MS)),
     );
   }
 
-  private run(): void {
+  /** Runs the task; a scheduled run (`scheduledAt`) goes through the sequence when there is one. */
+  private run(scheduledAt?: Date): void {
     this.clearTimer();
     this.nextRunAt = null;
-    this.lastRunStartedAt = this.now();
-    this.running = this.task(this.abort.signal)
+    const execute = () => {
+      this.lastRunStartedAt = this.now();
+      return this.task(this.abort.signal);
+    };
+    const started = scheduledAt && this.sequence ? this.sequence(scheduledAt, execute) : execute();
+    this.running = started
       .catch((error: unknown) => this.log.error({ err: error, job: this.name }, 'Scheduled job failed'))
       .finally(() => {
         this.running = null;
         this.lastRunFinishedAt = this.now();
         // A timer that fired a little early must not plan the same minute again.
-        const started = this.lastRunStartedAt?.getTime() ?? 0;
-        this.arm(new Date(Math.max(this.lastRunFinishedAt.getTime(), started + 1000)));
+        const planned = (scheduledAt ?? this.lastRunStartedAt)?.getTime() ?? 0;
+        this.arm(new Date(Math.max(this.lastRunFinishedAt.getTime(), planned + 1000)));
       });
   }
 
