@@ -200,8 +200,8 @@
                       type="checkbox"
                       [checked]="picked.has(c.id)"
                       (change)="togglePicked(c, $any($event.target).checked)"
+                      [attr.aria-label]="'Update ' + label(c)"
                     />
-                    <span class="visually-hidden">Update {{ label(c) }}</span>
                   </label>
                 } @else {
                   <span class="pick" aria-hidden="true"></span>
