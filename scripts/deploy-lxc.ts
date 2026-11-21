@@ -52,7 +52,8 @@ if (!/^\d+$/.test(vmid)) {
   fail(`--ct must be a number, got "${vmid}".`);
 }
 
-// Defaults come from the settings saved in the local (development) database.
+// Defaults come from the first Proxmox host of the local (development) database – or, in a database of an older
+// version, from its former Proxmox settings.
 const databasePath = resolve(root, values.database ?? process.env['DATABASE_PATH'] ?? 'releasewatcher.db');
 const saved: Record<string, string> = {};
 if (existsSync(databasePath)) {
@@ -61,14 +62,24 @@ if (existsSync(databasePath)) {
     for (const row of db.query<{ key: string; value: string }, []>('SELECT key, value FROM settings').all()) {
       saved[row.key] = row.value;
     }
+    const host = db
+      .query<{ address: string; port: number; user: string }, []>(
+        "SELECT address, port, user FROM hosts WHERE type = 'proxmox' ORDER BY id LIMIT 1",
+      )
+      .get();
+    if (host) {
+      saved['proxmoxHost'] = host.address;
+      saved['proxmoxPort'] = String(host.port);
+      saved['proxmoxUser'] = host.user;
+    }
   } catch {
-    // no settings table yet
+    // no settings / hosts table yet
   } finally {
     db.close();
   }
 }
 const node = values.node ?? saved['proxmoxHost'] ?? process.env['PROXMOX_HOST'] ?? fail(
-  'Unknown Proxmox node – pass --node <host> (or save it in Settings → Proxmox node of your local instance).',
+  'Unknown Proxmox node – pass --node <host> (or add it under Settings → Connections of your local instance).',
 );
 const user = values.user ?? saved['proxmoxUser'] ?? 'root';
 const port = values.port ?? saved['proxmoxPort'] ?? '22';

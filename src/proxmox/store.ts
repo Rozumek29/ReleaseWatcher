@@ -19,6 +19,7 @@ import {
 
 interface ContainerRow {
   id: number;
+  host_id: number | null;
   kind: string;
   vmid: number;
   name: string;
@@ -104,6 +105,7 @@ function parseStrings(json: string | null): string[] {
 
 const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   id: r.id,
+  hostId: r.host_id,
   kind: r.kind as TargetKind,
   vmid: r.vmid,
   name: r.name,
@@ -198,29 +200,35 @@ export class ContainerStore {
     return row ? this.toContainer(row) : null;
   }
 
-  existsVmid(vmid: number): boolean {
-    return this.db.query("SELECT 1 FROM containers WHERE vmid = ? AND kind IN ('lxc', 'vm')").get(vmid) !== null;
+  /** True when guest `vmid` of the node `hostId` has been added. */
+  existsVmid(hostId: number, vmid: number): boolean {
+    return (
+      this.db.query("SELECT 1 FROM containers WHERE host_id = ? AND vmid = ? AND kind IN ('lxc', 'vm')").get(hostId, vmid) !==
+      null
+    );
   }
 
-  /** The Proxmox host entry, when it has been added. */
-  getNode(): Container | null {
-    const row = this.db.query<ContainerRow, []>("SELECT * FROM containers WHERE kind = 'node'").get();
+  /** The entry of the Proxmox node `hostId` itself, when it has been added. */
+  getNode(hostId: number): Container | null {
+    const row = this.db
+      .query<ContainerRow, [number]>("SELECT * FROM containers WHERE host_id = ? AND kind = 'node'")
+      .get(hostId);
     return row ? this.toContainer(row) : null;
   }
 
-  /** Adds the Proxmox host as a target (apt only). */
-  addNode(name: string): Container {
+  /** Adds the Proxmox node `hostId` itself as a target (apt only). */
+  addNode(hostId: number, name: string): Container {
     const result = this.db
-      .query("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('node', ?, ?, ?)")
-      .run(NODE_VMID, name, new Date().toISOString());
+      .query("INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, 'node', ?, ?, ?)")
+      .run(hostId, NODE_VMID, name, new Date().toISOString());
     return this.get(Number(result.lastInsertRowid))!;
   }
 
-  /** Adds a container or virtual machine. */
-  add(vmid: number, name: string, kind: GuestKind = 'lxc'): Container {
+  /** Adds a container or virtual machine of the node `hostId`. */
+  add(hostId: number, vmid: number, name: string, kind: GuestKind = 'lxc'): Container {
     const result = this.db
-      .query('INSERT INTO containers (kind, vmid, name, created_at) VALUES (?, ?, ?, ?)')
-      .run(kind, vmid, name, new Date().toISOString());
+      .query('INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, ?, ?, ?, ?)')
+      .run(hostId, kind, vmid, name, new Date().toISOString());
     return this.get(Number(result.lastInsertRowid))!;
   }
 

@@ -1,0 +1,142 @@
+:host {
+  display: block;
+  container-type: inline-size;
+}
+
+.sections {
+  display: grid;
+  gap: 20px;
+}
+
+.section-icon {
+  &.hosts {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+
+  &.keys {
+    background: var(--surface-2);
+    color: var(--text);
+  }
+}
+
+.head-action,
+.head-actions {
+  margin-left: auto;
+}
+
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.section-body {
+  gap: 0;
+  padding-top: 6px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+
+  .node-test {
+    flex-basis: 100%;
+  }
+}
+
+.row-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+
+  .name {
+    font-weight: 600;
+    overflow-wrap: anywhere;
+  }
+}
+
+.row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+
+  app-icon {
+    vertical-align: -2px;
+  }
+}
+
+.row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.confirm-text {
+  font-size: 0.85rem;
+  color: var(--warning);
+}
+
+.empty-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+
+  p {
+    margin: 0;
+  }
+
+  app-icon {
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+}
+
+.row-skeleton {
+  height: 64px;
+  margin: 14px 0;
+}
+
+.hint {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+@container (max-width: 560px) {
+  .section-head {
+    flex-wrap: wrap;
+  }
+
+  .head-action,
+  .head-actions {
+    margin-left: 0;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+
+  .row-actions {
+    justify-content: flex-start;
+  }
+}

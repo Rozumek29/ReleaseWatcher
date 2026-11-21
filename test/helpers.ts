@@ -3,6 +3,10 @@ import type { ReleaseInfo } from '../src/domain.ts';
 import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
 import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
+import type { RepositoryStore } from '../src/db.ts';
+import type { Host } from '../src/hosts/domain.ts';
+import { InvalidKeyError, type KeyInfo, type KeyTool } from '../src/hosts/keys.ts';
+import { HostStore } from '../src/hosts/store.ts';
 import type {
   ContainerUpdatesNotification,
   NotificationEvent,
@@ -326,3 +330,37 @@ export const haState = (
     supported_features: supportedFeatures,
   },
 });
+
+/** A private key in the shape the API accepts (never used to connect – tests run against `FakeShell`). */
+export const TEST_PRIVATE_KEY =
+  '-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-only-for-tests\n-----END OPENSSH PRIVATE KEY-----';
+
+/** Answers `ssh-keygen` operations without running it. */
+export class FakeKeyTool implements KeyTool {
+  generated = 0;
+  readonly forgotten: { knownHostsFile: string; address: string; port: number }[] = [];
+  /** Keys `inspect` rejects as invalid (exact private key text). */
+  readonly invalid = new Set<string>();
+
+  async inspect(privateKey: string): Promise<KeyInfo | null> {
+    if (this.invalid.has(privateKey)) throw new InvalidKeyError('This is not a valid private key.');
+    const id = Bun.hash(privateKey).toString(16).slice(0, 8);
+    return { publicKey: `ssh-ed25519 AAAAfake${id} test`, fingerprint: `SHA256:fake${id}` };
+  }
+
+  async generate(comment: string): Promise<string> {
+    this.generated++;
+    return `-----BEGIN OPENSSH PRIVATE KEY-----\ngenerated-${this.generated}-${comment}\n-----END OPENSSH PRIVATE KEY-----`;
+  }
+
+  async forgetHostKey(knownHostsFile: string, address: string, port: number): Promise<void> {
+    this.forgotten.push({ knownHostsFile, address, port });
+  }
+}
+
+/** Saves a key and a Proxmox node host in the database (what Settings → Hosts does); returns the host. */
+export function addProxmoxHost(store: RepositoryStore, name = 'pve'): Host {
+  const hosts = new HostStore(store.database, store.secretBox);
+  const sshKeyId = hosts.addKey({ name: `${name} key`, privateKey: TEST_PRIVATE_KEY, publicKey: null, fingerprint: null });
+  return hosts.addHost({ type: 'proxmox', name, address: `${name}.lan`, port: 22, user: 'root', sshKeyId });
+}

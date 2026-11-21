@@ -7,7 +7,7 @@ import { silentLogger } from '../src/log.ts';
 import { APT_LIST_MARKER, capabilities } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
+import { addProxmoxHost, FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
 
 const PCT_LIST = 'VMID       Status     Lock         Name\n101        running                 vaultwarden\n102        stopped                 old\n';
 const QM_LIST =
@@ -50,6 +50,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
+    addProxmoxHost(store);
     haFetch = async () => {
       throw new TypeError('Home Assistant is not reachable in this test');
     };
@@ -93,6 +94,8 @@ describe('containers API', () => {
       'idx_container_runs_container',
       'idx_container_runs_running',
       'idx_containers_enabled',
+      'idx_containers_host_vmid',
+      'idx_hosts_ssh_key',
       'idx_repository_advisories_page',
       'idx_sessions_expires',
       'idx_watched_repositories_enabled',
@@ -932,14 +935,10 @@ describe('containers API', () => {
     assert.ok(shell.commands.includes('pct status 101'));
   });
 
-  it('never returns the SSH key and validates Proxmox settings', async () => {
-    const key = '-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n-----END OPENSSH PRIVATE KEY-----';
-    const response = await request('PUT', '/api/settings', { proxmoxHost: 'pve.lan', proxmoxSshKey: key });
-    assert.equal(response.status, 200);
-    assert.equal(response.text.includes('abc'), false);
-    assert.equal(response.json().proxmox.sshKeyConfigured, true);
-    assert.equal((await request('PUT', '/api/settings', { proxmoxSshKey: 'password123' })).status, 400);
-    assert.equal((await request('PUT', '/api/settings', { proxmoxHost: '-oProxyCommand=x' })).status, 400);
+  it('validates container settings; the connection lives in hosts, not in the settings', async () => {
+    const settings = (await request('GET', '/api/settings')).json();
+    assert.equal(settings.proxmox.configured, true);
+    assert.equal('host' in settings.proxmox || 'sshKeyConfigured' in settings.proxmox, false);
     assert.equal((await request('PUT', '/api/settings', { containerCheckCron: 'often' })).status, 400);
   });
 
@@ -1221,6 +1220,7 @@ describe('application detection API', () => {
     source.existing.add('dani-garcia/vaultwarden');
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
+    addProxmoxHost(store);
     app = await buildApp({
       store,
       settings,

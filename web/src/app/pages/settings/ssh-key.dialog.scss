@@ -1,0 +1,20 @@
+.dialog {
+  width: min(540px, calc(100vw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.private-key,
+.public-key {
+  resize: vertical;
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.private-key {
+  min-height: 120px;
+}

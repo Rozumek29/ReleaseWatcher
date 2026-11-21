@@ -308,6 +308,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     return defaults.storage ?? problem(409, 'Choose a backup storage in Settings → Proxmox node, or update without a backup.');
   };
 
+  /** ID of the Proxmox node to add guests from; throws (→ 409) when no node is configured. */
+  const requireNode = (): number => {
+    const hostId = service.nodeHostId();
+    if (hostId === null || !service.shell.isConfigured) {
+      throw new ShellNotConfiguredError();
+    }
+    return hostId;
+  };
+
   const accepted = (run: Run) => Response.json(runDto(run), { status: 202, headers: { location: `/api/runs/${run.id}` } });
 
   /**
@@ -354,7 +363,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         guard(async () => {
           try {
             const found = await service.discover();
-            return Response.json(found.map((c) => ({ ...c, added: containers.existsVmid(c.vmid) })));
+            const hostId = service.nodeHostId();
+            return Response.json(
+              found.map((c) => ({ ...c, added: hostId !== null && containers.existsVmid(hostId, c.vmid) })),
+            );
           } catch (error) {
             if (error instanceof ShellNotConfiguredError) throw error;
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
@@ -380,11 +392,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       POST: (req: Request) =>
         guard(async () => {
           const body = await readBody<{ vmid: number; name?: string | null }>(req, addContainerSchema);
-          if (containers.existsVmid(body.vmid)) {
+          const hostId = requireNode();
+          if (containers.existsVmid(hostId, body.vmid)) {
             return problem(409, `Guest ${body.vmid} has already been added.`);
-          }
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
           }
           let found: DiscoveredContainer | undefined;
           try {
@@ -395,7 +405,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           if (!found) {
             return validationProblem('vmid', `No container or virtual machine ${body.vmid} exists on the node.`);
           }
-          const container = containers.add(body.vmid, blankToNull(body.name) ?? found.name, found.kind);
+          const container = containers.add(hostId, body.vmid, blankToNull(body.name) ?? found.name, found.kind);
           service.startCheck(container, 'manual');
           return Response.json(containerDto(container), {
             status: 201,
@@ -407,11 +417,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/node': {
       POST: () =>
         guard(async () => {
-          if (containers.getNode()) {
+          const hostId = requireNode();
+          if (containers.getNode(hostId)) {
             return problem(409, 'The Proxmox host has already been added.');
-          }
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
           }
           let name: string;
           try {
@@ -419,7 +427,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           } catch (error) {
             return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
           }
-          const node = containers.addNode(name);
+          const node = containers.addNode(hostId, name);
           service.startCheck(node, 'manual');
           return Response.json(containerDto(node), {
             status: 201,
@@ -432,9 +440,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/add-all': {
       POST: () =>
         guard(async () => {
-          if (!service.shell.isConfigured) {
-            throw new ShellNotConfiguredError();
-          }
+          const hostId = requireNode();
           let found: DiscoveredContainer[];
           try {
             found = await service.discover();
@@ -442,8 +448,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
           const added = found
-            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(c.vmid))
-            .map((c) => containers.add(c.vmid, c.name, c.kind));
+            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(hostId, c.vmid))
+            .map((c) => containers.add(hostId, c.vmid, c.name, c.kind));
           // Checks run through the scheduler queue, so the concurrency limit applies.
           void scheduler.checkMany(added.map((c) => c.id));
           return Response.json(

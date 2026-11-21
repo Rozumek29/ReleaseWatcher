@@ -16,11 +16,6 @@ export interface Settings {
   releaseCheckCron: string;
   /** Cron schedule of vulnerability (security advisory) checks. */
   advisoryCheckCron: string;
-  proxmoxHost: string | null;
-  proxmoxPort: number;
-  proxmoxUser: string;
-  /** SSH private key used to log in to the Proxmox node. Secret. */
-  proxmoxSshKey: string | null;
   /** Default cron schedule of container checks. */
   containerCheckCron: string;
   /** How many containers are checked at the same time. */
@@ -73,6 +68,20 @@ export const MAX_CHECK_CONCURRENCY = 10;
 export type SettingKey = keyof Settings;
 export type SettingsPatch = { [K in SettingKey]?: Settings[K] | null };
 
+/**
+ * Connection to the Proxmox node as configured before hosts existed (env PROXMOX_* or saved in the UI). Read once
+ * to create the first host (`seedProxmoxHost`); the settings themselves are no longer editable.
+ */
+export interface LegacyProxmoxConnection {
+  host: string | null;
+  port: number;
+  user: string;
+  privateKey: string | null;
+}
+
+/** Keys of the former Proxmox connection settings (still read from the database for the migration). */
+const LEGACY_PROXMOX_KEYS = ['proxmoxHost', 'proxmoxPort', 'proxmoxUser', 'proxmoxSshKey'] as const;
+
 export class SettingsValidationError extends Error {
   readonly field: SettingKey;
 
@@ -89,6 +98,7 @@ export type SettingSource = 'ui' | 'env' | null;
 export class SettingsService {
   private readonly store: RepositoryStore;
   private readonly defaults: Settings;
+  private readonly legacyDefaults: LegacyProxmoxConnection;
   private overrides: Partial<Record<SettingKey, string>>;
   private readonly listeners = new Set<(settings: Settings) => void>();
 
@@ -101,10 +111,6 @@ export class SettingsService {
       githubToken: config.github.token,
       releaseCheckCron: config.releaseCheckCron,
       advisoryCheckCron: config.advisoryCheckCron,
-      proxmoxHost: config.proxmox.host,
-      proxmoxPort: config.proxmox.port,
-      proxmoxUser: config.proxmox.user,
-      proxmoxSshKey: config.proxmox.privateKey,
       containerCheckCron: config.proxmox.checkCron,
       containerCheckConcurrency: config.proxmox.checkConcurrency,
       backupStorage: config.proxmox.backupStorage,
@@ -126,8 +132,32 @@ export class SettingsService {
       advisoriesGithub: true,
       advisoriesOsv: true,
     };
+    this.legacyDefaults = {
+      host: config.proxmox.host,
+      port: config.proxmox.port,
+      user: config.proxmox.user,
+      privateKey: config.proxmox.privateKey,
+    };
     this.overrides = store.readSettings() as Partial<Record<SettingKey, string>>;
     this.migrateLegacySettings();
+  }
+
+  /** The former Proxmox connection: values saved in the UI first, then the environment. */
+  legacyProxmox(): LegacyProxmoxConnection {
+    const saved = this.store.readSettings();
+    return {
+      host: saved['proxmoxHost'] ?? this.legacyDefaults.host,
+      port: saved['proxmoxPort'] !== undefined ? Number(saved['proxmoxPort']) : this.legacyDefaults.port,
+      user: saved['proxmoxUser'] ?? this.legacyDefaults.user,
+      privateKey: saved['proxmoxSshKey'] ?? this.legacyDefaults.privateKey,
+    };
+  }
+
+  /** Removes the former Proxmox connection settings saved in the UI (after they were moved into a host). */
+  clearLegacyProxmox(): void {
+    for (const key of LEGACY_PROXMOX_KEYS) {
+      this.store.writeSetting(key, null);
+    }
   }
 
   /** Converts a polling interval saved by an older version into a release check cron expression. */
@@ -154,10 +184,6 @@ export class SettingsService {
       githubToken: o.githubToken ?? this.defaults.githubToken,
       releaseCheckCron: o.releaseCheckCron ?? this.defaults.releaseCheckCron,
       advisoryCheckCron: o.advisoryCheckCron ?? this.defaults.advisoryCheckCron,
-      proxmoxHost: o.proxmoxHost ?? this.defaults.proxmoxHost,
-      proxmoxPort: o.proxmoxPort !== undefined ? Number(o.proxmoxPort) : this.defaults.proxmoxPort,
-      proxmoxUser: o.proxmoxUser ?? this.defaults.proxmoxUser,
-      proxmoxSshKey: o.proxmoxSshKey ?? this.defaults.proxmoxSshKey,
       containerCheckCron: o.containerCheckCron ?? this.defaults.containerCheckCron,
       containerCheckConcurrency:
         o.containerCheckConcurrency !== undefined
@@ -260,31 +286,6 @@ function validate(key: SettingKey, value: string): void {
       }
       return;
     case 'githubToken':
-      return;
-    case 'proxmoxHost':
-      if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(value) || value.length > 253) {
-        throw new SettingsValidationError(key, 'Enter a host name or IP address.');
-      }
-      return;
-    case 'proxmoxPort': {
-      const port = Number(value);
-      if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-        throw new SettingsValidationError(key, 'Port must be between 1 and 65535.');
-      }
-      return;
-    }
-    case 'proxmoxUser':
-      if (!/^[A-Za-z_][A-Za-z0-9_.-]{0,31}$/.test(value)) {
-        throw new SettingsValidationError(key, 'Enter a valid user name.');
-      }
-      return;
-    case 'proxmoxSshKey':
-      if (!/^-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+-----END [A-Z ]*PRIVATE KEY-----$/.test(value)) {
-        throw new SettingsValidationError(key, 'Paste the whole private key (-----BEGIN … PRIVATE KEY----- … -----END …).');
-      }
-      if (/Proc-Type:\s*4,ENCRYPTED/.test(value)) {
-        throw new SettingsValidationError(key, 'Keys protected with a passphrase are not supported.');
-      }
       return;
     case 'backupStorage':
       if (!STORAGE_ID_PATTERN.test(value)) {

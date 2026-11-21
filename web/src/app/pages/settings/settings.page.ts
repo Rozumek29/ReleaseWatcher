@@ -26,9 +26,11 @@ import { describeCron } from '../../shared/cron';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
+import { ConnectionsPanel } from './connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
-type Tab = 'general' | 'notifications';
+type Tab = 'general' | 'connections' | 'notifications';
+const TABS: readonly Tab[] = ['general', 'connections', 'notifications'];
 
 /** Default port of each SMTP security mode (used when the port still has the previous mode's default). */
 const SMTP_PORTS: Record<SmtpSecurity, number> = { starttls: 587, tls: 465, none: 25 };
@@ -54,7 +56,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
 @Component({
   selector: 'app-settings-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, Icon, RelativeTimePipe, Switch],
+  imports: [FormsModule, DecimalPipe, ConnectionsPanel, Icon, RelativeTimePipe, Switch],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',
 })
@@ -66,7 +68,7 @@ export class SettingsPage implements OnInit {
   private readonly route = inject(ActivatedRoute);
 
   protected readonly tab = signal<Tab>(
-    this.route.snapshot.queryParamMap.get('tab') === 'notifications' ? 'notifications' : 'general',
+    TABS.find((t) => t === this.route.snapshot.queryParamMap.get('tab')) ?? 'general',
   );
 
   protected readonly settings = signal<AppSettings | null>(null);
@@ -80,8 +82,6 @@ export class SettingsPage implements OnInit {
   protected readonly loadingRateLimit = signal(false);
   protected readonly showWebhook = signal(false);
   protected readonly showToken = signal(false);
-  protected readonly testingNode = signal(false);
-  protected readonly nodeTest = signal<{ ok: boolean; text: string } | null>(null);
   protected readonly storages = signal<BackupStorage[] | null>(null);
   protected readonly storagesError = signal<string | null>(null);
   protected readonly loadingStorages = signal(false);
@@ -95,10 +95,6 @@ export class SettingsPage implements OnInit {
   protected advisoriesOsv = true;
   protected releaseCron = '';
   protected advisoryCron = '';
-  protected proxmoxHost = '';
-  protected proxmoxPort: number | null = 22;
-  protected proxmoxUser = '';
-  protected sshKey = '';
   protected checkCron = '';
   protected checkConcurrency: number | null = 3;
   protected backupStorage = '';
@@ -259,26 +255,32 @@ export class SettingsPage implements OnInit {
   }
 
   protected async saveProxmox(): Promise<void> {
-    const port = this.proxmoxPort === null || `${this.proxmoxPort}` === '' ? null : Number(this.proxmoxPort);
     const concurrency =
       this.checkConcurrency === null || `${this.checkConcurrency}` === '' ? null : Number(this.checkConcurrency);
     const patch: SettingsPatch = {
       // Empty values reset to the environment default.
-      proxmoxHost: this.proxmoxHost.trim() || null,
-      proxmoxPort: port,
-      proxmoxUser: this.proxmoxUser.trim() || null,
       containerCheckCron: this.checkCron.trim() || null,
       containerCheckConcurrency: concurrency,
       backupStorage: this.backupStorage.trim() || null,
       backupBeforeUpdate: this.backupDefault,
     };
-    // The key is never shown; an empty field keeps the saved one.
-    if (this.sshKey.trim()) {
-      patch.proxmoxSshKey = this.sshKey.trim();
-    }
-    if (await this.save('proxmox', patch, 'Proxmox settings saved.')) {
-      this.nodeTest.set(null);
+    if (await this.save('proxmox', patch, 'Container settings saved.')) {
       void this.statusService.refresh();
+    }
+  }
+
+  /** Hosts or keys changed: whether a Proxmox node is configured may have changed too. */
+  protected async connectionsChanged(): Promise<void> {
+    try {
+      const wasConfigured = this.settings()?.proxmox.configured ?? false;
+      const settings = await firstValueFrom(this.api.getSettings());
+      this.settings.set(settings);
+      if (settings.proxmox.configured && !wasConfigured) {
+        void this.loadStorages();
+      }
+      void this.statusService.refresh();
+    } catch (error) {
+      this.toast.error(error);
     }
   }
 
@@ -308,23 +310,6 @@ export class SettingsPage implements OnInit {
       details.push(st.status);
     }
     return `${st.name} (${details.join(', ')})`;
-  }
-
-  protected async resetSshKey(): Promise<void> {
-    await this.save('proxmox', { proxmoxSshKey: null }, 'SSH key removed.');
-  }
-
-  protected async testNode(): Promise<void> {
-    this.testingNode.set(true);
-    this.nodeTest.set(null);
-    try {
-      const { output } = await firstValueFrom(this.api.testProxmoxConnection());
-      this.nodeTest.set({ ok: true, text: output || 'Connected.' });
-    } catch (error) {
-      this.nodeTest.set({ ok: false, text: describeError(error) });
-    } finally {
-      this.testingNode.set(false);
-    }
   }
 
   /** Sends a sample release through one channel. */
@@ -401,10 +386,6 @@ export class SettingsPage implements OnInit {
     this.username = settings.discord.username ?? '';
     this.releaseCron = settings.polling.releaseCron;
     this.advisoryCron = settings.polling.advisoryCron;
-    this.proxmoxHost = settings.proxmox.host ?? '';
-    this.proxmoxPort = settings.proxmox.port;
-    this.proxmoxUser = settings.proxmox.user;
-    this.sshKey = '';
     this.checkCron = settings.proxmox.checkCron;
     this.checkConcurrency = settings.proxmox.checkConcurrency;
     this.backupStorage = settings.proxmox.backupStorage ?? '';
