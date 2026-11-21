@@ -333,7 +333,7 @@ export const haState = (
 
 /** A private key in the shape the API accepts (never used to connect – tests run against `FakeShell`). */
 export const TEST_PRIVATE_KEY =
-  '-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\n-----END OPENSSH PRIVATE KEY-----';
+  '-----BEGIN OPENSSH PRIVATE KEY-----\nnot-a-real-key-only-for-tests\n-----END OPENSSH PRIVATE KEY-----';
 
 /** Answers `ssh-keygen` operations without running it. */
 export class FakeKeyTool implements KeyTool {

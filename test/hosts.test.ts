@@ -112,8 +112,8 @@ describe('SSH keys API', () => {
     assert.ok((await request('POST', '/api/ssh-keys', { name: 'Other', privateKey: 'password123' })).json().errors.privateKey);
     const encrypted = TEST_PRIVATE_KEY.replace('\n', '\nProc-Type: 4,ENCRYPTED\n');
     assert.match((await request('POST', '/api/ssh-keys', { name: 'Other', privateKey: encrypted })).json().errors.privateKey[0], /passphrase/);
-    keyTool.invalid.add(TEST_PRIVATE_KEY.replace('b3Bl', 'xxxx'));
-    const invalid = await request('POST', '/api/ssh-keys', { name: 'Other', privateKey: TEST_PRIVATE_KEY.replace('b3Bl', 'xxxx') });
+    keyTool.invalid.add(TEST_PRIVATE_KEY.replace('not-a-real', 'broken'));
+    const invalid = await request('POST', '/api/ssh-keys', { name: 'Other', privateKey: TEST_PRIVATE_KEY.replace('not-a-real', 'broken') });
     assert.equal(invalid.status, 400);
     assert.match(invalid.json().errors.privateKey[0], /not a valid private key/);
   });
