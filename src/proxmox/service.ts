@@ -46,8 +46,10 @@ import {
   shutdownGuestCommand,
   startGuestCommand,
   type BackupStorage,
+  capabilities,
   type GuestTarget,
   guestCli,
+  guestOf,
   guestExec,
   hasHomeAssistantApi,
   homeAssistantInstallContext,
@@ -133,10 +135,7 @@ const HA_START_TIMEOUT_MS = 10 * 60_000;
 /** Restart of a container: clean shutdown, start and the wait for its network. */
 const restartTimeoutMs = (target: GuestTarget): number => (SHUTDOWN_TIMEOUT_SECONDS + readyWaitSeconds(target) + 120) * 1000;
 
-/** The guest a container entry stands for; null for the Proxmox host. */
-const guestOf = (c: Container): GuestTarget | null => (c.kind === 'node' ? null : { kind: c.kind, vmid: c.vmid });
-
-/** The guest of an entry that cannot be the host (callers checked `kind` already). */
+/** The guest of an entry that cannot be the host (callers checked its capabilities already). */
 const requireGuest = (c: Container): GuestTarget => {
   const guest = guestOf(c);
   if (!guest) throw new Error('This action is not available for the Proxmox host.');
@@ -327,7 +326,13 @@ export class ContainerService {
     this.homeAssistantPollMs = deps.homeAssistantPollMs ?? 5000;
   }
 
+  /** SSH connection to the Proxmox node (discovery, storages, connection test). */
   get shell(): NodeShell {
+    return this.deps.shell;
+  }
+
+  /** SSH connection that reaches a target: the node of a guest, or the machine itself. */
+  shellFor(_container: Pick<Container, 'kind'>): NodeShell {
     return this.deps.shell;
   }
 
@@ -386,16 +391,16 @@ export class ContainerService {
    * GitHub repository. Only reads – nothing is saved; the UI adds the suggestions the user confirms.
    */
   async detectApps(container: Container): Promise<DetectedApp[]> {
-    const guest = guestOf(container);
-    if (!guest) {
+    if (!capabilities(container.kind).apps) {
       throw new DetectionUnavailableError('Applications can be detected in guests only, not on the Proxmox host.');
     }
+    const guest = guestOf(container);
     const token = newCheckToken();
     const steps: CheckStep[] = [{ id: 'detect', script: DETECT_SCRIPT, timeoutSeconds: DETECT_TIMEOUT_SECONDS }];
-    const result = await this.deps.shell.run(buildCheckScript(guest, steps, token), {
+    const result = await this.shellFor(container).run(buildCheckScript(guest, steps, token), {
       timeoutMs: NODE_TIMEOUT_MS + DETECT_TIMEOUT_SECONDS * 1000,
     });
-    const batch = parseCheckOutput(result.output, token, guest.kind === 'vm');
+    const batch = parseCheckOutput(result.output, token, guest?.kind === 'vm');
     if (!batch.status) {
       throw new Error(describeSshFailure(result));
     }
@@ -440,7 +445,7 @@ export class ContainerService {
   startCheck(container: Container, trigger: RunTrigger): Run {
     return this.start(container, null, 'check', trigger, async (log) => {
       // Without the option a stopped container is detected by the batched check itself (no extra connection).
-      const started = container.startWhenStopped ? await this.prepare(container, log, false) : false;
+      const started = capabilities(container.kind).power && container.startWhenStopped ? await this.prepare(container, log, false) : false;
       try {
         const errors = await this.check(container, log, true);
         return { ok: errors === 0, exitCode: null };
@@ -450,12 +455,12 @@ export class ContainerService {
     });
   }
 
-  /** @param backupStorage back up to this storage first (null = no backup; always null for the host) */
+  /** @param backupStorage back up to this storage first (null = no backup; always null for targets without backups) */
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
-    if (container.kind === 'node') {
+    if (!guestOf(container)) {
       return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
-        log.note('apt-get update && apt-get dist-upgrade on the Proxmox host (no backup – vzdump backs up guests only)');
-        const result = await this.execDetached(log, 'update', NODE_APT_UPGRADE_SCRIPT, {
+        log.note(`apt-get update && apt-get dist-upgrade on ${targetLabel(container)} (no backup)`);
+        const result = await this.execDetached(this.shellFor(container), log, 'update', NODE_APT_UPGRADE_SCRIPT, {
           timeoutMs: APT_UPGRADE_TIMEOUT_MS,
           startedContainer: false,
         });
@@ -508,7 +513,7 @@ export class ContainerService {
    */
   startHomeAssistantUpdate(container: Container, ids: readonly string[] | null, backupStorage: string | null): Run {
     const state = container.homeAssistant;
-    if (container.kind !== 'vm' || !state) {
+    if (!capabilities(container.kind).homeAssistant || !state) {
       throw new HomeAssistantUpdateError(`${targetLabel(container)} does not run Home Assistant OS (as of its last check).`);
     }
     const context = homeAssistantInstallContext(container);
@@ -655,10 +660,10 @@ export class ContainerService {
    * scheduled ({@link NODE_RESTART_DELAY_SECONDS} s later), so the run can finish before the node goes down.
    */
   startRestart(container: Container): Run {
-    if (container.kind === 'node') {
+    if (capabilities(container.kind).restart === 'machine') {
       return this.start(container, null, 'restart', 'manual', async (log) => {
-        log.note(`Scheduling a restart of the Proxmox host in ${NODE_RESTART_DELAY_SECONDS} s`);
-        const result = await this.deps.shell.run(NODE_RESTART_COMMAND, {
+        log.note(`Scheduling a restart of ${targetLabel(container)} in ${NODE_RESTART_DELAY_SECONDS} s`);
+        const result = await this.shellFor(container).run(NODE_RESTART_COMMAND, {
           timeoutMs: NODE_TIMEOUT_MS,
           onOutput: (chunk) => log.write(chunk),
         });
@@ -673,7 +678,7 @@ export class ContainerService {
     return this.start(container, null, 'restart', 'manual', async (log) => {
       const guest = requireGuest(container);
       log.note(`Restarting ${targetLabel(container)} (${guestCli(guest.kind)} reboot)`);
-      const result = await this.execDetached(log, 'restart', restartGuestCommand(guest), {
+      const result = await this.execDetached(this.shellFor(container), log, 'restart', restartGuestCommand(guest), {
         timeoutMs: restartTimeoutMs(guest),
         startedContainer: false,
       });
@@ -700,26 +705,22 @@ export class ContainerService {
    * restores resources left raised. Runs without a detached step are marked as failed by the store on startup.
    */
   async recover(): Promise<void> {
-    const { containers, shell } = this.deps;
-    const resumable = containers.listResumableRuns();
-    if (!shell.isConfigured) {
-      if (resumable.length > 0) containers.failInterruptedRuns(true);
-      return;
-    }
-    for (const { run, resume } of resumable) {
+    const { containers } = this.deps;
+    for (const { run, resume } of containers.listResumableRuns()) {
       const container = containers.get(run.containerId);
-      if (!container || this.active.has(container.id)) {
+      if (!container || this.active.has(container.id) || !this.shellFor(container).isConfigured) {
         const log = new RunLog(containers, run, run.output);
         log.note('ReleaseWatcher was restarted while this was running');
         log.finish(false, null);
         continue;
       }
+      const shell = this.shellFor(container);
       this.track(container, run, new RunLog(containers, run, run.output), async (log) => {
         log.note('ReleaseWatcher was restarted – re-attaching to the command still running on the node');
         try {
           // Only the update step of a virtual machine runs through the guest agent (backups and restarts are node commands).
           const guest = container.kind === 'vm' && resume.step === 'update';
-          const result = await this.follow(log, resume.unit, resume.timeoutSeconds * 1000, guest);
+          const result = await this.follow(shell, log, resume.unit, resume.timeoutSeconds * 1000, guest);
           if (resume.step === 'backup') {
             log.note(
               result.exitCode === 0
@@ -739,7 +740,7 @@ export class ContainerService {
       });
     }
     for (const container of containers.list()) {
-      if (container.resourcesToRestore && !this.active.has(container.id)) {
+      if (container.resourcesToRestore && !this.active.has(container.id) && this.shellFor(container).isConfigured) {
         await this.restoreResources(container, null);
       }
     }
@@ -803,8 +804,7 @@ export class ContainerService {
     const app = run.appId === null ? null : this.deps.containers.getApp(container.id, run.appId);
     await this.deps.dispatcher.dispatchUpdateResult({
       vmid: container.vmid,
-      isNode: container.kind === 'node',
-      isVm: container.kind === 'vm',
+      targetKind: container.kind,
       containerName: container.name,
       kind: run.kind,
       appName: app?.name ?? (run.kind === 'home-assistant-update' ? 'Home Assistant' : null),
@@ -824,6 +824,7 @@ export class ContainerService {
    * re-attach to it ({@link recover}).
    */
   private async execDetached(
+    shell: NodeShell,
     log: RunLog,
     step: DetachedStep,
     command: string,
@@ -831,7 +832,7 @@ export class ContainerService {
   ): Promise<CommandResult> {
     const unit = detachedUnit(log.run.id, step);
     const timeoutSeconds = Math.ceil(options.timeoutMs / 1000);
-    const start = await this.deps.shell.run(
+    const start = await shell.run(
       detachedStartCommand(unit, command, { tty: options.tty ?? false, timeoutSeconds }),
       { timeoutMs: NODE_TIMEOUT_MS },
     );
@@ -840,7 +841,7 @@ export class ContainerService {
     }
     this.deps.containers.setRunResume(log.run.id, { unit, step, timeoutSeconds, startedContainer: options.startedContainer });
     try {
-      return await this.follow(log, unit, options.timeoutMs, options.guest ?? false);
+      return await this.follow(shell, log, unit, options.timeoutMs, options.guest ?? false);
     } finally {
       this.deps.containers.setRunResume(log.run.id, null);
     }
@@ -861,7 +862,7 @@ export class ContainerService {
     if (guest.kind === 'vm') {
       log.note('Virtual machines run commands through the QEMU guest agent – the output appears when the command has finished');
     }
-    return this.execDetached(log, 'update', guestExec(guest, script, timeoutSeconds), {
+    return this.execDetached(this.shellFor(container), log, 'update', guestExec(guest, script, timeoutSeconds), {
       ...options,
       // A pseudo-terminal on the node would not reach the guest.
       tty: guest.kind === 'vm' ? false : options.tty,
@@ -873,15 +874,14 @@ export class ContainerService {
    * Streams the output of a detached unit until it finishes. When the SSH connection drops, it reconnects and reads
    * the output again from the start (replacing the partial copy) – the command itself keeps running on the node.
    */
-  private async follow(log: RunLog, unit: string, timeoutMs: number, guest = false): Promise<CommandResult> {
-    const { shell } = this.deps;
+  private async follow(shell: NodeShell, log: RunLog, unit: string, timeoutMs: number, guest = false): Promise<CommandResult> {
     const mark = log.mark();
     const deadline = Date.now() + timeoutMs + FOLLOW_GRACE_MS;
     let stopped: PromptStop | null = null;
     for (let attempt = 0; ; attempt++) {
       const token = newCheckToken();
       log.truncate(mark);
-      const watch = this.watchForPrompt(unit, (stop) => (stopped ??= stop));
+      const watch = this.watchForPrompt(shell, unit, (stop) => (stopped ??= stop));
       let result: CommandResult;
       try {
         result = await shell.run(detachedFollowCommand(unit, token), {
@@ -945,7 +945,7 @@ export class ContainerService {
    * Watches the output of a detached command: when it ends at an interactive prompt and nothing new arrives for
    * `promptIdleMs`, the unit is stopped on the node (the follow connection then ends) and `onStop` is called once.
    */
-  private watchForPrompt(unit: string, onStop: (stop: PromptStop) => void): { output: (chunk: string) => void; dispose: () => void } {
+  private watchForPrompt(shell: NodeShell, unit: string, onStop: (stop: PromptStop) => void): { output: (chunk: string) => void; dispose: () => void } {
     let tail = '';
     let lastOutputAt = Date.now();
     let stopping = false;
@@ -958,7 +958,7 @@ export class ContainerService {
         stopping = true;
         onStop({ prompt, idleSeconds: Math.round(idleMs / 1000) });
         this.deps.log.warn({ unit, prompt }, 'Command is waiting for input – stopping it');
-        this.deps.shell.run(detachedStopCommand(unit), { timeoutMs: NODE_TIMEOUT_MS }).catch(() => undefined);
+        shell.run(detachedStopCommand(unit), { timeoutMs: NODE_TIMEOUT_MS }).catch(() => undefined);
       },
       Math.max(10, Math.min(5000, Math.floor(this.promptIdleMs / 4))),
     );
@@ -982,11 +982,11 @@ export class ContainerService {
   }
 
   private async raiseResources(container: Container, log: RunLog): Promise<void> {
-    // Only containers are resized (a virtual machine would need CPU/memory hotplug).
-    if (container.kind !== 'lxc' || (container.updateCores === null && container.updateMemoryMb === null)) {
+    if (!capabilities(container.kind).updateResources || (container.updateCores === null && container.updateMemoryMb === null)) {
       return;
     }
-    const { shell, containers } = this.deps;
+    const { containers } = this.deps;
+    const shell = this.shellFor(container);
     const config = await shell.run(`pct config ${container.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
     if (config.exitCode !== 0) {
       throw new Error(`Reading the container configuration failed – ${describeSshFailure(config)}`);
@@ -1025,7 +1025,7 @@ export class ContainerService {
       if (attempt > 0) {
         await Bun.sleep(this.resourcePollMs);
       }
-      const result = await this.deps.shell.run(`pct exec ${container.vmid} -- nproc`, { timeoutMs: NODE_TIMEOUT_MS });
+      const result = await this.shellFor(container).run(`pct exec ${container.vmid} -- nproc`, { timeoutMs: NODE_TIMEOUT_MS });
       const count = Number.parseInt(result.output.trim(), 10);
       if (result.exitCode !== 0 || !Number.isInteger(count)) {
         return; // stopped container or no nproc: nothing to wait for
@@ -1051,7 +1051,7 @@ export class ContainerService {
       return;
     }
     log?.note(`Restoring resources: ${describeResources(restore)}`);
-    const result = await this.deps.shell.run(pctSetResourcesCommand(container.vmid, restore), {
+    const result = await this.shellFor(container).run(pctSetResourcesCommand(container.vmid, restore), {
       timeoutMs: NODE_TIMEOUT_MS,
       ...(log ? { onOutput: (chunk: string) => log.write(chunk) } : {}),
     });
@@ -1108,7 +1108,8 @@ export class ContainerService {
     const guest = requireGuest(container);
     const label = targetLabel(container);
     const cli = guestCli(guest.kind);
-    const result = await this.deps.shell.run(`${cli} status ${guest.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
+    const shell = this.shellFor(container);
+    const result = await shell.run(`${cli} status ${guest.vmid}`, { timeoutMs: NODE_TIMEOUT_MS });
     if (result.exitCode !== 0) {
       throw new Error(`${cli} status failed – ${describeSshFailure(result)}`);
     }
@@ -1120,7 +1121,7 @@ export class ContainerService {
     }
     if (status === 'stopped' && container.startWhenStopped) {
       log.note(`${label} is stopped – starting it for this task (it is shut down again afterwards)`);
-      const start = await this.deps.shell.run(startGuestCommand(guest), {
+      const start = await shell.run(startGuestCommand(guest), {
         timeoutMs: NODE_TIMEOUT_MS + readyWaitSeconds(guest) * 1000,
         onOutput: (chunk) => log.write(chunk),
       });
@@ -1144,7 +1145,7 @@ export class ContainerService {
   private async shutDownAgain(container: Container, log: RunLog): Promise<void> {
     const label = targetLabel(container);
     log.note(`Shutting ${label} down again`);
-    const result = await this.deps.shell.run(shutdownGuestCommand(requireGuest(container)), {
+    const result = await this.shellFor(container).run(shutdownGuestCommand(requireGuest(container)), {
       timeoutMs: NODE_TIMEOUT_MS + SHUTDOWN_TIMEOUT_SECONDS * 1000,
       onOutput: (chunk) => log.write(chunk),
     });
@@ -1176,8 +1177,12 @@ export class ContainerService {
       log.note('No backup before this update');
       return;
     }
+    if (capabilities(container.kind).backup !== 'vzdump') {
+      throw new Error(`${targetLabel(container)} cannot be backed up – update not started.`);
+    }
     log.note(`Backing up ${targetLabel(container)} to storage "${storage}" (vzdump)`);
     const result = await this.execDetached(
+      this.shellFor(container),
       log,
       'backup',
       vzdumpCommand(container.vmid, storage, `ReleaseWatcher: before ${reason} (${this.now().toISOString()})`),
@@ -1204,7 +1209,7 @@ export class ContainerService {
       steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
-    if (container.kind === 'vm') {
+    if (capabilities(container.kind).homeAssistant) {
       steps.push({ id: 'ha', script: HA_CHECK_SCRIPT, timeoutSeconds: HA_CHECK_TIMEOUT_SECONDS });
     }
     for (const app of apps) {
@@ -1220,7 +1225,7 @@ export class ContainerService {
 
     log.note(`Checking ${targetLabel(container)} (${container.name})`);
     const guest = guestOf(container);
-    const result = await this.deps.shell.run(buildCheckScript(guest, steps, token), {
+    const result = await this.shellFor(container).run(buildCheckScript(guest, steps, token), {
       timeoutMs: NODE_TIMEOUT_MS + totalSeconds * 1000,
     });
     const batch = parseCheckOutput(result.output, token, guest?.kind === 'vm');
@@ -1246,7 +1251,7 @@ export class ContainerService {
       errors.push(guestAgentError(batch.guestError));
       log.note(guestAgentError(batch.guestError));
     } else {
-      const isHomeAssistant = container.kind === 'vm' && (await this.applyHomeAssistant(container, batch.steps, errors, log));
+      const isHomeAssistant = capabilities(container.kind).homeAssistant && (await this.applyHomeAssistant(container, batch.steps, errors, log));
       if (container.aptEnabled && !isHomeAssistant) {
         const apt = batch.steps.get('apt');
         if (apt?.exitCode === 0) {
@@ -1421,8 +1426,7 @@ export class ContainerService {
     }
     const result = await this.deps.dispatcher.dispatchContainerUpdates({
       vmid: container.vmid,
-      isNode: container.kind === 'node',
-      isVm: container.kind === 'vm',
+      targetKind: container.kind,
       containerName: container.name,
       aptPackages: container.aptUpgradable,
       apps: [

@@ -452,7 +452,7 @@
                   <div class="item-actions">
                     @if (confirming() === 'apt-' + c.id) {
                       <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
-                      @if (c.kind === 'node') {
+                      @if (!c.capabilities.backup) {
                         <span class="muted small">apt-get dist-upgrade, no backup</span>
                       } @else {
                       <label class="backup-check" [class.disabled]="!backupStorage()">
@@ -631,7 +631,7 @@
                 }
               </div>
             } @empty {
-              @if (c.kind !== 'node' && !c.homeAssistant?.detected) {
+              @if (c.capabilities.apps && !c.homeAssistant?.detected) {
               <div class="item muted small">
                 No applications configured.
                 <button type="button" class="link-btn" (click)="editing.set(c)">Add one</button>

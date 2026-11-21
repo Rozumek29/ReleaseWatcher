@@ -1,4 +1,4 @@
-import { AppSettings, Container, HomeAssistantInfo } from '../../core/models';
+import { AppSettings, Container, HomeAssistantInfo, TargetCapabilities } from '../../core/models';
 
 /** Test data shared by the specs of the containers page. */
 export const proxmoxSettings = (configured: boolean): AppSettings => ({
@@ -50,9 +50,44 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 });
 
+/** Capabilities the server reports per kind (`TARGET_CAPABILITIES` in `src/proxmox/domain.ts`). */
+export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities>> = {
+  lxc: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    updateResources: true,
+    apps: true,
+    homeAssistant: false,
+    updateAll: true,
+    restart: 'guest',
+  },
+  vm: {
+    backup: 'vzdump',
+    power: true,
+    aptOptional: true,
+    updateResources: false,
+    apps: true,
+    homeAssistant: true,
+    updateAll: true,
+    restart: 'guest',
+  },
+  node: {
+    backup: null,
+    power: false,
+    aptOptional: false,
+    updateResources: false,
+    apps: false,
+    homeAssistant: false,
+    updateAll: false,
+    restart: 'machine',
+  },
+};
+
 export const container = (overrides: Partial<Container> = {}): Container => ({
   id: 1,
   kind: 'lxc',
+  capabilities: CAPABILITIES[overrides.kind ?? 'lxc'],
   vmid: 101,
   name: 'vaultwarden',
   isEnabled: true,

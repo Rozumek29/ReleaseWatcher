@@ -89,6 +89,11 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   commands that differ per guest kind take a `GuestTarget` (`{ kind, vmid }`) and use `guestCli()` (`pct`/`qm`). `ContainerService` allows one task per container
   and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
+- What a target kind supports (backups, start/stop, resources, applications, Home Assistant, "update all", how it
+  restarts) is described once in `TARGET_CAPABILITIES` (`src/proxmox/domain.ts`) and sent to the UI as
+  `capabilities` in the container DTO. Branch on `capabilities(kind)` / `c.capabilities` – not on `kind` – except
+  for labels and transport details (`pct` vs `qm guest exec`). The SSH connection of a target comes from
+  `ContainerService.shellFor(container)`, never from `deps.shell` directly.
 - Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),
   sessions in the `sessions` table (only a SHA-256 of the cookie token). `buildApp` guards every route except
   `PUBLIC_ROUTES` (`src/auth/routes.ts`) and refuses cross-site writes (Origin check). New routes are protected

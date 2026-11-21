@@ -419,6 +419,26 @@ export interface HomeAssistantInfo {
   tokenMasked: string | null;
 }
 
+/** What ReleaseWatcher can do with a target – the UI branches on these instead of on `kind`. */
+export interface TargetCapabilities {
+  /** How the target is backed up before updates; null = it cannot be backed up. */
+  backup: 'vzdump' | null;
+  /** Can be started and shut down ("Start temporarily when stopped"). */
+  power: boolean;
+  /** apt can be switched off (false = always on). */
+  aptOptional: boolean;
+  /** CPU cores and memory can be raised for updates. */
+  updateResources: boolean;
+  /** Applications can be added and detected. */
+  apps: boolean;
+  /** Home Assistant OS may run here. */
+  homeAssistant: boolean;
+  /** Included in "Update all". */
+  updateAll: boolean;
+  /** `guest` = rebooted by the node; `machine` = the machine itself reboots (restart is only scheduled). */
+  restart: 'guest' | 'machine';
+}
+
 export interface Container {
   id: number;
   /**
@@ -426,6 +446,7 @@ export interface Container {
    * `node` = the Proxmox host itself (apt only, vmid 0).
    */
   kind: 'lxc' | 'vm' | 'node';
+  capabilities: TargetCapabilities;
   vmid: number;
   name: string;
   isEnabled: boolean;

@@ -1,5 +1,6 @@
 import type { SecurityAdvisory } from '../advisories.ts';
 import type { ReleaseInfo } from '../domain.ts';
+import type { TargetKind } from '../proxmox/domain.ts';
 
 /** Payload passed to every notifier when a new release is detected. */
 export interface ReleaseNotification {
@@ -24,10 +25,8 @@ export interface VulnerabilityNotification {
 /** Pending updates found in a Proxmox LXC container. */
 export interface ContainerUpdatesNotification {
   vmid: number;
-  /** The Proxmox host itself rather than a container. */
-  isNode?: boolean;
-  /** A virtual machine rather than a container. */
-  isVm?: boolean;
+  /** What the target is: a container, a virtual machine or the Proxmox host. */
+  targetKind: TargetKind;
   containerName: string;
   /** Upgradable apt packages (all of them, not only new ones). */
   aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];
@@ -38,8 +37,7 @@ export interface ContainerUpdatesNotification {
 /** An update started from the UI (apt upgrade or application update) has finished. */
 export interface UpdateResultNotification {
   vmid: number;
-  isNode?: boolean;
-  isVm?: boolean;
+  targetKind: TargetKind;
   containerName: string;
   kind: 'apt-upgrade' | 'app-update' | 'home-assistant-update';
   /** Application name for `app-update` ("Home Assistant" for `home-assistant-update`). */
@@ -61,8 +59,14 @@ export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repo
   `https://github.com/${n.owner}/${n.repository}`;
 
 /** "CT 105 (nextcloud)", "VM 137 (debian)" or "Proxmox host (pve)". */
-export const targetName = (n: { vmid: number; isNode?: boolean; isVm?: boolean; containerName: string }): string =>
-  `${n.isNode ? 'Proxmox host' : n.isVm ? `VM ${n.vmid}` : `CT ${n.vmid}`} (${n.containerName})`;
+export const targetName = (n: { vmid: number; targetKind: TargetKind; containerName: string }): string =>
+  `${TARGET_PREFIX[n.targetKind](n.vmid)} (${n.containerName})`;
+
+const TARGET_PREFIX: Readonly<Record<TargetKind, (vmid: number) => string>> = {
+  lxc: (vmid) => `CT ${vmid}`,
+  vm: (vmid) => `VM ${vmid}`,
+  node: () => 'Proxmox host',
+};
 
 /** "apt upgrade", "update of Nextcloud" or "update of Home Assistant". */
 export const updateLabel = (n: UpdateResultNotification): string =>

@@ -4,7 +4,7 @@ import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
-import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
+import { APT_LIST_MARKER, capabilities } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
 import { FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
@@ -116,6 +116,7 @@ describe('containers API', () => {
     assert.equal(response.status, 201);
     const vm = response.json();
     assert.equal(vm.kind, 'vm');
+    assert.equal(vm.capabilities.homeAssistant, true);
     assert.equal(vm.name, 'debian');
     await app.containers.wait(vm.id);
 
@@ -128,7 +129,7 @@ describe('containers API', () => {
       'Processes use upgraded files: sshd',
     ]);
     assert.equal(shell.commands.some((c) => c.startsWith('pct') && !c.startsWith('pct list')), false);
-    assert.equal(notifier.containerSent.at(-1)?.isVm, true);
+    assert.equal(notifier.containerSent.at(-1)?.targetKind, 'vm');
 
     // apt upgrade runs detached on the node through the agent; the log shows the command's output, not the JSON.
     shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('Setting up curl (8.1) ...\n', 0) });
@@ -422,7 +423,7 @@ describe('containers API', () => {
     assert.equal(notifier.resultsSent.length, 1);
     assert.deepEqual(
       { ...notifier.resultsSent[0], detail: undefined },
-      { vmid: 101, isNode: false, isVm: false, containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
+      { vmid: 101, targetKind: 'lxc', containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
     );
     assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
 
@@ -820,6 +821,7 @@ describe('containers API', () => {
     assert.equal(response.status, 201);
     const node = response.json();
     assert.equal(node.kind, 'node');
+    assert.deepEqual(node.capabilities, capabilities('node'));
     assert.equal(node.name, 'pve');
     assert.equal((await request('POST', '/api/containers/node')).status, 409);
     await app.containers.wait(node.id);
@@ -831,7 +833,7 @@ describe('containers API', () => {
     assert.equal(dto.status, 'running');
     assert.equal(dto.aptUpgradable.length, 1);
     assert.equal(dto.effectiveBackupBeforeUpdate, false);
-    assert.equal(notifier.containerSent.at(-1)?.isNode, true);
+    assert.equal(notifier.containerSent.at(-1)?.targetKind, 'node');
 
     // The host has no applications, backups or temporary starts.
     const app1 = await request('POST', `/api/containers/${node.id}/apps`, { name: 'x', latestSource: 'none' });

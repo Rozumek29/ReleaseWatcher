@@ -361,9 +361,8 @@ export class ContainersPage {
 
   /** Opens an update confirmation; "Backup first" starts with the container's default. */
   protected ask(key: string, container: Container): void {
-    // The host cannot be backed up with vzdump.
     this.backupFirst.set(
-      container.kind !== 'node' && container.effectiveBackupBeforeUpdate && this.backupStorage() !== null,
+      container.capabilities.backup !== null && container.effectiveBackupBeforeUpdate && this.backupStorage() !== null,
     );
     this.confirming.set(key);
   }
@@ -515,7 +514,7 @@ export class ContainersPage {
    * with a newer version and an update command; nothing for the host, paused or blocked containers).
    */
   protected pendingCount(container: Container): number {
-    if (container.kind === 'node' || !container.isEnabled || this.blockedWhileStopped(container)) {
+    if (!container.capabilities.updateAll || !container.isEnabled || this.blockedWhileStopped(container)) {
       return 0;
     }
     const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;

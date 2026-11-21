@@ -82,9 +82,9 @@ export class ContainerScheduler {
 
   /** Queues the checks due at `now` (exposed for tests). Resolves when the queue is empty. */
   tick(now: Date): Promise<void> {
-    const due = this.service.shell.isConfigured
-      ? this.store.listEnabled().filter((container) => this.scheduleOf(container)?.matches(now))
-      : [];
+    const due = this.store
+      .listEnabled()
+      .filter((container) => this.service.shellFor(container).isConfigured && this.scheduleOf(container)?.matches(now));
     // Nothing due: resolve right away instead of waiting for manual checks (keeps the run sequence moving).
     return due.length === 0 ? Promise.resolve() : this.queueAll(due.map((c) => c.id), 'schedule');
   }

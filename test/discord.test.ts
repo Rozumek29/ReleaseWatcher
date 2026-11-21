@@ -66,6 +66,7 @@ describe('DiscordNotifier', () => {
   it('links container notifications to the Containers page when PUBLIC_URL is set', () => {
     const notification = {
       vmid: 101,
+      targetKind: 'lxc' as const,
       containerName: 'vaultwarden',
       aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
       apps: [{ name: 'Vaultwarden', installedVersion: '1.30.0', latestVersion: '1.32.0' }],
@@ -90,7 +91,7 @@ describe('DiscordNotifier', () => {
       urls.push(url);
       return new Response(null, { status: 204 });
     }) as unknown as typeof globalThis.fetch;
-    const notification = { vmid: 101, containerName: 'vaultwarden', aptPackages: [], apps: [] };
+    const notification = { vmid: 101, targetKind: 'lxc' as const, containerName: 'vaultwarden', aptPackages: [], apps: [] };
 
     await new DiscordNotifier({ ...options, fetch, webhookUrl: `${options.webhookUrl}?thread_id=9` }).notifyContainerUpdates(notification);
     await new DiscordNotifier({ ...options, fetch, publicUrl: 'https://updater.example.com' }).notifyContainerUpdates(notification);

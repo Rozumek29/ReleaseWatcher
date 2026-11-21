@@ -23,7 +23,7 @@
 
           <div class="switches">
             <app-switch label="Active (scheduled checks)" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
-            @if (c.kind !== 'node') {
+            @if (c.capabilities.aptOptional) {
               <app-switch label="apt packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
             }
           </div>
@@ -140,7 +140,7 @@
               </span>
             </div>
 
-            @if (c.kind === 'lxc') {
+            @if (c.capabilities.updateResources) {
             <div class="field">
               <div class="form-row resources">
                 <div class="field resource-field">
@@ -204,7 +204,7 @@
           </div>
         </form>
 
-        @if (c.kind !== 'node') {
+        @if (c.capabilities.apps) {
           <fieldset class="group">
             <legend>
               <app-icon name="server" [size]="16" />
