@@ -1,0 +1,51 @@
+name: Docker
+
+# Builds the image for every platform the release publishes and starts each one, so a broken Dockerfile or
+# cross-compilation shows up in the PR – not only when a release tag is pushed. Runs only when the image can change.
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - scripts/compile.ts
+      - package.json
+      - bun.lock
+      - .github/workflows/docker.yml
+      - .github/workflows/release.yml
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            target: ''
+          - platform: linux/arm64
+            target: ''
+          - platform: linux/amd64
+            target: bun-linux-x64-baseline
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          load: true
+          tags: releasewatcher:test
+          build-args: |
+            TARGET=${{ matrix.target }}
+          cache-from: type=gha,scope=ci-${{ matrix.platform }}-${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=ci-${{ matrix.platform }}-${{ matrix.target }}
+      - name: Start the image and wait for /health
+        run: |
+          docker run -d --name rw --platform ${{ matrix.platform }} -p 8080:8080 releasewatcher:test
+          docker exec rw uname -m
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs rw
+          exit 1

@@ -13,7 +13,8 @@
 //                      none yet; add --force-db to replace an existing one
 //   --baseline         build for older x64 CPUs without AVX2 (the default build crashes there with
 //                      "Illegal instruction")
-//   --skip-build       reuse dist/releasewatcher-linux-x64 (or dist/releasewatcher-linux-x64-baseline)
+//   --arm64            build for a 64-bit ARM node (e.g. Proxmox on a Raspberry Pi)
+//   --skip-build       reuse dist/releasewatcher-linux-x64 (or -linux-x64-baseline / -linux-arm64)
 //   --database <path>  local database to read defaults from / copy (default: DATABASE_PATH or releasewatcher.db)
 
 import { Database } from 'bun:sqlite';
@@ -34,6 +35,7 @@ const { values } = parseArgs({
     db: { type: 'boolean', default: false },
     'force-db': { type: 'boolean', default: false },
     baseline: { type: 'boolean', default: false },
+    arm64: { type: 'boolean', default: false },
     'skip-build': { type: 'boolean', default: false },
     database: { type: 'string' },
   },
@@ -77,7 +79,8 @@ if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(node) || !/^[A-Za-z_][A-Za-z0-9_.-]*$/
 const staging = mkdtempSync(join(tmpdir(), 'releasewatcher-deploy-'));
 try {
   // 1. Build
-  const buildTarget = values.baseline ? 'bun-linux-x64-baseline' : 'bun-linux-x64';
+  if (values.baseline && values.arm64) fail('--baseline and --arm64 cannot be combined.');
+  const buildTarget = values.arm64 ? 'bun-linux-arm64' : values.baseline ? 'bun-linux-x64-baseline' : 'bun-linux-x64';
   const binary = join(root, 'dist', `releasewatcher-${buildTarget.replace(/^bun-/, '')}`);
   if (!values['skip-build']) {
     step('Building the UI');

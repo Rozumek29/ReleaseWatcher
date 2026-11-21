@@ -264,7 +264,7 @@ dedicated to it.
 | --- | --- | --- |
 | [Docker](#docker) | any Docker host | Docker |
 | [`bun run deploy`](#proxmox-lxc-one-command) | a dedicated Proxmox LXC, installed from your computer | Bun + SSH access to the node |
-| [Manual](#manual-install-systemd) | any Linux x64 machine | nothing – one executable |
+| [Manual](#manual-install-systemd) | any Linux x64 or arm64 machine | nothing – one executable |
 
 ### Docker
 
@@ -277,8 +277,11 @@ Images are published to `ghcr.io/rozumek29/releasewatcher` for every release:
 | `<version>` | `1.4.0` | never (pinned) |
 | `beta-<version>` | `beta-1.4.0` | pre-releases only |
 
+The images are multi-platform – `linux/amd64` and `linux/arm64` (e.g. a Raspberry Pi 4/5 with a 64-bit OS, ARM
+cloud servers); Docker pulls the right one by itself. 32-bit ARM is not supported (Bun has no runtime for it).
+
 Every tag also exists with a **`-baseline`** suffix (`latest-baseline`, `1.2-baseline`, `1.4.0-baseline`,
-`beta-1.4.0-baseline`) for older x64 CPUs without AVX2 (before Intel Haswell / AMD Excavator, about 2013). If the
+`beta-1.4.0-baseline`, `linux/amd64` only) for older x64 CPUs without AVX2 (before Intel Haswell / AMD Excavator, about 2013). If the
 container exits with `Illegal instruction (core dumped)`, use the `-baseline` image – the default one is a little
 faster on newer CPUs. Check a host with `grep -o -m1 avx2 /proc/cpuinfo` (no output = use `-baseline`).
 
@@ -327,6 +330,7 @@ keeps the configuration, the account and the data.
 | `--db` | also copy your local database when the container has none yet |
 | `--force-db` | replace an existing database in the container |
 | `--baseline` | build for older x64 CPUs without AVX2 (see [Docker](#docker)) |
+| `--arm64` | build for a 64-bit ARM node |
 
 `deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
 
@@ -334,7 +338,8 @@ keeps the configuration, the account and the data.
 
 The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node
 or Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. On older x64 CPUs without
-AVX2 download `releasewatcher-<version>-linux-x64-baseline.tar.xz` instead (see [Docker](#docker)). As root:
+AVX2 download `releasewatcher-<version>-linux-x64-baseline.tar.xz` instead (see [Docker](#docker)), on 64-bit ARM
+`releasewatcher-<version>-linux-arm64.tar.xz`. As root:
 
 ```bash
 # 1. Dependencies (the OpenSSH client reaches the Proxmox node)
@@ -692,7 +697,7 @@ Push a tag – `.github/workflows/release.yml` builds and publishes everything:
 
 | Tag | GitHub Release | Docker image |
 | --- | --- | --- |
-| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64.tar.xz`, `releasewatcher-1.2.3-linux-x64-baseline.tar.xz` | `1.2.3`, `1.2`, `latest` (+ `-baseline`) |
+| `v1.2.3` or `1.2.3` | `releasewatcher-1.2.3.zip`, `releasewatcher-1.2.3-linux-x64.tar.xz`, `releasewatcher-1.2.3-linux-x64-baseline.tar.xz`, `releasewatcher-1.2.3-linux-arm64.tar.xz` | `1.2.3`, `1.2`, `latest` (amd64 + arm64; + `-baseline`) |
 | `beta-1.2.3` | pre-release with the same files | `beta-1.2.3` (+ `-baseline`) |
 
 ```bash
@@ -708,6 +713,7 @@ Release artifacts (`bun run package`):
   runtime). Needs a CPU with AVX2.
 - **`releasewatcher-<version>-linux-x64-baseline.tar.xz`** – the same with Bun's baseline runtime for older x64 CPUs
   without AVX2.
+- **`releasewatcher-<version>-linux-arm64.tar.xz`** – the same for 64-bit ARM.
 - **`releasewatcher-<version>.zip`** – server sources, production UI and runtime dependencies for an installed Bun
   (`bun start`, no `bun install` needed).
 

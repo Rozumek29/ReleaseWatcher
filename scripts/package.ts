@@ -5,6 +5,7 @@
 //   release/releasewatcher-<version>-linux-x64            single self-contained executable (Bun runtime + UI
 //                                                         embedded) for x64 CPUs with AVX2 (Haswell, 2013, and newer)
 //   release/releasewatcher-<version>-linux-x64-baseline   the same for older x64 CPUs without AVX2
+//   release/releasewatcher-<version>-linux-arm64          the same for 64-bit ARM (Raspberry Pi 4/5 with a 64-bit OS …)
 //
 // Usage: bun scripts/package.ts [version] [--skip-build]   (version defaults to package.json "version")
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
@@ -16,7 +17,7 @@ import { compile } from './compile.ts';
  * `bun build --compile` targets of the executables; their file names use them without the `bun-` prefix. The
  * default Bun build needs AVX2 and crashes with "Illegal instruction" on older CPUs – `-baseline` runs on any x64 CPU.
  */
-const TARGETS = ['bun-linux-x64', 'bun-linux-x64-baseline'];
+const TARGETS = ['bun-linux-x64', 'bun-linux-x64-baseline', 'bun-linux-arm64'];
 
 const root = join(import.meta.dir, '..');
 const args = process.argv.slice(2);
