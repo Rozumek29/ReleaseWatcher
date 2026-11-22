@@ -1163,6 +1163,26 @@ describe('containers API', () => {
     assert.equal((await request('POST', '/api/containers/999/restart')).status, 404);
   });
 
+  it('reads the operating system and keeps it when a later probe fails', async () => {
+    shell.on(/debian_version/, {
+      output: 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nNAME="Debian GNU/Linux"\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\nID=debian\nRW_DEBIAN_VERSION=12.8\n',
+    });
+    const container = await addContainer();
+    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.os.label, 'Debian 12.8 (bookworm)');
+    assert.equal(dto.os.versionId, '12');
+    assert.equal(dto.os.pointVersion, '12.8');
+    assert.equal(dto.lastError, null);
+
+    shell.on(/debian_version/, { output: 'no os-release file\n', exitCode: 1 });
+    await request('POST', `/api/containers/${container.id}/check`);
+    const run = await app.containers.wait(container.id);
+    assert.match(run?.output ?? '', /Could not read the operating system/);
+    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.os.label, 'Debian 12.8 (bookworm)');
+    assert.equal(dto.lastError, null);
+  });
+
   it('schedules a restart of the Proxmox host only while nothing else runs', async () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
     shell.on(/uname -r/, { output: 'kernel 6.8.12-4-pve 6.8.12-5-pve\n' });

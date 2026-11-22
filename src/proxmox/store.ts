@@ -8,6 +8,7 @@ import {
   type GuestKind,
   type LatestSource,
   NODE_VMID,
+  type OsRelease,
   type ResourceChange,
   type Run,
   type RunKind,
@@ -34,6 +35,7 @@ interface ContainerRow {
   status: string | null;
   apt_upgradable: string | null;
   restart_reasons: string | null;
+  os_release: string | null;
   home_assistant: string | null;
   home_assistant_url: string | null;
   home_assistant_token: string | null;
@@ -120,6 +122,7 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
   restartReasons: parseStrings(r.restart_reasons),
+  osRelease: parseOsReleaseJson(r.os_release),
   homeAssistant: parseHomeAssistant(r.home_assistant),
   homeAssistantUrl: r.home_assistant_url,
   homeAssistantToken: secrets.decryptNullable(r.home_assistant_token),
@@ -129,6 +132,25 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   notifiedSignature: r.notified_signature,
   createdAt: r.created_at,
 });
+
+const OS_RELEASE_KEYS = ['id', 'name', 'versionId', 'pointVersion', 'codename', 'prettyName', 'proxmoxVersion'] as const;
+
+function parseOsReleaseJson(json: string | null): OsRelease | null {
+  const parsed = parseJson<Record<string, unknown>>(json);
+  if (!parsed || typeof parsed !== 'object') {
+    return null;
+  }
+  const str = (key: (typeof OS_RELEASE_KEYS)[number]) => (typeof parsed[key] === 'string' ? (parsed[key] as string) : null);
+  return {
+    id: str('id'),
+    name: str('name'),
+    versionId: str('versionId'),
+    pointVersion: str('pointVersion'),
+    codename: str('codename'),
+    prettyName: str('prettyName'),
+    proxmoxVersion: str('proxmoxVersion'),
+  };
+}
 
 function parseHomeAssistant(json: string | null): HomeAssistantState | null {
   const parsed = parseJson<HomeAssistantState>(json);
@@ -254,7 +276,7 @@ export class ContainerStore {
         `UPDATE containers SET
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
-           apt_upgradable = ?, restart_reasons = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
+           apt_upgradable = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
            home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
          WHERE id = ?`,
       )
@@ -270,6 +292,7 @@ export class ContainerStore {
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
         c.restartReasons.length > 0 ? JSON.stringify(c.restartReasons) : null,
+        c.osRelease ? JSON.stringify(c.osRelease) : null,
         c.homeAssistant ? JSON.stringify(c.homeAssistant) : null,
         c.homeAssistantUrl,
         this.secrets.encryptNullable(c.homeAssistantToken),

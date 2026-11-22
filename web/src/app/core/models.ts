@@ -426,6 +426,23 @@ export interface TargetCapabilities {
   restart: 'guest' | 'machine';
 }
 
+/** Operating system of a target, from `/etc/os-release`. */
+export interface OsRelease {
+  /** debian, ubuntu, alpine, haos… */
+  id: string | null;
+  name: string | null;
+  /** "12", "24.04"; null on Debian testing. */
+  versionId: string | null;
+  /** Debian point release ("12.8"); null elsewhere. */
+  pointVersion: string | null;
+  codename: string | null;
+  prettyName: string | null;
+  /** Proxmox VE version ("9.1.1"); only on a Proxmox node. */
+  proxmoxVersion: string | null;
+  /** For display: "Debian 12.8 (bookworm)", "Proxmox VE 9.1.1 · Debian 13.2 (trixie)". */
+  label: string;
+}
+
 export interface Container {
   id: number;
   /** Host the target is reached through (its Proxmox node, or the server itself); null = not assigned. */
@@ -464,6 +481,8 @@ export interface Container {
   aptUpgradable: AptPackage[];
   /** Why a restart is needed (last check); empty = none. */
   restartReasons: string[];
+  /** Operating system read by the last check; null = not read yet. */
+  os: OsRelease | null;
   /** Home Assistant OS of a virtual machine; null for containers and the host. */
   homeAssistant: HomeAssistantInfo | null;
   lastCheckedAt: string | null;

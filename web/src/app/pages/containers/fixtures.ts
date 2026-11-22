@@ -113,6 +113,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
     { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
   ],
   restartReasons: [],
+  os: null,
   homeAssistant: null,
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,

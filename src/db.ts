@@ -457,6 +457,8 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE hosts ADD COLUMN backup_storage TEXT;`,
   // Password sign-in can be turned off (passkeys only); `--reset-login` brings it back with a new account.
   `ALTER TABLE account ADD COLUMN password_login INTEGER NOT NULL DEFAULT 1;`,
+  // Operating system of a target (/etc/os-release, JSON `OsRelease`) read by the last check; NULL = not read yet.
+  `ALTER TABLE containers ADD COLUMN os_release TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

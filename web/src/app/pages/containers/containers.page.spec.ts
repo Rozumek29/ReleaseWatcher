@@ -174,6 +174,23 @@ describe('ContainersPage', () => {
     expect(el.querySelector('h1')?.textContent).toBe('Machines');
   });
 
+  it('shows the operating system read by the last check', async () => {
+    const os = {
+      id: 'debian',
+      name: 'Debian GNU/Linux',
+      versionId: '12',
+      pointVersion: '12.8',
+      codename: 'bookworm',
+      prettyName: 'Debian GNU/Linux 12 (bookworm)',
+      proxmoxVersion: null,
+      label: 'Debian 12.8 (bookworm)',
+    };
+    const { el } = await create([container({ id: 1, os })]);
+    const meta = [...el.querySelectorAll<HTMLElement>('.detail .meta-item')].find((m) => m.textContent?.includes('Debian'));
+    expect(meta?.textContent?.trim()).toBe('Debian 12.8 (bookworm)');
+    expect(meta?.title).toBe('Debian GNU/Linux 12 (bookworm)');
+  });
+
   it('works with servers only – without a Proxmox node', async () => {
     const server = container({
       id: 7,

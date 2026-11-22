@@ -37,6 +37,9 @@ import {
   NODE_RESTART_DELAY_SECONDS,
   parseGuestExecResult,
   parseRestartCheck,
+  OS_CHECK_SCRIPT,
+  osLabel,
+  parseOsRelease,
   readyWaitSeconds,
   restartCheckScript,
   restartGuestCommand,
@@ -129,6 +132,7 @@ const NODE_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
 const RESTART_CHECK_TIMEOUT_SECONDS = 60;
+const OS_CHECK_TIMEOUT_SECONDS = 15;
 const HA_CHECK_TIMEOUT_SECONDS = 90;
 /** One Home Assistant update (an app, Core, an integration); Core updates download a large image. */
 const HA_UPDATE_TIMEOUT_MS = 30 * 60_000;
@@ -1287,6 +1291,7 @@ export class ContainerService {
       steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
+    steps.push({ id: 'os', script: OS_CHECK_SCRIPT, timeoutSeconds: OS_CHECK_TIMEOUT_SECONDS });
     if (capabilities(container.kind).homeAssistant) {
       steps.push({ id: 'ha', script: HA_CHECK_SCRIPT, timeoutSeconds: HA_CHECK_TIMEOUT_SECONDS });
     }
@@ -1356,6 +1361,16 @@ export class ContainerService {
       } else {
         // Worded without "failed": lastNote() must keep reporting the update's own failure.
         log.note(`Could not tell whether a restart is needed: ${describeStep(restart)}`);
+      }
+
+      // Informational only: a failed probe keeps the system read by an earlier check.
+      const os = batch.steps.get('os');
+      const osRelease = os?.exitCode === 0 ? parseOsRelease(os.output) : null;
+      if (osRelease) {
+        container.osRelease = osRelease;
+        log.note(`System: ${osLabel(osRelease)}`);
+      } else {
+        log.note(`Could not read the operating system: ${os?.exitCode === 0 ? 'no system named in os-release' : describeStep(os)}`);
       }
 
       for (const app of apps) {

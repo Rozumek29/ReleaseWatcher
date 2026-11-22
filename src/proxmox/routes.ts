@@ -24,6 +24,7 @@ import {
   targetLabel,
   targetTitle,
   capabilities,
+  osLabel,
 } from './domain.ts';
 import { installBlocker, normalizeHomeAssistantUrl } from './home-assistant.ts';
 import type { ContainerScheduler } from './scheduler.ts';
@@ -264,6 +265,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       aptUpgradable: c.aptUpgradable,
       /** Why a restart is needed (last check); empty = none. */
       restartReasons: c.restartReasons,
+      /** Operating system read by the last check (`label` for display); null = not read yet. */
+      os: c.osRelease ? { ...c.osRelease, label: osLabel(c.osRelease) } : null,
       homeAssistant: homeAssistantDto(c),
       lastCheckedAt: c.lastCheckedAt,
       lastError: c.lastError,

@@ -257,6 +257,9 @@ A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. 
   with a **Restart** button (after a confirmation): a container or VM is restarted with `pct reboot` / `qm reboot` (detached, so it
   also works for the container ReleaseWatcher runs in) and checked again; for the host a reboot is scheduled 15 s
   later with `systemd-run` and refused while other checks or updates run. Restarts never happen automatically.
+- **Operating system:** every check also reads `/etc/os-release` (plus the Debian point release from
+  `/etc/debian_version` and, on the host, `pveversion`) and shows it next to the target, e.g. *Debian 12.8 (bookworm)*
+  or *Proxmox VE 9.1.1 · Debian 13.2 (trixie)*. It is informational only – release upgrades are not detected or run.
 - **Stopped containers** are not started by default: a check only reads their status and keeps the last results;
   updates are refused. Enable **Start temporarily when stopped** to have checks and updates start the container
   (`pct start`), wait for its network and shut it down afterwards.
@@ -604,7 +607,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output. Like the other `/api/proxmox/*` routes and `POST /api/containers/node` / `add-all`, it takes `?hostId=` (default: the first node); `POST /api/containers` takes `hostId` in the body |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
 | `GET` | `/api/proxmox/storages` | Storages of a node (`?hostId=`) that accept backups |
-| `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
+| `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `os` (operating system with a display `label`), `isBusy` and `activeRunId` |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |

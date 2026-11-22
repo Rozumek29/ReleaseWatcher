@@ -128,6 +128,8 @@ export interface Container {
   aptUpgradable: AptPackage[];
   /** Why the container (or host) should be restarted, from the last check; empty = no restart needed. */
   restartReasons: string[];
+  /** Operating system read by the last successful check; null = not read yet. */
+  osRelease: OsRelease | null;
   /** Home Assistant OS found in this virtual machine by the last check (its pending updates); null = not HAOS. */
   homeAssistant: HomeAssistantState | null;
   /** Base URL of Home Assistant for the REST API (live checks, integration updates); null = not configured. */
@@ -789,6 +791,93 @@ export function parseRestartCheck(output: string): string[] {
     reasons.push(`Processes use upgraded files: ${names.slice(0, MAX_STALE_NAMES).join(', ')}${more}`);
   }
   return reasons;
+}
+
+/** Operating system of a target, read from `/etc/os-release` by the last check. */
+export interface OsRelease {
+  /** `ID`: debian, ubuntu, alpine, haos… */
+  id: string | null;
+  /** `NAME`: "Debian GNU/Linux". */
+  name: string | null;
+  /** `VERSION_ID`: "12", "24.04"; null on Debian testing/unstable. */
+  versionId: string | null;
+  /** Point release of Debian from `/etc/debian_version` ("12.8"); null elsewhere. */
+  pointVersion: string | null;
+  /** `VERSION_CODENAME`: "bookworm". */
+  codename: string | null;
+  /** `PRETTY_NAME`: "Debian GNU/Linux 12 (bookworm)". */
+  prettyName: string | null;
+  /** Proxmox VE version from `pveversion` ("9.1.1"); only on a Proxmox node. */
+  proxmoxVersion: string | null;
+}
+
+/** Prefix of the extra lines {@link OS_CHECK_SCRIPT} prints after the os-release file. */
+const OS_EXTRA_PREFIX = 'RW_';
+
+/**
+ * Prints the os-release file (`/etc/os-release`, else `/usr/lib/os-release`), the Debian point release and – on a
+ * Proxmox node – `pveversion`. Exits 1 when there is no os-release file.
+ */
+export const OS_CHECK_SCRIPT = String.raw`cat /etc/os-release 2>/dev/null || cat /usr/lib/os-release 2>/dev/null || { echo "no os-release file" >&2; exit 1; }
+if [ -r /etc/debian_version ]; then echo "${OS_EXTRA_PREFIX}DEBIAN_VERSION=$(head -n 1 /etc/debian_version)"; fi
+if command -v pveversion >/dev/null 2>&1; then echo "${OS_EXTRA_PREFIX}PVE_VERSION=$(pveversion 2>/dev/null | head -n 1)"; fi
+true`;
+
+/** Value of an os-release line: unquoted, or in single/double quotes with `\` escapes (os-release(5)). */
+function osReleaseValue(raw: string): string {
+  const value = raw.trim();
+  if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
+    return value.slice(1, -1);
+  }
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    return value.slice(1, -1).replace(/\\([\\"$`])/g, '$1');
+  }
+  return value;
+}
+
+/** Parses the output of {@link OS_CHECK_SCRIPT}; null when it names no system at all. */
+export function parseOsRelease(output: string): OsRelease | null {
+  const values = new Map<string, string>();
+  for (const line of output.split('\n')) {
+    const match = line.match(/^\s*([A-Z][A-Z0-9_]*)=(.*)$/);
+    if (match) {
+      const value = osReleaseValue(match[2]!);
+      if (value) {
+        values.set(match[1]!, value);
+      }
+    }
+  }
+  const get = (key: string): string | null => values.get(key) ?? null;
+  const id = get('ID');
+  const versionId = get('VERSION_ID');
+  // /etc/debian_version also exists on Ubuntu ("trixie/sid") and on Debian testing – use it only when it is a point
+  // release of the Debian version os-release names.
+  const debianVersion = get(`${OS_EXTRA_PREFIX}DEBIAN_VERSION`);
+  const pointVersion =
+    id === 'debian' && versionId && debianVersion && /^\d+(\.\d+)*$/.test(debianVersion) &&
+    (debianVersion === versionId || debianVersion.startsWith(`${versionId}.`))
+      ? debianVersion
+      : null;
+  const pve = get(`${OS_EXTRA_PREFIX}PVE_VERSION`)?.match(/pve-manager\/([^/\s]+)/)?.[1] ?? null;
+  const os: OsRelease = {
+    id,
+    name: get('NAME'),
+    versionId,
+    pointVersion,
+    codename: get('VERSION_CODENAME'),
+    prettyName: get('PRETTY_NAME'),
+    proxmoxVersion: pve,
+  };
+  return os.id || os.name || os.prettyName ? os : null;
+}
+
+/** Short name of a system: "Debian 12.8 (bookworm)", "Ubuntu 24.04.1 LTS", "Proxmox VE 9.1.1 · Debian 13.2 (trixie)". */
+export function osLabel(os: OsRelease): string {
+  const debian = os.id === 'debian' && (os.pointVersion ?? os.versionId);
+  const system = debian
+    ? `Debian ${debian}${os.codename ? ` (${os.codename})` : ''}`
+    : (os.prettyName ?? ([os.name ?? os.id, os.versionId].filter(Boolean).join(' ') || 'Unknown system'));
+  return os.proxmoxVersion ? `Proxmox VE ${os.proxmoxVersion} · ${system}` : system;
 }
 
 /** Human-readable name of a check/update target in logs and notifications. */

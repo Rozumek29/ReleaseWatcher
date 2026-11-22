@@ -345,6 +345,12 @@
                   <app-icon name="clock" [size]="14" />
                   checked {{ c.lastCheckedAt ? (c.lastCheckedAt | relativeTime: now()) : 'never' }}
                 </span>
+                @if (c.os; as os) {
+                  <span class="meta-item" [title]="os.prettyName ?? os.label">
+                    <app-icon name="server" [size]="14" />
+                    {{ os.label }}
+                  </span>
+                }
                 @if (c.nextCheckAt) {
                   <span class="meta-item" [title]="'Schedule: ' + cronOf(c)">
                     <app-icon name="timer" [size]="14" />

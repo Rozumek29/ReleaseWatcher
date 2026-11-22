@@ -25,6 +25,8 @@ import {
   NODE_RESTART_CHECK_SCRIPT,
   NODE_RESTART_COMMAND,
   parseRestartCheck,
+  parseOsRelease,
+  osLabel,
   RESTART_CHECK_SCRIPT,
   restartGuestCommand,
   restartCheckScript,
@@ -362,6 +364,47 @@ describe('proxmox domain', () => {
       'Processes use upgraded files: nginx, sshd',
     ]);
     assert.match(parseRestartCheck(stale)[0]!, /^Processes use upgraded files: proc0, .*, proc7 and 2 more$/);
+  });
+
+  it('reads the operating system from os-release', () => {
+    const debian = parseOsRelease(
+      [
+        'PRETTY_NAME="Debian GNU/Linux 13 (trixie)"',
+        'NAME="Debian GNU/Linux"',
+        'VERSION_ID="13"',
+        'VERSION_CODENAME=trixie',
+        'ID=debian',
+        'RW_DEBIAN_VERSION=13.2',
+        'RW_PVE_VERSION=pve-manager/9.1.1/42db4a6cf33dac83 (running kernel: 6.17.2-1-pve)',
+      ].join('\n'),
+    );
+    assert.deepEqual(debian, {
+      id: 'debian',
+      name: 'Debian GNU/Linux',
+      versionId: '13',
+      pointVersion: '13.2',
+      codename: 'trixie',
+      prettyName: 'Debian GNU/Linux 13 (trixie)',
+      proxmoxVersion: '9.1.1',
+    });
+    assert.equal(osLabel(debian!), 'Proxmox VE 9.1.1 · Debian 13.2 (trixie)');
+    assert.equal(osLabel({ ...debian!, proxmoxVersion: null }), 'Debian 13.2 (trixie)');
+
+    // Ubuntu also has /etc/debian_version ("trixie/sid") – it is not a Debian point release.
+    const ubuntu = parseOsRelease(
+      'NAME="Ubuntu"\nVERSION_ID="24.04"\nID=ubuntu\nPRETTY_NAME="Ubuntu 24.04.1 LTS"\nVERSION_CODENAME=noble\nRW_DEBIAN_VERSION=trixie/sid\n',
+    );
+    assert.equal(ubuntu?.pointVersion, null);
+    assert.equal(osLabel(ubuntu!), 'Ubuntu 24.04.1 LTS');
+
+    // Debian testing has no VERSION_ID; quotes and escapes are removed.
+    const testing = parseOsRelease(`PRETTY_NAME='Debian GNU/Linux forky/sid'\nNAME="Debian \\"GNU\\"/Linux"\nID=debian\nRW_DEBIAN_VERSION=forky/sid\n`);
+    assert.equal(testing?.name, 'Debian "GNU"/Linux');
+    assert.equal(osLabel(testing!), 'Debian GNU/Linux forky/sid');
+
+    assert.equal(osLabel(parseOsRelease('ID=alpine\nVERSION_ID=3.20.3\n')!), 'alpine 3.20.3');
+    assert.equal(parseOsRelease(''), null);
+    assert.equal(parseOsRelease('RW_DEBIAN_VERSION=12.8\n'), null);
   });
 
   it('finds processes that map replaced executables or libraries', () => {
