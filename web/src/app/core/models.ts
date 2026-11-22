@@ -154,9 +154,6 @@ export interface AppSettings {
     checkConcurrencySource: SettingSource;
     minCheckConcurrency: number;
     maxCheckConcurrency: number;
-    /** Storage that receives backups (vzdump) made before updates. */
-    backupStorage: string | null;
-    backupStorageSource: SettingSource;
     /** Back up before updates by default (containers can override, every update can change it). */
     backupBeforeUpdate: boolean;
     backupBeforeUpdateSource: SettingSource;
@@ -230,7 +227,6 @@ export interface SettingsPatch {
   advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
-  backupStorage?: string | null;
   backupBeforeUpdate?: boolean | null;
 }
 
@@ -611,7 +607,7 @@ export interface Host {
   user: string;
   sshKeyId: number | null;
   sshKeyName: string | null;
-  /** Proxmox node: storage for backups before updates; null = the global setting. */
+  /** Proxmox node: storage for backups before updates; null = no backups. */
   backupStorage: string | null;
   /** A key is chosen (whether the host answers shows "Test connection"). */
   configured: boolean;

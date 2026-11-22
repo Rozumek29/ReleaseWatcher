@@ -66,3 +66,40 @@ export async function seedProxmoxHost(deps: SeedDeps): Promise<Host | null> {
   hosts.writeMeta(PROXMOX_SEEDED_META, new Date().toISOString());
   return created;
 }
+
+/** app_meta flag: the former global backup storage was given to the Proxmox nodes (done once). */
+export const BACKUP_STORAGE_SEEDED_META = 'nodeBackupStorageSeeded';
+
+export interface BackupStorageSeedDeps {
+  hosts: HostStore;
+  /** The former global backup storage (saved in the UI or PROXMOX_BACKUP_STORAGE). */
+  legacy: string | null;
+  /** Removes the former setting saved in the UI once the nodes have it. */
+  clearLegacy: () => void;
+  log: Pick<Logger, 'info'>;
+}
+
+/**
+ * Older versions had one global backup storage (Settings → Containers) used by every node without its own. The
+ * storage now belongs to the node only: give the former value, once, to every Proxmox node that has none.
+ * Returns the number of nodes that got it.
+ */
+export function seedNodeBackupStorage(deps: BackupStorageSeedDeps): number {
+  const { hosts, legacy, log } = deps;
+  if (hosts.readMeta(BACKUP_STORAGE_SEEDED_META) !== null) {
+    return 0;
+  }
+  let updated = 0;
+  if (legacy) {
+    for (const node of hosts.listProxmoxHosts()) {
+      if (node.backupStorage === null) {
+        hosts.saveHost({ ...node, backupStorage: legacy });
+        updated++;
+      }
+    }
+    if (updated > 0) log.info({ storage: legacy, nodes: updated }, 'Moved the global backup storage to the Proxmox nodes');
+  }
+  deps.clearLegacy();
+  hosts.writeMeta(BACKUP_STORAGE_SEEDED_META, new Date().toISOString());
+  return updated;
+}

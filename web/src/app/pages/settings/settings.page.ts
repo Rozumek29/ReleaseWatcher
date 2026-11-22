@@ -13,7 +13,6 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import {
   AppSettings,
-  BackupStorage,
   NotificationPreferences,
   RateLimit,
   SettingSource,
@@ -82,9 +81,6 @@ export class SettingsPage implements OnInit {
   protected readonly loadingRateLimit = signal(false);
   protected readonly showWebhook = signal(false);
   protected readonly showToken = signal(false);
-  protected readonly storages = signal<BackupStorage[] | null>(null);
-  protected readonly storagesError = signal<string | null>(null);
-  protected readonly loadingStorages = signal(false);
 
   // Form state. Secrets start empty: an empty field on save means "keep the current value".
   protected webhookUrl = '';
@@ -97,7 +93,6 @@ export class SettingsPage implements OnInit {
   protected advisoryCron = '';
   protected checkCron = '';
   protected checkConcurrency: number | null = 3;
-  protected backupStorage = '';
   protected backupDefault = false;
   protected smtpHost = '';
   protected smtpPort: number | null = 587;
@@ -130,9 +125,6 @@ export class SettingsPage implements OnInit {
   async ngOnInit(): Promise<void> {
     try {
       this.apply(await firstValueFrom(this.api.getSettings()));
-      if (this.settings()?.proxmox.configured) {
-        void this.loadStorages();
-      }
     } catch (error) {
       this.toast.error(error);
     }
@@ -261,7 +253,6 @@ export class SettingsPage implements OnInit {
       // Empty values reset to the environment default.
       containerCheckCron: this.checkCron.trim() || null,
       containerCheckConcurrency: concurrency,
-      backupStorage: this.backupStorage.trim() || null,
       backupBeforeUpdate: this.backupDefault,
     };
     if (await this.save('proxmox', patch, 'Container settings saved.')) {
@@ -272,44 +263,11 @@ export class SettingsPage implements OnInit {
   /** Hosts or keys changed: whether a Proxmox node is configured may have changed too. */
   protected async connectionsChanged(): Promise<void> {
     try {
-      const wasConfigured = this.settings()?.proxmox.configured ?? false;
-      const settings = await firstValueFrom(this.api.getSettings());
-      this.settings.set(settings);
-      if (settings.proxmox.configured && !wasConfigured) {
-        void this.loadStorages();
-      }
+      this.settings.set(await firstValueFrom(this.api.getSettings()));
       void this.statusService.refresh();
     } catch (error) {
       this.toast.error(error);
     }
-  }
-
-  /** Lists the node's storages that accept backups. */
-  protected async loadStorages(): Promise<void> {
-    this.loadingStorages.set(true);
-    this.storagesError.set(null);
-    try {
-      this.storages.set(await firstValueFrom(this.api.getBackupStorages()));
-    } catch (error) {
-      this.storagesError.set(describeError(error));
-    } finally {
-      this.loadingStorages.set(false);
-    }
-  }
-
-  protected isListed(name: string): boolean {
-    return (this.storages() ?? []).some((st) => st.name === name);
-  }
-
-  protected storageLabel(st: BackupStorage): string {
-    const details = [st.type];
-    if (st.availableBytes !== null && st.status === 'active') {
-      details.push(`${formatBytes(st.availableBytes)} free`);
-    }
-    if (st.status !== 'active') {
-      details.push(st.status);
-    }
-    return `${st.name} (${details.join(', ')})`;
   }
 
   /** Sends a sample release through one channel. */
@@ -388,7 +346,6 @@ export class SettingsPage implements OnInit {
     this.advisoryCron = settings.polling.advisoryCron;
     this.checkCron = settings.proxmox.checkCron;
     this.checkConcurrency = settings.proxmox.checkConcurrency;
-    this.backupStorage = settings.proxmox.backupStorage ?? '';
     this.backupDefault = settings.proxmox.backupBeforeUpdate;
     this.smtpHost = settings.email.smtpHost ?? '';
     this.smtpPort = settings.email.smtpPort;
@@ -408,15 +365,4 @@ export class SettingsPage implements OnInit {
       updateFailed: n.updateFailed,
     };
   }
-}
-
-function formatBytes(bytes: number): string {
-  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
-  let value = bytes;
-  let unit = 0;
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024;
-    unit++;
-  }
-  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }

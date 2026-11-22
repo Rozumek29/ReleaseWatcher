@@ -25,6 +25,8 @@ describe('containers API', () => {
   let baseUrl: URL;
   /** Answers requests to the Home Assistant REST API (tests never reach a real one). */
   let haFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /** The Proxmox node the containers live on. */
+  let nodeHostId: number;
 
   const request = async (method: string, url: string, payload?: unknown, headers: Record<string, string> = {}) => {
     const response = await fetch(new URL(url, baseUrl), {
@@ -34,6 +36,12 @@ describe('containers API', () => {
     });
     const text = await response.text();
     return { status: response.status, json: () => JSON.parse(text), text };
+  };
+
+  /** Sets the backup storage of the node and, if given, the global "back up before updates". */
+  const setBackupStorage = async (storage: string, backupBeforeUpdate?: boolean) => {
+    assert.equal((await request('PUT', `/api/hosts/${nodeHostId}`, { backupStorage: storage })).status, 200);
+    if (backupBeforeUpdate !== undefined) await request('PUT', '/api/settings', { backupBeforeUpdate });
   };
 
   beforeEach(async () => {
@@ -50,7 +58,7 @@ describe('containers API', () => {
     notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     const settings = new SettingsService(store, loadConfig({}));
-    addProxmoxHost(store);
+    nodeHostId = addProxmoxHost(store).id;
     haFetch = async () => {
       throw new TypeError('Home Assistant is not reachable in this test');
     };
@@ -391,7 +399,7 @@ describe('containers API', () => {
 
   it('runs apt upgrade after a backup and refreshes the state', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     shell.commands.length = 0;
     shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
     const upgrade = Promise.withResolvers<{ output: string }>();
@@ -456,7 +464,7 @@ describe('containers API', () => {
     assert.deepEqual(await upgrade(), { status: 202, backedUp: false });
     assert.equal((await upgrade({ backup: true })).status, 409);
 
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     assert.deepEqual(await upgrade(), { status: 202, backedUp: true });
     assert.deepEqual(await upgrade({ backup: false }), { status: 202, backedUp: false });
 
@@ -469,7 +477,7 @@ describe('containers API', () => {
 
   it('aborts the update when the backup fails', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/vzdump/, { exitCode: 255, output: 'ERROR: Backup of VM 101 failed - no space left\n' });
     shell.commands.length = 0;
 
@@ -487,10 +495,12 @@ describe('containers API', () => {
     assert.deepEqual((await request('GET', '/api/proxmox/storages')).json(), [
       { name: 'local', type: 'dir', status: 'active', availableBytes: 90 * 1024 },
     ]);
-    assert.equal((await request('PUT', '/api/settings', { backupStorage: 'bad name' })).status, 400);
-    const saved = (await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true })).json();
-    assert.equal(saved.proxmox.backupStorage, 'pbs');
+    assert.equal((await request('PUT', `/api/hosts/${nodeHostId}`, { backupStorage: 'bad name' })).status, 400);
+    await setBackupStorage('pbs');
+    const saved = (await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true })).json();
     assert.equal(saved.proxmox.backupBeforeUpdate, true);
+    assert.equal(saved.proxmox.backupStorage, undefined, 'the storage belongs to the node');
+    assert.deepEqual(saved.proxmox.nodes.map((n: { backupStorage: string | null }) => n.backupStorage), ['pbs']);
   });
 
   it('runs an application update and marks failures', async () => {
@@ -730,7 +740,7 @@ describe('containers API', () => {
 
   it('refuses to update a container that is stopped now', async () => {
     const container = await addContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
     shell.commands.length = 0;
 
@@ -786,7 +796,7 @@ describe('containers API', () => {
 
   it('starts a stopped container temporarily for an update, after the backup', async () => {
     const { container, state } = await stoppableContainer();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
 
     assert.equal((await request('POST', `/api/containers/${container.id}/apt-upgrade`)).status, 202);
@@ -853,7 +863,7 @@ describe('containers API', () => {
       [saved.json().aptEnabled, saved.json().startWhenStopped, saved.json().backupBeforeUpdate],
       [true, false, null],
     );
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await setBackupStorage('local', true);
     assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`, { backup: true })).status, 409);
 
     // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
@@ -966,7 +976,7 @@ describe('containers API', () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
     const node = (await request('POST', '/api/containers/node')).json();
     await app.containers.wait(node.id);
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
@@ -1019,7 +1029,7 @@ describe('containers API', () => {
 
   it('skips the remaining updates of a container after a failure and honours backup: false', async () => {
     const container = await addContainerWithUpdates();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs', backupBeforeUpdate: true });
+    await setBackupStorage('pbs', true);
     shell.on(/apt-get -y/, { exitCode: 100, output: 'E: Could not get lock\n' });
     shell.commands.length = 0;
 
@@ -1035,7 +1045,7 @@ describe('containers API', () => {
 
   it('updates all pending updates of one container: apt, then applications, one backup', async () => {
     const container = await addContainerWithUpdates();
-    await request('PUT', '/api/settings', { backupStorage: 'pbs' });
+    await setBackupStorage('pbs');
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });

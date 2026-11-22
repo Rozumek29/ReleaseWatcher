@@ -48,7 +48,7 @@ export class HostDialog {
   protected port: number | null = 22;
   protected user = 'root';
   protected sshKeyId: number | null = null;
-  /** Proxmox node: its backup storage ('' = the global setting). */
+  /** Proxmox node: its backup storage ('' = none, no backups). */
   protected backupStorage = '';
 
   /** Saved keys to choose from (null while loading). */
@@ -112,6 +112,18 @@ export class HostDialog {
     }
   }
 
+  /** "local (dir, 50 GB free)"; inactive storages say so. */
+  protected storageLabel(st: BackupStorage): string {
+    const details = [st.type];
+    if (st.availableBytes !== null && st.status === 'active') {
+      details.push(`${formatBytes(st.availableBytes)} free`);
+    }
+    if (st.status !== 'active') {
+      details.push(st.status);
+    }
+    return `${st.name} (${details.join(', ')})`;
+  }
+
   protected title(data: HostDialogData): string {
     const what = data.type === 'proxmox' ? 'Proxmox node' : 'server';
     return data.host ? `Edit ${data.host.name}` : `Add ${what}`;
@@ -156,4 +168,15 @@ export class HostDialog {
   protected close(): void {
     this.closed.emit();
   }
+}
+
+function formatBytes(bytes: number): string {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return `${value >= 10 || unit === 0 ? Math.round(value) : value.toFixed(1)} ${units[unit]}`;
 }

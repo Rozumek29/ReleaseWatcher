@@ -66,7 +66,7 @@ describe('ConnectionsPanel', () => {
     expect(el.textContent).toContain('Used by 1 host(s)');
     // More Proxmox nodes can be added.
     expect(el.textContent).toContain('Add Proxmox node');
-    expect(el.textContent).toContain('Backups: global storage');
+    expect(el.textContent).toContain('Backups: none');
     const removes = [...el.querySelectorAll<HTMLButtonElement>('button.btn-danger-ghost')];
     // Host with machines, key in use: disabled; the unused key can be removed.
     expect(removes.map((b) => b.disabled)).toEqual([true, true, false]);
@@ -154,15 +154,17 @@ describe('ConnectionsPanel', () => {
     await settle(fixture);
     http.expectOne('/api/ssh-keys').flush([key(1, { hostCount: 1 })]);
     http.expectOne('/api/proxmox/storages?hostId=1').flush([
-      { name: 'local', type: 'dir', status: 'active', availableBytes: 1 },
-      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 1 },
+      { name: 'local', type: 'dir', status: 'active', availableBytes: 50 * 1024 ** 3 },
+      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 2 * 1024 ** 4 },
+      { name: 'nas', type: 'cifs', status: 'inactive', availableBytes: 0 },
     ]);
     await settle(fixture);
     const select = el.querySelector<HTMLSelectElement>('#host-backup')!;
     expect([...select.options].map((o) => o.textContent?.trim())).toEqual([
-      '– the global setting (Settings → Containers) –',
-      'local (dir)',
-      'pbs (pbs)',
+      '– none (no backups before updates) –',
+      'local (dir, 50 GB free)',
+      'pbs (pbs, 2.0 TB free)',
+      'nas (cifs, inactive)',
     ]);
     select.value = 'pbs';
     select.dispatchEvent(new Event('change'));

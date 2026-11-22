@@ -12,15 +12,16 @@ const settings: AppSettings = {
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   proxmox: {
     configured: true,
-    nodes: [{ id: 1, name: 'pve', configured: true, backupStorage: null }],
+    nodes: [
+      { id: 1, name: 'pve', configured: true, backupStorage: 'pbs' },
+      { id: 2, name: 'pve2', configured: true, backupStorage: null },
+    ],
     checkCron: '0 */6 * * *',
     checkCronSource: 'env',
     checkConcurrency: 3,
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
-    backupStorage: 'pbs',
-    backupStorageSource: 'ui',
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },
@@ -150,25 +151,19 @@ describe('SettingsPage', () => {
     http.expectOne('/api/settings').flush(settings);
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
-    http.expectOne('/api/proxmox/storages').flush([
-      { name: 'local', type: 'dir', status: 'active', availableBytes: 50 * 1024 ** 3 },
-      { name: 'pbs', type: 'pbs', status: 'active', availableBytes: 2 * 1024 ** 4 },
-      { name: 'nas', type: 'cifs', status: 'inactive', availableBytes: 0 },
-    ]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
     const section = el.querySelector<HTMLElement>('section[aria-labelledby=proxmox-title]')!;
-    const storage = section.querySelector<HTMLSelectElement>('#pve-backup-storage')!;
-    expect([...storage.options].map((o) => o.textContent?.trim())).toEqual([
-      '– none (no backups before updates) –',
-      'local (dir, 50 GB free)',
-      'pbs (pbs, 2.0 TB free)',
-      'nas (cifs, inactive)',
+    // The storage belongs to each node (edited under Connections); here it is only listed.
+    expect(section.querySelector('select#pve-backup-storage')).toBeNull();
+    const rows = [...section.querySelectorAll('.node-storages li')].map((li) =>
+      [...li.children].map((c) => c.textContent?.trim()),
+    );
+    expect(rows).toEqual([
+      ['pve', 'pbs'],
+      ['pve2', 'none – no backups'],
     ]);
-    expect(storage.value).toBe('pbs');
-    storage.value = 'local';
-    storage.dispatchEvent(new Event('change'));
     [...section.querySelectorAll<HTMLElement>('app-switch button, app-switch [role=switch]')]
       .find((b) => b.closest('app-switch')?.textContent?.includes('Back up before updates'))!
       .click();
@@ -188,7 +183,6 @@ describe('SettingsPage', () => {
     expect(save.request.body).toEqual({
       containerCheckCron: '0 3 * * *',
       containerCheckConcurrency: 5,
-      backupStorage: 'local',
       backupBeforeUpdate: false,
     });
     save.flush(settings);
@@ -212,7 +206,6 @@ describe('SettingsPage', () => {
     });
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
-    http.expectOne('/api/proxmox/storages').flush([]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;

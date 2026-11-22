@@ -35,7 +35,7 @@
                   <span><app-icon name="key" [size]="12" /> {{ h.sshKeyName }}</span>
                 }
                 @if (h.type === 'proxmox') {
-                  <span>Backups: {{ h.backupStorage ?? 'global storage' }}</span>
+                  <span>Backups: {{ h.backupStorage ?? 'none' }}</span>
                 }
                 <span>{{ h.targetCount }} watched machine(s)</span>
               </div>
