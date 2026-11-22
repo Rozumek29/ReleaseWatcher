@@ -459,6 +459,18 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE account ADD COLUMN password_login INTEGER NOT NULL DEFAULT 1;`,
   // Operating system of a target (/etc/os-release, JSON `OsRelease`) read by the last check; NULL = not read yet.
   `ALTER TABLE containers ADD COLUMN os_release TEXT;`,
+  // API tokens for dashboards and scripts (`Authorization: Bearer` / `X-API-Key`); only a SHA-256 of the token is stored.
+  `CREATE TABLE api_tokens (
+     id           INTEGER PRIMARY KEY AUTOINCREMENT,
+     name         TEXT NOT NULL,
+     scope        TEXT NOT NULL,
+     token_hash   TEXT NOT NULL UNIQUE,
+     prefix       TEXT NOT NULL,
+     created_at   TEXT NOT NULL,
+     expires_at   TEXT,
+     last_used_at TEXT,
+     last_used_ip TEXT
+   );`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

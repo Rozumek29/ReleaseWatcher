@@ -12,7 +12,7 @@ import {
 } from './advisories.ts';
 import { AdvisoryImpacts } from './advisory-impacts.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
-import { AuthService, requestContext, sessionTokenFrom } from './auth/service.ts';
+import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
 import { ReleaseChecker } from './checker.ts';
 import type { AdvisoryCursor, AdvisoryFilter, RepositoryStore } from './db.ts';
@@ -831,7 +831,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return Response.json(settingsDto());
   };
 
-  // Login: every route except PUBLIC_ROUTES needs a session (the API can run commands as root on the node).
+  // Login: every route except PUBLIC_ROUTES needs a session or an API token (the API can run commands as root on the node).
   const requireAuth = deps.auth?.requireAuth ?? true;
   const context = (req: Request, server: Bun.Server<undefined>) =>
     requestContext(req, server.requestIP(req)?.address ?? null, {
@@ -839,6 +839,31 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       trustProxy: deps.auth?.trustProxy ?? false,
     });
   const signedIn = (req: Request) => auth.sessionFromToken(sessionTokenFrom(req)) !== null;
+  /**
+   * Access to a protected route: a signed-in browser session, or an API token (`Authorization: Bearer` /
+   * `X-API-Key`) for dashboards and scripts. A `read` token only reads (GET/HEAD); no token reaches the account
+   * routes (/api/auth/*). Returns null when allowed, otherwise the problem response.
+   */
+  const denied = (req: Request, server: Bun.Server<undefined>, path: string): Response | null => {
+    if (signedIn(req)) {
+      return null;
+    }
+    const value = apiTokenFrom(req);
+    if (!value) {
+      return problem(401, 'Sign in first.');
+    }
+    const token = auth.apiTokenFromValue(value, context(req, server).ip);
+    if (!token) {
+      return problem(401, 'The API token is invalid, expired or revoked.');
+    }
+    if (path.startsWith('/api/auth/')) {
+      return problem(403, 'API tokens cannot manage the account – sign in instead.');
+    }
+    if (token.scope === 'read' && req.method !== 'GET' && req.method !== 'HEAD') {
+      return problem(403, 'This API token can only read – use a token with full access to change data.');
+    }
+    return null;
+  };
   /**
    * CSRF defence on top of SameSite=Strict cookies: browsers send Origin with every state-changing request,
    * and it must be this site. Requests without Origin (curl, scripts) carry no browser cookies anyway.
@@ -872,8 +897,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         if (!sameOrigin(req)) {
           return noStore(problem(403, 'Cross-site request refused.'));
         }
-        if (requireAuth && !PUBLIC_ROUTES.has(path) && !signedIn(req)) {
-          return noStore(problem(401, 'Sign in first.'));
+        const refused = requireAuth && !PUBLIC_ROUTES.has(path) ? denied(req, server, path) : null;
+        if (refused) {
+          return noStore(refused);
         }
         // API responses are per-user, live data: never let a browser or proxy cache them.
         return noStore(await handler(req, server));
@@ -895,12 +921,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   // Angular UI + SPA fallback (see static-ui.ts); everything else (incl. unknown /api routes) is a 404 problem.
   const ui = await loadUi(deps);
-  const fallback = (req: Request) => {
+  const fallback = (req: Request, server: Bun.Server<undefined>) => {
     const { pathname } = new URL(req.url);
     if (ui && (req.method === 'GET' || req.method === 'HEAD') && !pathname.startsWith('/api/')) {
       return ui.respond(req, pathname);
     }
-    return noStore(requireAuth && !signedIn(req) ? problem(401, 'Sign in first.') : problem(404, 'Not found.'));
+    return noStore((requireAuth ? denied(req, server, pathname) : null) ?? problem(404, 'Not found.'));
   };
 
   let server: Bun.Server<undefined> | null = null;

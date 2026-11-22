@@ -595,6 +595,37 @@ export interface SessionInfo {
   current: boolean;
 }
 
+/** What an API token may do: `read` = GET only, `full` = everything except the account. */
+export type ApiTokenScope = 'read' | 'full';
+
+/** An API token for dashboards and scripts; its value is shown only once, when it is created. */
+export interface ApiTokenInfo {
+  id: number;
+  name: string;
+  scope: ApiTokenScope;
+  /** Beginning of the token (`rw_` + 8 characters) to recognise it. */
+  prefix: string;
+  createdAt: string;
+  /** null = never expires. */
+  expiresAt: string | null;
+  expired: boolean;
+  lastUsedAt: string | null;
+  lastUsedIp: string | null;
+}
+
+/** POST /api/auth/api-tokens */
+export interface NewApiToken {
+  name: string;
+  scope: ApiTokenScope;
+  /** null = never expires. */
+  expiresInDays: number | null;
+}
+
+export interface CreatedApiToken extends ApiTokenInfo {
+  /** The full token – send it as `Authorization: Bearer …` or `X-API-Key: …`. */
+  token: string;
+}
+
 /** PUT /api/auth/account – the current password is always required. */
 export interface AccountUpdate {
   currentPassword: string;

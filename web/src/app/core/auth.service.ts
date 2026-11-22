@@ -2,7 +2,15 @@ import { HttpClient } from '@angular/common/http';
 import { Injectable, InjectionToken, computed, inject, signal } from '@angular/core';
 import { startAuthentication, startRegistration } from '@simplewebauthn/browser';
 import { firstValueFrom } from 'rxjs';
-import { AccountUpdate, AuthState, PasskeyInfo, SessionInfo } from './models';
+import {
+  AccountUpdate,
+  ApiTokenInfo,
+  AuthState,
+  CreatedApiToken,
+  NewApiToken,
+  PasskeyInfo,
+  SessionInfo,
+} from './models';
 
 type AuthenticationOptions = Parameters<typeof startAuthentication>[0]['optionsJSON'];
 type RegistrationOptions = Parameters<typeof startRegistration>[0]['optionsJSON'];
@@ -163,5 +171,18 @@ export class AuthService {
 
   async endSession(id: string): Promise<void> {
     await firstValueFrom(this.http.delete<void>(`${this.baseUrl}/sessions/${encodeURIComponent(id)}`));
+  }
+
+  listApiTokens(): Promise<ApiTokenInfo[]> {
+    return firstValueFrom(this.http.get<ApiTokenInfo[]>(`${this.baseUrl}/api-tokens`));
+  }
+
+  /** Creates an API token; the response is the only time its value is sent. */
+  createApiToken(body: NewApiToken): Promise<CreatedApiToken> {
+    return firstValueFrom(this.http.post<CreatedApiToken>(`${this.baseUrl}/api-tokens`, body));
+  }
+
+  async deleteApiToken(id: number): Promise<void> {
+    await firstValueFrom(this.http.delete<void>(`${this.baseUrl}/api-tokens/${id}`));
   }
 }

@@ -3,7 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { AuthService, WEBAUTHN } from '../../core/auth.service';
-import { PasskeyInfo, SessionInfo } from '../../core/models';
+import { ApiTokenInfo, PasskeyInfo, SessionInfo } from '../../core/models';
 import { settle } from '../../testing';
 import { AccountPage } from './account.page';
 
@@ -29,6 +29,19 @@ const session = (overrides: Partial<SessionInfo>): SessionInfo => ({
   ...overrides,
 });
 
+const apiToken = (overrides: Partial<ApiTokenInfo>): ApiTokenInfo => ({
+  id: 1,
+  name: 'Homepage',
+  scope: 'read',
+  prefix: 'rw_AbCd1234',
+  createdAt: '2026-01-01T00:00:00Z',
+  expiresAt: null,
+  expired: false,
+  lastUsedAt: null,
+  lastUsedIp: null,
+  ...overrides,
+});
+
 const type = (el: HTMLElement, selector: string, value: string) => {
   const input = el.querySelector<HTMLInputElement>(selector)!;
   input.value = value;
@@ -39,7 +52,12 @@ describe('AccountPage', () => {
   let http: HttpTestingController;
   const webauthn = { supported: vi.fn(() => true), authenticate: vi.fn(), register: vi.fn() };
 
-  const create = async (supported = true, passwordLogin = true, passkeys = [passkey]) => {
+  const create = async (
+    supported = true,
+    passwordLogin = true,
+    passkeys = [passkey],
+    apiTokens: ApiTokenInfo[] = [],
+  ) => {
     webauthn.supported.mockReturnValue(supported);
     await TestBed.configureTestingModule({
       imports: [AccountPage],
@@ -65,6 +83,7 @@ describe('AccountPage', () => {
       session({ id: 'me', current: true }),
       session({ id: 'phone', method: 'passkey', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1' }),
     ]);
+    http.expectOne('/api/auth/api-tokens').flush(apiTokens);
     await settle(fixture);
     return { fixture, el: fixture.nativeElement as HTMLElement };
   };
@@ -173,5 +192,55 @@ describe('AccountPage', () => {
     http.expectOne('/api/auth/sessions').flush([session({ id: 'me', current: true })]);
     await settle(fixture);
     expect(el.querySelectorAll('.session').length).toBe(1);
+  });
+  it('lists API tokens without their value', async () => {
+    const { el } = await create(true, true, [passkey], [
+      apiToken({ lastUsedAt: '2026-01-02T00:00:00Z', lastUsedIp: '10.0.0.5' }),
+      apiToken({ id: 2, name: 'Script', scope: 'full', expiresAt: '2026-01-05T00:00:00Z', expired: true }),
+    ]);
+    const text = el.querySelector('[aria-labelledby=tokens-title]')!.textContent!;
+    expect(text).toContain('Homepage');
+    expect(text).toContain('Read only');
+    expect(text).toContain('rw_AbCd1234…');
+    expect(text).toContain('from 10.0.0.5');
+    expect(text).toContain('never expires');
+    expect(text).toContain('Full access');
+    expect(text).toContain('Expired');
+  });
+
+  it('creates an API token and shows its value once', async () => {
+    const { fixture, el } = await create();
+    const submit = () => el.querySelector<HTMLButtonElement>('.token-form button[type=submit]')!.click();
+    submit();
+    await settle(fixture);
+    http.expectNone('/api/auth/api-tokens');
+    expect(el.querySelector('.token-form')!.textContent).toContain('Enter a name for the token.');
+
+    type(el, '#token-name', 'Homepage');
+    const expiry = el.querySelector<HTMLSelectElement>('#token-expiry')!;
+    expiry.selectedIndex = [...expiry.options].findIndex((o) => o.textContent?.trim() === 'Never');
+    expiry.dispatchEvent(new Event('change'));
+    submit();
+    const request = http.expectOne((r) => r.method === 'POST' && r.url === '/api/auth/api-tokens');
+    expect(request.request.body).toEqual({ name: 'Homepage', scope: 'read', expiresInDays: null });
+    request.flush({ ...apiToken({ id: 7 }), token: 'rw_AbCd1234secret' }, { status: 201, statusText: 'Created' });
+    await settle(fixture);
+    expect(el.querySelector('.new-token code')!.textContent).toBe('rw_AbCd1234secret');
+    expect(el.querySelectorAll('[aria-labelledby=tokens-title] .list-item').length).toBe(1);
+
+    [...el.querySelectorAll<HTMLButtonElement>('.new-token button')].find((b) => b.textContent?.trim() === 'Done')!.click();
+    await settle(fixture);
+    expect(el.querySelector('.new-token')).toBeNull();
+    expect(el.textContent).not.toContain('rw_AbCd1234secret');
+  });
+
+  it('revokes an API token after confirmation', async () => {
+    const { fixture, el } = await create(true, true, [passkey], [apiToken({ id: 3 })]);
+    el.querySelector<HTMLButtonElement>('[aria-label="Revoke API token Homepage"]')!.click();
+    await settle(fixture);
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Revoke')!.click();
+    http.expectOne((r) => r.method === 'DELETE' && r.url === '/api/auth/api-tokens/3').flush(null, { status: 204, statusText: 'No Content' });
+    await settle(fixture);
+    expect(el.querySelector('[aria-labelledby=tokens-title]')!.textContent).toContain('No API tokens yet.');
   });
 });

@@ -103,7 +103,9 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),
   sessions in the `sessions` table (only a SHA-256 of the cookie token). `buildApp` guards every route except
   `PUBLIC_ROUTES` (`src/auth/routes.ts`) and refuses cross-site writes (Origin check). New routes are protected
-  automatically; add a path to `PUBLIC_ROUTES` only if it must work signed out. Tests of other features pass
+  automatically; add a path to `PUBLIC_ROUTES` only if it must work signed out. Instead of a session, a request may
+  carry an API token (`api_tokens`, SHA-256 only; `Authorization: Bearer` or `X-API-Key`, checked by `denied()` in
+  `app.ts`): `read` tokens only `GET`/`HEAD`, `full` tokens everything – but never `/api/auth/*`. Tests of other features pass
   `auth: { requireAuth: false }`; `test/auth.test.ts` has a software passkey for real WebAuthn round trips.
 - Settings: values saved from the UI live in the `settings` table and override env vars; `null` in
   `PUT /api/settings` resets to the env value. Components read `settings.current` lazily (callbacks), so
@@ -118,7 +120,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 ### Secrets
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
-  SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, password hashes, session tokens and the setup code are secrets
+  SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, password hashes, session tokens, API tokens and the setup code are secrets
   (a key is exposed only as its public key and fingerprint, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
   `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
@@ -127,7 +129,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   or `encryption.key` next to the database). Stores encrypt on write and decrypt on read, so the rest of the code
   sees plain values. A new secret setting goes into `SECRET_SETTING_KEYS` (`src/db.ts`); a new secret column is
   encrypted in its store and added to `RepositoryStore.encryptSecrets()` so plain-text values of older databases
-  get migrated. Password hashes and session hashes are hashed, not encrypted.
+  get migrated. Password hashes, session hashes and API token hashes are hashed, not encrypted (an API token value is returned only once, by `POST /api/auth/api-tokens`).
 - Never log secret values.
 
 ## API contract (server ↔ UI)

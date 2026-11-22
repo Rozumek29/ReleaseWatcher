@@ -1,8 +1,8 @@
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { problem, validationProblem } from '../http.ts';
-import { type ObjectSchema, readBody } from '../validation.ts';
+import { type ObjectSchema, parseId, readBody } from '../validation.ts';
 import { AuthError, type AuthService, type RequestContext, sessionCookie, sessionTokenFrom } from './service.ts';
-import type { Session } from './store.ts';
+import type { ApiTokenScope, Session } from './store.ts';
 
 /** Routes reachable without a session (everything else under /api requires one). */
 export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
@@ -54,6 +54,16 @@ const renameSchema: ObjectSchema = {
   type: 'object',
   properties: { name: { type: 'string', maxLength: 100 } },
   required: ['name'],
+};
+
+const apiTokenSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string', maxLength: 100 },
+    scope: { type: 'string', maxLength: 10 },
+    expiresInDays: { type: 'integer', nullable: true, minimum: 1 },
+  },
+  required: ['name', 'scope'],
 };
 
 export interface AuthRoutesDeps {
@@ -200,6 +210,29 @@ export function authRoutes({ auth, context }: AuthRoutesDeps) {
         withSession(req, (session) =>
           auth.endSessions(session, req.params.id) > 0 ? new Response(null, { status: 204 }) : problem(404, 'Session not found.'),
         ),
+    },
+    '/api/auth/api-tokens': {
+      GET: (req: Request) => withSession(req, () => Response.json(auth.listApiTokens())),
+      // The response carries the token value – the only time it leaves the server.
+      POST: async (req: Request) => {
+        const body = await readBody<{ name: string; scope: string; expiresInDays?: number | null }>(req, apiTokenSchema);
+        return withSession(req, () => {
+          const { token, value } = auth.createApiToken({
+            name: body.name,
+            scope: body.scope as ApiTokenScope,
+            expiresInDays: body.expiresInDays ?? null,
+          });
+          return Response.json({ ...token, expired: false, token: value }, { status: 201 });
+        });
+      },
+    },
+    '/api/auth/api-tokens/:id': {
+      DELETE: (req: Bun.BunRequest<'/api/auth/api-tokens/:id'>) => {
+        const id = parseId(req.params.id);
+        return withSession(req, () =>
+          auth.deleteApiToken(id) ? new Response(null, { status: 204 }) : problem(404, 'API token not found.'),
+        );
+      },
     },
   };
 }

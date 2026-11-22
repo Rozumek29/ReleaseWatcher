@@ -60,7 +60,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 **App**
 
 - A single self-contained executable (Bun runtime + UI) or a Docker image; one SQLite file, no external services.
-- Login with password and/or **passkeys**; secrets encrypted at rest (AES-256-GCM).
+- Login with password and/or **passkeys**; **API tokens** (read-only or full) for dashboards like Homepage; secrets encrypted at rest (AES-256-GCM).
 - Clean, responsive UI with light and dark themes; every setting can be changed in the UI without a restart.
 
 <table>
@@ -464,7 +464,9 @@ The UI and the API require a login – **one account** that signs in with a **pa
   header values – are encrypted with AES-256-GCM. The key comes from `ENCRYPTION_KEY` or from `encryption.key`,
   generated next to the database. **Back up the key**: without it the app refuses to start on that database. The
   API never returns secrets (only masked hints).
-- Passwords are stored as argon2id hashes, sessions only as SHA-256 hashes of their tokens.
+- **API tokens** (Account → *API tokens*) let dashboards and scripts call the API without a session – see
+  [API tokens](#api-tokens) below.
+- Passwords are stored as argon2id hashes, sessions and API tokens only as SHA-256 hashes of their tokens.
 
 > [!CAUTION]
 > **The UI can run commands as root on your Proxmox node.** Keep it on a private network or behind HTTPS – over plain
@@ -483,7 +485,7 @@ account is created with them on the first start – sign in with the same creden
 <details>
 <summary><b>Reset the login</b> (forgot the password, no passkey at hand, or lost every passkey with password sign-in off)</summary>
 
-Removes the account, its passkeys and sessions – nothing else (the new account signs in with its password again):
+Removes the account, its passkeys, sessions and API tokens – nothing else (the new account signs in with its password again):
 
 ```bash
 # in the container (on the node: prefix each command with `pct exec <vmid> --`)
@@ -584,7 +586,7 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 ## API
 
 A JSON REST API under `/api` – the same one the UI uses. Everything except `/health`, `/api/version` and the public
-auth endpoints requires a session cookie (`401` otherwise). Errors are
+auth endpoints requires a session cookie or an [API token](#api-tokens) (`401` otherwise). Errors are
 [problem details](https://www.rfc-editor.org/rfc/rfc9457) (`{ status, title, detail?, errors? }`); long operations
 return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 
@@ -668,6 +670,55 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `PATCH` / `DELETE` | `/api/auth/passkeys/:id` | Rename (`{ name }`) / remove a passkey |
 | `GET` / `DELETE` | `/api/auth/sessions` | List sessions / sign out all other sessions |
 | `DELETE` | `/api/auth/sessions/:id` | Sign out one session |
+| `GET` / `POST` | `/api/auth/api-tokens` | List API tokens (name, `scope`, `prefix`, `createdAt`, `expiresAt`, `expired`, `lastUsedAt`, `lastUsedIp` – never the value) / create one `{ "name", "scope": "read" \| "full", "expiresInDays"?: 1–3650 \| null }` → `201` with the `token` (shown only this once; `null` = never expires) |
+| `DELETE` | `/api/auth/api-tokens/:id` | Revoke an API token |
+
+</details>
+
+### API tokens
+
+For dashboards such as [Homepage](https://gethomepage.dev) and for scripts, create a token on the Account page
+(*API tokens*: name, access and expiry – 30 days, 90 days, 1 year or never). The token (`rw_…`) is shown only once;
+the server keeps a SHA-256 hash of it. Send it with either header:
+
+```bash
+curl -H "Authorization: Bearer rw_…" https://watcher.example.com/api/status
+curl -H "X-API-Key: rw_…" https://watcher.example.com/api/status
+```
+
+- **Read only** tokens may only `GET` (`403` for anything else) – enough for dashboards.
+- **Full access** tokens may also change data and start checks, updates and upgrades on your machines.
+- No token reaches the account endpoints (`/api/auth/*` → `403`): tokens cannot change the password, passkeys,
+  sessions or other tokens. Unknown, revoked and expired tokens get `401`.
+- The Account page shows when and from which address each token was last used; revoke a token there.
+
+<details>
+<summary><b>Homepage widget</b> (<code>services.yaml</code>)</summary>
+
+```yaml
+- Monitoring:
+    - ReleaseWatcher:
+        href: https://watcher.example.com
+        icon: mdi-update
+        widget:
+          type: customapi
+          url: https://watcher.example.com/api/status
+          refreshInterval: 60000
+          headers:
+            X-API-Key: rw_… # a read-only token
+          mappings:
+            - field: { repositories: updatesAvailable }
+              label: Updates
+            - field: { containers: aptPending }
+              label: apt updates
+            - field: { containers: appUpdatesAvailable }
+              label: App updates
+            - field: { advisories: affecting }
+              label: Vulnerabilities
+```
+
+`GET /api/status` also has `repositories.total` / `withErrors`, `containers.total` / `withErrors` /
+`homeAssistantUpdatesAvailable` and `advisories.total`.
 
 </details>
 
@@ -727,7 +778,7 @@ src/
   db.ts              bun:sqlite store with versioned migrations
   settings.ts        UI-editable settings stored in SQLite, falling back to env vars
   secret-box.ts      AES-256-GCM encryption of secrets at rest
-  auth/              account, passkeys, sessions, setup code, routes
+  auth/              account, passkeys, sessions, API tokens, setup code, routes
   notifiers/         Notifier interface, dispatcher (types, digest), Discord, e-mail + SMTP client
   proxmox/           SSH client, pct/apt parsing, store, service (checks, updates, runs), scheduler, routes
   install.ts         --install / --uninstall: runs the embedded deploy/ scripts

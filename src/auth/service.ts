@@ -12,13 +12,18 @@ import {
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
 import type { Logger } from '../log.ts';
-import type { AuthStore, LoginMethod, Passkey, Session } from './store.ts';
+import type { ApiToken, ApiTokenScope, AuthStore, LoginMethod, Passkey, Session } from './store.ts';
 
 export const SESSION_COOKIE = 'rw_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
 /** Sliding expiry is written at most this often per session. */
 const SESSION_TOUCH_MS = 60 * 60_000;
 const CHALLENGE_TTL_MS = 5 * 60_000;
+/** API tokens start with this, so they are easy to recognise (and to find with secret scanners). */
+export const API_TOKEN_PREFIX = 'rw_';
+export const MAX_API_TOKEN_DAYS = 3650;
+/** The last use of an API token is written at most this often. */
+const API_TOKEN_TOUCH_MS = 60_000;
 const MAX_PENDING_CHALLENGES = 1000;
 
 export const MIN_PASSWORD_LENGTH = 10;
@@ -461,6 +466,66 @@ export class AuthService {
     return this.store.deletePasskey(id);
   }
 
+  // --- API tokens ---
+
+  listApiTokens(): (ApiToken & { expired: boolean })[] {
+    const now = this.now().getTime();
+    return this.store.listApiTokens().map((t) => ({ ...t, expired: t.expiresAt !== null && Date.parse(t.expiresAt) <= now }));
+  }
+
+  /** Creates an API token; its value is returned only here (the database keeps a SHA-256 of it). */
+  createApiToken(change: { name: string; scope: ApiTokenScope; expiresInDays: number | null }): { token: ApiToken; value: string } {
+    const name = change.name.trim().slice(0, 100);
+    if (!name) {
+      throw new AuthError(400, 'Enter a name for the token.', 'name');
+    }
+    if (change.scope !== 'read' && change.scope !== 'full') {
+      throw new AuthError(400, 'The access must be "read" or "full".', 'scope');
+    }
+    if (change.expiresInDays !== null && (change.expiresInDays < 1 || change.expiresInDays > MAX_API_TOKEN_DAYS)) {
+      throw new AuthError(400, `Choose between 1 and ${MAX_API_TOKEN_DAYS} days.`, 'expiresInDays');
+    }
+    const value = `${API_TOKEN_PREFIX}${randomToken()}`;
+    const now = this.now();
+    const token = this.store.createApiToken({
+      name,
+      scope: change.scope,
+      tokenHash: sha256(value),
+      prefix: value.slice(0, API_TOKEN_PREFIX.length + 8),
+      createdAt: now.toISOString(),
+      expiresAt: change.expiresInDays === null ? null : new Date(now.getTime() + change.expiresInDays * 86_400_000).toISOString(),
+    });
+    this.options.log.info({ name, scope: change.scope, expiresAt: token.expiresAt }, 'API token created');
+    return { token, value };
+  }
+
+  deleteApiToken(id: number): boolean {
+    const deleted = this.store.deleteApiToken(id);
+    if (deleted) {
+      this.options.log.info({ id }, 'API token revoked');
+    }
+    return deleted;
+  }
+
+  /** Returns the valid (known, not expired) API token for a header value, or null; records its use. */
+  apiTokenFromValue(value: string, ip: string | null): ApiToken | null {
+    const token = this.store.getApiTokenByHash(sha256(value));
+    if (!token) {
+      return null;
+    }
+    const now = this.now();
+    if (token.expiresAt && Date.parse(token.expiresAt) <= now.getTime()) {
+      return null;
+    }
+    // Dashboards poll often: the last use is written at most once a minute (or when the address changes).
+    if (!token.lastUsedAt || now.getTime() - Date.parse(token.lastUsedAt) > API_TOKEN_TOUCH_MS || token.lastUsedIp !== ip) {
+      token.lastUsedAt = now.toISOString();
+      token.lastUsedIp = ip;
+      this.store.markApiTokenUsed(token.id, token.lastUsedAt, ip);
+    }
+    return token;
+  }
+
   // --- helpers ---
 
   private createSession(method: LoginMethod, ctx: RequestContext): string {
@@ -527,6 +592,17 @@ export function sessionTokenFrom(req: Request): string | null {
     }
   }
   return null;
+}
+
+/**
+ * Reads an API token from `Authorization: Bearer <token>` or `X-API-Key: <token>` (null = none sent).
+ * Other Authorization schemes (e.g. Basic auth of a reverse proxy) are ignored.
+ */
+export function apiTokenFrom(req: Request): string | null {
+  const authorization = req.headers.get('authorization')?.trim();
+  const bearer = authorization?.match(/^Bearer\s+(\S+)$/i)?.[1];
+  const value = bearer ?? req.headers.get('x-api-key')?.trim();
+  return value ? value : null;
 }
 
 /** Whether the client reached us over HTTPS (directly or through a reverse proxy). */

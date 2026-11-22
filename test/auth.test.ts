@@ -330,4 +330,115 @@ describe('login', () => {
     await setupAccount();
     assert.equal((await client().request('POST', '/api/auth/passkeys/options')).status, 401);
   });
+
+  describe('API tokens', () => {
+    /** A client without cookies that sends the given headers (e.g. a dashboard). */
+    const withHeaders = (headers: Record<string, string>) => (method: string, path: string, body?: unknown) =>
+      client().request(method, path, body, headers);
+    const createToken = async (browser: ReturnType<typeof client>, body: Record<string, unknown>) => {
+      const response = await browser.request('POST', '/api/auth/api-tokens', body);
+      assert.equal(response.status, 201);
+      return response.json() as { id: number; token: string; prefix: string; scope: string; expiresAt: string | null };
+    };
+
+    it('creates a token once and lists it without its value', async () => {
+      await start();
+      const browser = await setupAccount();
+      const created = await createToken(browser, { name: 'Homepage', scope: 'read' });
+      assert.match(created.token, /^rw_[\w-]{40,}$/);
+      assert.equal(created.prefix, created.token.slice(0, 11));
+      assert.equal(created.expiresAt, null);
+
+      const list = await browser.request('GET', '/api/auth/api-tokens');
+      assert.equal(list.status, 200);
+      const [listed] = list.json();
+      assert.equal(listed.name, 'Homepage');
+      assert.equal(listed.scope, 'read');
+      assert.equal(listed.expired, false);
+      assert.equal(listed.token, undefined);
+      assert.equal(JSON.stringify(list.json()).includes(created.token), false);
+      // Only a hash is stored.
+      const row = store.database.query<{ token_hash: string }, []>('SELECT token_hash FROM api_tokens').get()!;
+      assert.notEqual(row.token_hash, created.token);
+      assert.equal(row.token_hash.length, 64);
+    });
+
+    it('lets a read token read with either header, but not write', async () => {
+      await start();
+      const browser = await setupAccount();
+      const { token } = await createToken(browser, { name: 'Homepage', scope: 'read' });
+      const bearer = withHeaders({ authorization: `Bearer ${token}` });
+      const apiKey = withHeaders({ 'x-api-key': token });
+
+      assert.equal((await bearer('GET', '/api/status')).status, 200);
+      assert.equal((await apiKey('GET', '/api/repositories')).status, 200);
+      const write = await bearer('PUT', '/api/settings', {});
+      assert.equal(write.status, 403);
+      assert.match(write.json().title, /only read/);
+      assert.equal((await apiKey('POST', '/api/containers/check-all')).status, 403);
+      // Unknown API paths are a 404 for a valid token.
+      assert.equal((await bearer('GET', '/api/nothing-here')).status, 404);
+
+      const [listed] = (await browser.request('GET', '/api/auth/api-tokens')).json();
+      assert.ok(listed.lastUsedAt);
+      assert.equal(listed.lastUsedIp, '127.0.0.1');
+    });
+
+    it('lets a full token write, but never reach the account routes', async () => {
+      await start();
+      const browser = await setupAccount();
+      const { token } = await createToken(browser, { name: 'Script', scope: 'full' });
+      const bearer = withHeaders({ authorization: `bearer ${token}` });
+      assert.equal((await bearer('PUT', '/api/settings', {})).status, 200);
+      assert.equal((await bearer('GET', '/api/auth/api-tokens')).status, 403);
+      assert.equal((await bearer('POST', '/api/auth/api-tokens', { name: 'More', scope: 'full' })).status, 403);
+      assert.equal((await bearer('GET', '/api/auth/sessions')).status, 403);
+      // Public routes stay public; the auth state does not count a token as a session.
+      assert.equal((await bearer('GET', '/api/auth/state')).json().authenticated, false);
+    });
+
+    it('refuses unknown, revoked and expired tokens and other schemes', async () => {
+      await start();
+      const browser = await setupAccount();
+      const revoked = await createToken(browser, { name: 'Old', scope: 'full' });
+      const expiring = await createToken(browser, { name: 'Short', scope: 'read', expiresInDays: 30 });
+      assert.ok(Date.parse(expiring.expiresAt!) > Date.now() + 29 * 86_400_000);
+
+      assert.equal((await withHeaders({ authorization: 'Bearer rw_wrong' })('GET', '/api/status')).status, 401);
+      assert.equal((await withHeaders({ authorization: `Basic ${btoa('admin:x')}` })('GET', '/api/status')).status, 401);
+      assert.equal((await withHeaders({ 'x-api-key': '' })('GET', '/api/status')).status, 401);
+
+      assert.equal((await browser.request('DELETE', `/api/auth/api-tokens/${revoked.id}`)).status, 204);
+      assert.equal((await browser.request('DELETE', `/api/auth/api-tokens/${revoked.id}`)).status, 404);
+      assert.equal((await withHeaders({ 'x-api-key': revoked.token })('GET', '/api/status')).status, 401);
+
+      assert.equal((await withHeaders({ 'x-api-key': expiring.token })('GET', '/api/status')).status, 200);
+      store.database.query('UPDATE api_tokens SET expires_at = ? WHERE id = ?').run('2000-01-01T00:00:00.000Z', expiring.id);
+      const expired = await withHeaders({ 'x-api-key': expiring.token })('GET', '/api/status');
+      assert.equal(expired.status, 401);
+      assert.match(expired.json().title, /invalid, expired or revoked/);
+      assert.equal((await browser.request('GET', '/api/auth/api-tokens')).json()[0].expired, true);
+    });
+
+    it('validates new tokens and needs a session to manage them', async () => {
+      await start();
+      const browser = await setupAccount();
+      assert.ok((await browser.request('POST', '/api/auth/api-tokens', { name: ' ', scope: 'read' })).json().errors.name);
+      assert.ok((await browser.request('POST', '/api/auth/api-tokens', { name: 'X', scope: 'admin' })).json().errors.scope);
+      assert.equal((await browser.request('POST', '/api/auth/api-tokens', { name: 'X', scope: 'read', expiresInDays: 0 })).status, 400);
+      assert.ok(
+        (await browser.request('POST', '/api/auth/api-tokens', { name: 'X', scope: 'read', expiresInDays: 5000 })).json().errors
+          .expiresInDays,
+      );
+      assert.equal((await client().request('GET', '/api/auth/api-tokens')).status, 401);
+    });
+
+    it('removes the tokens with --reset-login', async () => {
+      await start();
+      const browser = await setupAccount();
+      const { token } = await createToken(browser, { name: 'Homepage', scope: 'read' });
+      new AuthStore(store.database).resetAll();
+      assert.equal((await withHeaders({ 'x-api-key': token })('GET', '/api/status')).status, 401);
+    });
+  });
 });

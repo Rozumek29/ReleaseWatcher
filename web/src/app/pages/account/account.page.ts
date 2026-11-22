@@ -3,14 +3,20 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError, fieldErrors } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
-import { PasskeyInfo, SessionInfo } from '../../core/models';
+import {
+  ApiTokenInfo,
+  ApiTokenScope,
+  CreatedApiToken,
+  PasskeyInfo,
+  SessionInfo,
+} from '../../core/models';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 
-/** The single account: user name, password, passkeys and signed-in sessions. */
+/** The single account: user name, password, passkeys, signed-in sessions and API tokens. */
 @Component({
   selector: 'app-account-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -54,16 +60,31 @@ export class AccountPage implements OnInit {
   // Sessions
   protected readonly sessions = signal<SessionInfo[]>([]);
 
+  // API tokens
+  protected readonly apiTokens = signal<ApiTokenInfo[]>([]);
+  protected readonly expiryOptions = EXPIRY_OPTIONS;
+  protected tokenName = '';
+  protected tokenScope: ApiTokenScope = 'read';
+  /** Days until the token expires; 0 = never. */
+  protected tokenExpiry = 90;
+  protected readonly creatingToken = signal(false);
+  protected readonly tokenErrors = signal<Record<string, string>>({});
+  /** The token just created – its value is shown only until the user dismisses it. */
+  protected readonly createdToken = signal<CreatedApiToken | null>(null);
+  protected readonly confirmRevoke = signal<number | null>(null);
+
   async ngOnInit(): Promise<void> {
     this.username = this.auth.username() ?? '';
     this.newPasskeyName = defaultPasskeyName();
     try {
-      const [passkeys, sessions] = await Promise.all([
+      const [passkeys, sessions, apiTokens] = await Promise.all([
         this.auth.listPasskeys(),
         this.auth.listSessions(),
+        this.auth.listApiTokens(),
       ]);
       this.passkeys.set(passkeys);
       this.sessions.set(sessions);
+      this.apiTokens.set(apiTokens);
     } catch (error) {
       this.toast.error(error);
     }
@@ -217,6 +238,58 @@ export class AccountPage implements OnInit {
     }
   }
 
+  protected async createApiToken(): Promise<void> {
+    if (!this.tokenName.trim()) {
+      this.tokenErrors.set({ name: 'Enter a name for the token.' });
+      return;
+    }
+    this.tokenErrors.set({});
+    this.creatingToken.set(true);
+    try {
+      const created = await this.auth.createApiToken({
+        name: this.tokenName.trim(),
+        scope: this.tokenScope,
+        expiresInDays: this.tokenExpiry > 0 ? this.tokenExpiry : null,
+      });
+      const { token: _, ...info } = created;
+      this.apiTokens.update((list) => [info, ...list]);
+      this.createdToken.set(created);
+      this.tokenName = '';
+    } catch (error) {
+      const fields = fieldErrors(error);
+      if (fields) {
+        this.tokenErrors.set(fields);
+      } else {
+        this.toast.error(error);
+      }
+    } finally {
+      this.creatingToken.set(false);
+    }
+  }
+
+  protected async copyToken(token: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(token);
+      this.toast.success('Token copied.');
+    } catch {
+      this.toast.error('Copying failed – select the token and copy it by hand.');
+    }
+  }
+
+  protected async revokeApiToken(token: ApiTokenInfo): Promise<void> {
+    this.confirmRevoke.set(null);
+    try {
+      await this.auth.deleteApiToken(token.id);
+      this.apiTokens.update((list) => list.filter((t) => t.id !== token.id));
+      if (this.createdToken()?.id === token.id) {
+        this.createdToken.set(null);
+      }
+      this.toast.success(`API token "${token.name}" revoked.`);
+    } catch (error) {
+      this.toast.error(error);
+    }
+  }
+
   protected async signOut(): Promise<void> {
     await this.auth.logout();
     await this.router.navigateByUrl('/login');
@@ -252,6 +325,14 @@ export class AccountPage implements OnInit {
     this.sessions.set(await this.auth.listSessions());
   }
 }
+
+/** Expiry choices for new API tokens (days; 0 = never). */
+const EXPIRY_OPTIONS: readonly { days: number; label: string }[] = [
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: 365, label: '1 year' },
+  { days: 0, label: 'Never' },
+];
 
 function defaultPasskeyName(): string {
   const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent;

@@ -38,6 +38,46 @@ export interface Session {
   expiresAt: string;
 }
 
+/** What an API token may do: `read` = GET/HEAD only, `full` = every method (never the account routes). */
+export type ApiTokenScope = 'read' | 'full';
+
+export interface ApiToken {
+  id: number;
+  name: string;
+  scope: ApiTokenScope;
+  /** Beginning of the token (e.g. `rw_AbCd1234`) so it can be recognised; the rest is never stored. */
+  prefix: string;
+  createdAt: string;
+  /** null = never expires. */
+  expiresAt: string | null;
+  lastUsedAt: string | null;
+  lastUsedIp: string | null;
+}
+
+interface ApiTokenRow {
+  id: number;
+  name: string;
+  scope: string;
+  prefix: string;
+  created_at: string;
+  expires_at: string | null;
+  last_used_at: string | null;
+  last_used_ip: string | null;
+}
+
+const toApiToken = (r: ApiTokenRow): ApiToken => ({
+  id: r.id,
+  name: r.name,
+  scope: r.scope === 'full' ? 'full' : 'read',
+  prefix: r.prefix,
+  createdAt: r.created_at,
+  expiresAt: r.expires_at,
+  lastUsedAt: r.last_used_at,
+  lastUsedIp: r.last_used_ip,
+});
+
+const API_TOKEN_COLUMNS = 'id, name, scope, prefix, created_at, expires_at, last_used_at, last_used_ip';
+
 interface AccountRow {
   username: string;
   password_hash: string;
@@ -137,9 +177,10 @@ export class AuthStore {
     this.db.query('UPDATE account SET password_login = ? WHERE id = 1').run(enabled ? 1 : 0);
   }
 
-  /** Removes the account with all passkeys and sessions (`--reset-login`). */
+  /** Removes the account with all passkeys, sessions and API tokens (`--reset-login`). */
   resetAll(): void {
     this.db.transaction(() => {
+      this.db.run('DELETE FROM api_tokens');
       this.db.run('DELETE FROM sessions');
       this.db.run('DELETE FROM passkeys');
       this.db.run('DELETE FROM account');
@@ -225,5 +266,36 @@ export class AuthStore {
 
   deleteExpiredSessions(now: string): number {
     return this.db.query('DELETE FROM sessions WHERE expires_at <= ?').run(now).changes;
+  }
+
+  listApiTokens(): ApiToken[] {
+    return this.db
+      .query<ApiTokenRow, []>(`SELECT ${API_TOKEN_COLUMNS} FROM api_tokens ORDER BY created_at DESC, id DESC`)
+      .all()
+      .map(toApiToken);
+  }
+
+  getApiTokenByHash(tokenHash: string): ApiToken | null {
+    const r = this.db
+      .query<ApiTokenRow, [string]>(`SELECT ${API_TOKEN_COLUMNS} FROM api_tokens WHERE token_hash = ?`)
+      .get(tokenHash);
+    return r ? toApiToken(r) : null;
+  }
+
+  createApiToken(t: { name: string; scope: ApiTokenScope; tokenHash: string; prefix: string; createdAt: string; expiresAt: string | null }): ApiToken {
+    const { lastInsertRowid } = this.db
+      .query('INSERT INTO api_tokens (name, scope, token_hash, prefix, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(t.name, t.scope, t.tokenHash, t.prefix, t.createdAt, t.expiresAt);
+    return toApiToken(
+      this.db.query<ApiTokenRow, [number]>(`SELECT ${API_TOKEN_COLUMNS} FROM api_tokens WHERE id = ?`).get(Number(lastInsertRowid))!,
+    );
+  }
+
+  markApiTokenUsed(id: number, at: string, ip: string | null): void {
+    this.db.query('UPDATE api_tokens SET last_used_at = ?, last_used_ip = ? WHERE id = ?').run(at, ip, id);
+  }
+
+  deleteApiToken(id: number): boolean {
+    return this.db.query('DELETE FROM api_tokens WHERE id = ?').run(id).changes > 0;
   }
 }

@@ -234,4 +234,125 @@
       </div>
     </div>
   </section>
+
+  <!-- API tokens -->
+  <section class="card section" aria-labelledby="tokens-title">
+    <div class="section-head">
+      <span class="section-icon tokens"><app-icon name="lock" /></span>
+      <div class="section-title">
+        <h2 id="tokens-title">API tokens</h2>
+        <p>
+          For dashboards (e.g. Homepage) and scripts: send a token as <code>Authorization: Bearer …</code> or
+          <code>X-API-Key: …</code>. Tokens never manage this account.
+        </p>
+      </div>
+    </div>
+    <div class="section-body">
+      @if (createdToken(); as created) {
+        <div class="new-token" role="status">
+          <span class="new-token-title">
+            <app-icon name="check" [size]="16" /> Token “{{ created.name }}” created – copy it now, it is not shown again.
+          </span>
+          <div class="new-token-value">
+            <code class="mono">{{ created.token }}</code>
+            <button type="button" class="btn btn-sm btn-secondary" (click)="copyToken(created.token)">Copy</button>
+            <button type="button" class="btn btn-sm btn-ghost" (click)="createdToken.set(null)">Done</button>
+          </div>
+        </div>
+      }
+
+      @if (apiTokens().length === 0) {
+        <p class="muted">No API tokens yet.</p>
+      } @else {
+        <ul class="list">
+          @for (t of apiTokens(); track t.id) {
+            <li class="list-item">
+              <div class="item-main">
+                <span class="item-name">
+                  {{ t.name }}
+                  @if (t.scope === 'full') {
+                    <span class="badge badge-warning">Full access</span>
+                  } @else {
+                    <span class="badge">Read only</span>
+                  }
+                  @if (t.expired) {
+                    <span class="badge badge-danger">Expired</span>
+                  }
+                </span>
+                <span class="item-meta">
+                  <span class="mono">{{ t.prefix }}…</span>
+                  · created {{ t.createdAt | relativeTime: now() }}
+                  · {{ t.lastUsedAt ? 'used ' + (t.lastUsedAt | relativeTime: now()) : 'never used' }}
+                  @if (t.lastUsedIp) {
+                    from {{ t.lastUsedIp }}
+                  }
+                  @if (!t.expired) {
+                    · {{ t.expiresAt ? 'expires ' + (t.expiresAt | relativeTime: now()) : 'never expires' }}
+                  }
+                </span>
+              </div>
+              <div class="item-actions">
+                @if (confirmRevoke() === t.id) {
+                  <span class="confirm-text">Revoke?</span>
+                  <button type="button" class="btn btn-sm btn-danger-ghost" (click)="revokeApiToken(t)">Revoke</button>
+                  <button type="button" class="btn btn-sm btn-ghost" (click)="confirmRevoke.set(null)">Keep</button>
+                } @else {
+                  <button
+                    type="button"
+                    class="icon-btn"
+                    (click)="confirmRevoke.set(t.id)"
+                    [attr.aria-label]="'Revoke API token ' + t.name"
+                    title="Revoke token"
+                  >
+                    <app-icon name="trash" [size]="16" />
+                  </button>
+                }
+              </div>
+            </li>
+          }
+        </ul>
+      }
+
+      <form class="token-form" (ngSubmit)="createApiToken()" novalidate>
+        <div class="field token-name">
+          <label for="token-name">Name</label>
+          <input id="token-name" class="input" name="tokenName" [(ngModel)]="tokenName" maxlength="100" placeholder="Homepage dashboard" [class.invalid]="tokenErrors()['name']" />
+          @if (tokenErrors()['name']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+        <div class="field">
+          <label for="token-scope">Access</label>
+          <select id="token-scope" class="input" name="tokenScope" [(ngModel)]="tokenScope">
+            <option value="read">Read only</option>
+            <option value="full">Full access</option>
+          </select>
+          @if (tokenErrors()['scope']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+        <div class="field">
+          <label for="token-expiry">Expires</label>
+          <select id="token-expiry" class="input" name="tokenExpiry" [(ngModel)]="tokenExpiry">
+            @for (o of expiryOptions; track o.days) {
+              <option [ngValue]="o.days">{{ o.label }}</option>
+            }
+          </select>
+          @if (tokenErrors()['expiresInDays']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+        </div>
+        <span class="hint token-hint">
+          Read only is enough for dashboards. Full access can also start checks, updates and upgrades on your
+          machines – keep such tokens secret.
+        </span>
+        <div class="section-actions token-actions">
+          <span class="spacer"></span>
+          <button type="submit" class="btn" [disabled]="creatingToken()">
+            <app-icon name="plus" [size]="16" /> {{ creatingToken() ? 'Creating…' : 'Create token' }}
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
 </div>
