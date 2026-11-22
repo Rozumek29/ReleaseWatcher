@@ -1,0 +1,84 @@
+<div class="sections">
+  <!-- Theme -->
+  <section class="card section enter" style="--i: 0" aria-labelledby="theme-title">
+    <div class="section-head">
+      <span class="section-icon theme"><app-icon name="sun" /></span>
+      <div class="section-title">
+        <h2 id="theme-title">Theme</h2>
+        <p>Light, dark or the same as your operating system. Saved in this browser only.</p>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="themes" role="radiogroup" aria-labelledby="theme-title">
+        @for (t of themes; track t.mode) {
+          <button
+            type="button"
+            role="radio"
+            class="theme-option"
+            [class.selected]="preferences.theme() === t.mode"
+            [attr.aria-checked]="preferences.theme() === t.mode"
+            (click)="setTheme(t.mode)"
+          >
+            <span class="preview" aria-hidden="true">
+              @for (scheme of t.mode === 'system' ? schemesBoth : [t.mode]; track scheme) {
+                <span class="mini" [attr.data-theme-preview]="scheme">
+                  <span class="mini-side"></span>
+                  <span class="mini-main">
+                    <span class="mini-line"></span>
+                    <span class="mini-line short"></span>
+                    <span class="mini-pill"></span>
+                  </span>
+                </span>
+              }
+            </span>
+            <span class="option-label"><app-icon [name]="t.icon" [size]="16" /> {{ t.label }}</span>
+            <span class="hint">{{ t.hint }}</span>
+          </button>
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- Accent -->
+  <section class="card section enter" style="--i: 1" aria-labelledby="accent-title">
+    <div class="section-head">
+      <span class="section-icon accent"><app-icon name="palette" /></span>
+      <div class="section-title">
+        <h2 id="accent-title">Accent colour</h2>
+        <p>Used for buttons, links, switches and the active page. Saved in this browser only.</p>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="swatches" role="radiogroup" aria-labelledby="accent-title">
+        @for (a of accents; track a.name) {
+          <button
+            type="button"
+            role="radio"
+            class="swatch"
+            [attr.data-accent-preview]="a.name"
+            [class.selected]="preferences.accent() === a.name"
+            [attr.aria-checked]="preferences.accent() === a.name"
+            [attr.aria-label]="a.label"
+            [title]="a.label"
+            (click)="setAccent(a.name)"
+          >
+            <span class="dot">
+              @if (preferences.accent() === a.name) {
+                <app-icon name="check" [size]="16" />
+              }
+            </span>
+            <span class="swatch-label">{{ a.label }}</span>
+          </button>
+        }
+      </div>
+
+      <div class="sample" aria-hidden="true">
+        <span class="btn btn-sm">Button</span>
+        <span class="badge badge-accent">Badge</span>
+        <span class="sample-link">Link</span>
+      </div>
+    </div>
+  </section>
+</div>

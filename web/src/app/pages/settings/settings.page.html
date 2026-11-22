@@ -15,7 +15,17 @@
   <button type="button" role="tab" class="tab" id="tab-notifications" aria-controls="panel-notifications" [class.active]="tab() === 'notifications'" [attr.aria-selected]="tab() === 'notifications'" (click)="selectTab('notifications')">
     <app-icon name="bell" [size]="15" /> Notifications
   </button>
+  <button type="button" role="tab" class="tab" id="tab-appearance" aria-controls="panel-appearance" [class.active]="tab() === 'appearance'" [attr.aria-selected]="tab() === 'appearance'" (click)="selectTab('appearance')">
+    <app-icon name="palette" [size]="15" /> Appearance
+  </button>
 </div>
+
+@if (tab() === 'appearance') {
+<!-- Per-browser, so it does not wait for the server settings. -->
+<div class="fade-in" id="panel-appearance" role="tabpanel" aria-labelledby="tab-appearance">
+  <app-appearance />
+</div>
+} @else {
 
 @if (settings(); as s) {
   @if (tab() === 'general') {
@@ -622,4 +632,5 @@
       <div class="card section skeleton"></div>
     }
   </div>
+}
 }

@@ -61,7 +61,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 
 - A single self-contained executable (Bun runtime + UI) or a Docker image; one SQLite file, no external services.
 - Login with password and/or **passkeys**; **API tokens** (read-only or full) for dashboards like Homepage; secrets encrypted at rest (AES-256-GCM).
-- Clean, responsive UI with light and dark themes; every setting can be changed in the UI without a restart.
+- Clean, responsive UI with light and dark themes (follow the system or pick one) and accent colour presets
+  (*Settings → Appearance*, saved per browser); every setting can be changed in the UI without a restart.
 
 <table>
   <tr>
@@ -70,14 +71,23 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
         <source media="(prefers-color-scheme: dark)" srcset="docs/images/containers-dark.png">
         <img src="docs/images/containers-light.png" alt="Machines page with pending apt packages and application updates">
       </picture>
-      <p align="center"><sub>Containers – pending apt packages and application updates</sub></p>
+      <p align="center"><sub>Machines – pending apt packages and application updates</sub></p>
     </td>
     <td width="50%">
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/images/settings-dark.png">
-        <img src="docs/images/settings-light.png" alt="Settings page with GitHub token, polling interval and Proxmox node">
+        <img src="docs/images/settings-light.png" alt="Settings page with the GitHub token, API quota and check schedules">
       </picture>
       <p align="center"><sub>Settings – applied immediately, no restart</sub></p>
+    </td>
+  </tr>
+  <tr>
+    <td colspan="2" align="center">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="docs/images/appearance-dark.png">
+        <img src="docs/images/appearance-light.png" alt="Appearance settings with light, dark and system themes and accent colour presets" width="50%">
+      </picture>
+      <p align="center"><sub>Appearance – light, dark or system theme and an accent colour</sub></p>
     </td>
   </tr>
 </table>

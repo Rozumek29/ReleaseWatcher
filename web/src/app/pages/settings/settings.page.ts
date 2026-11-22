@@ -25,11 +25,12 @@ import { describeCron } from '../../shared/cron';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
+import { AppearancePanel } from './appearance';
 import { ConnectionsPanel } from './connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
-type Tab = 'general' | 'connections' | 'notifications';
-const TABS: readonly Tab[] = ['general', 'connections', 'notifications'];
+type Tab = 'general' | 'connections' | 'notifications' | 'appearance';
+const TABS: readonly Tab[] = ['general', 'connections', 'notifications', 'appearance'];
 
 /** Default port of each SMTP security mode (used when the port still has the previous mode's default). */
 const SMTP_PORTS: Record<SmtpSecurity, number> = { starttls: 587, tls: 465, none: 25 };
@@ -55,7 +56,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
 @Component({
   selector: 'app-settings-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, ConnectionsPanel, Icon, RelativeTimePipe, Switch],
+  imports: [FormsModule, DecimalPipe, AppearancePanel, ConnectionsPanel, Icon, RelativeTimePipe, Switch],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',
 })

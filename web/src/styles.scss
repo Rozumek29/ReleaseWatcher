@@ -1,4 +1,12 @@
-:root {
+@use 'sass:list';
+@use 'sass:map';
+
+/*
+ * Theme and accent come from Settings → Appearance (per browser): `data-theme` (`light` | `dark`, absent or `system`
+ * = follow the OS) and `data-accent` (a preset name) on <html>, set before the app starts by the script in index.html
+ * and kept in sync by PreferencesService.
+ */
+@mixin light-theme {
   color-scheme: light;
   --bg: #f7f7f9;
   --sidebar-bg: #fbfbfc;
@@ -9,9 +17,6 @@
   --text-muted: #5d6470;
   --border: #e3e5ea;
   --border-strong: #c9cdd5;
-  --accent: #5865f2;
-  --accent-strong: #4752c4;
-  --accent-soft: #eceefe;
   --accent-contrast: #ffffff;
   --success: #1f8a4c;
   --success-soft: #dcf3e5;
@@ -22,33 +27,95 @@
   --danger-border: #f3c2bf;
   --shadow-sm: 0 1px 2px rgb(16 24 40 / 0.05);
   --shadow-lg: 0 10px 30px rgb(16 24 40 / 0.12);
+}
+
+@mixin dark-theme {
+  color-scheme: dark;
+  --bg: #111215;
+  --sidebar-bg: #16171b;
+  --surface: #1b1d22;
+  --surface-2: #25282e;
+  --hover: #22252b;
+  --text: #e9eaee;
+  --text-muted: #9ba1ad;
+  --border: #2a2d34;
+  --border-strong: #41454e;
+  --success: #5dd394;
+  --success-soft: #173326;
+  --warning: #f1bd52;
+  --warning-soft: #392d12;
+  --danger: #ff8278;
+  --danger-soft: #3a1b19;
+  --danger-border: #5b2925;
+  --shadow-sm: none;
+  --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.45);
+}
+
+/*
+ * Accent presets: accent, accent-strong, accent-soft per theme. Keep white text on `accent` and `accent-strong` on
+ * `accent-soft` at WCAG AA. The themes above leave the accent out, so it is set once per theme here.
+ * `[data-accent-preview]` applies a preset to one element (the swatches in Settings).
+ * Keep the names in sync with ACCENTS in core/preferences.service.ts.
+ */
+$accent-presets: (
+  'indigo': (light: (#5865f2, #4752c4, #eceefe), dark: (#6d78f6, #a3aaff, #252848)),
+  'blue': (light: (#2563eb, #1d4ed8, #e8effd), dark: (#3b7cf0, #9cc0ff, #1a2a46)),
+  'teal': (light: (#0f766e, #115e59, #ddf2ef), dark: (#14877d, #6fd8cc, #123230)),
+  'green': (light: (#15803d, #166534, #e1f3e7), dark: (#1f8a4c, #74d69a, #16301f)),
+  'orange': (light: (#c2410c, #9a3412, #fdebe1), dark: (#d4580f, #ffa66e, #3a2214)),
+  'rose': (light: (#e11d48, #be123c, #fde7ec), dark: (#de3158, #ff8fa8, #3d1822)),
+  'violet': (light: (#7c3aed, #6d28d9, #f1eafd), dark: (#8b5cf6, #c4b0ff, #2c2148)),
+);
+
+@mixin accent($tones) {
+  --accent: #{list.nth($tones, 1)};
+  --accent-strong: #{list.nth($tones, 2)};
+  --accent-soft: #{list.nth($tones, 3)};
+}
+
+:root {
+  @include light-theme;
+  @include accent(map.get($accent-presets, 'indigo', light));
   --radius: 12px;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    color-scheme: dark;
-    --bg: #111215;
-    --sidebar-bg: #16171b;
-    --surface: #1b1d22;
-    --surface-2: #25282e;
-    --hover: #22252b;
-    --text: #e9eaee;
-    --text-muted: #9ba1ad;
-    --border: #2a2d34;
-    --border-strong: #41454e;
-    --accent: #6d78f6;
-    --accent-strong: #a3aaff;
-    --accent-soft: #252848;
-    --success: #5dd394;
-    --success-soft: #173326;
-    --warning: #f1bd52;
-    --warning-soft: #392d12;
-    --danger: #ff8278;
-    --danger-soft: #3a1b19;
-    --danger-border: #5b2925;
-    --shadow-sm: none;
-    --shadow-lg: 0 10px 30px rgb(0 0 0 / 0.45);
+  :root:not([data-theme='light']) {
+    @include dark-theme;
+    @include accent(map.get($accent-presets, 'indigo', dark));
+  }
+}
+
+:root[data-theme='dark'] {
+  @include dark-theme;
+  @include accent(map.get($accent-presets, 'indigo', dark));
+}
+
+/* Theme previews in Settings → Appearance: one element in the other theme (the accent stays the active one). */
+[data-theme-preview='light'] {
+  @include light-theme;
+}
+
+[data-theme-preview='dark'] {
+  @include dark-theme;
+}
+
+@each $name, $preset in $accent-presets {
+  :root[data-accent='#{$name}'],
+  [data-accent-preview='#{$name}'] {
+    @include accent(map.get($preset, light));
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root[data-accent='#{$name}']:not([data-theme='light']),
+    :root:not([data-theme='light']) [data-accent-preview='#{$name}'] {
+      @include accent(map.get($preset, dark));
+    }
+  }
+
+  :root[data-theme='dark'][data-accent='#{$name}'],
+  :root[data-theme='dark'] [data-accent-preview='#{$name}'] {
+    @include accent(map.get($preset, dark));
   }
 }
 

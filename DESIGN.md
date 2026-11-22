@@ -119,7 +119,8 @@ Full endpoint list: `README.md` → *API*. Rules for new endpoints:
 ## 3. UI design system
 
 Angular 22 standalone + signals, zoneless, no component library. The look is a calm, neutral admin UI with a
-single indigo accent (Discord-like `#5865f2`), light and dark themes following the OS.
+single accent colour (default indigo, Discord-like `#5865f2`), light and dark themes following the OS. Users can force
+a theme and pick another accent preset in *Settings → Appearance* (per browser).
 
 ### 3.1 Tokens (`web/src/styles.scss`)
 
@@ -139,7 +140,12 @@ Use CSS custom properties – **never hard-code colours** in component styles.
 | `--shadow-sm` (cards), `--shadow-lg` (dialogs, toasts, open mobile sidebar) | elevation |
 | `--radius` (12px) | cards |
 
-Every new token gets a value in **both** `:root` and the `prefers-color-scheme: dark` block. Status colours are
+Theme tokens live in two mixins, `light-theme` and `dark-theme`; `:root` uses the light one, the dark one applies under
+`prefers-color-scheme: dark` unless `<html data-theme="light">`, and always with `data-theme="dark"`. The accent
+(`--accent`, `--accent-strong`, `--accent-soft`) is kept out of the mixins and comes from `$accent-presets` per theme,
+selected by `<html data-accent="…">`. Both attributes are set before the first paint by the script in `index.html` and
+then by `PreferencesService`. Every new token gets a value in **both** mixins; a new accent preset needs light and dark
+tones (white text on `--accent`, `--accent-strong` on `--accent-soft` at WCAG AA) and an entry in `ACCENTS`. Status colours are
 always used in pairs: text in `--x`, background in `--x-soft`.
 
 ### 3.2 Typography & spacing

@@ -11,6 +11,7 @@ import {
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
 import { AuthService } from './core/auth.service';
+import { PreferencesService } from './core/preferences.service';
 import { StatusService } from './core/status.service';
 import { ToastService } from './core/toast.service';
 import { describeCron } from './shared/cron';
@@ -35,6 +36,8 @@ export class App {
   protected readonly statusService = inject(StatusService);
   protected readonly toastService = inject(ToastService);
   protected readonly auth = inject(AuthService);
+  // Applies the saved theme and accent colour.
+  protected readonly preferences = inject(PreferencesService);
   private readonly router = inject(Router);
 
   protected readonly nav: NavItem[] = [
