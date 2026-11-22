@@ -286,8 +286,10 @@
                   @if (t.lastUsedIp) {
                     from {{ t.lastUsedIp }}
                   }
-                  @if (!t.expired) {
-                    · {{ t.expiresAt ? 'expires ' + (t.expiresAt | relativeTime: now()) : 'never expires' }}
+                  @if (t.expiresAt) {
+                    · <span [attr.title]="t.expiresAt | relativeTime: now()">{{ t.expired ? 'expired' : 'expires' }} {{ t.expiresAt | date: 'd MMM y, HH:mm' }}</span>
+                  } @else {
+                    · never expires
                   }
                 </span>
               </div>

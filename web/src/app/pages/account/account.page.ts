@@ -1,4 +1,13 @@
-import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
+import { DatePipe } from '@angular/common';
+import {
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  OnInit,
+  computed,
+  inject,
+  signal,
+} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError, fieldErrors } from '../../core/api.service';
@@ -20,7 +29,7 @@ import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 @Component({
   selector: 'app-account-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, Icon, RelativeTimePipe, Switch],
+  imports: [DatePipe, FormsModule, Icon, RelativeTimePipe, Switch],
   templateUrl: './account.page.html',
   styleUrl: './account.page.scss',
 })
@@ -30,7 +39,13 @@ export class AccountPage implements OnInit {
   private readonly router = inject(Router);
 
   protected readonly minLength = MIN_PASSWORD_LENGTH;
+  /** Ticks so relative times stay fresh; set again right after something is created. */
   protected readonly now = signal(Date.now());
+
+  constructor() {
+    const ticker = setInterval(() => this.now.set(Date.now()), 30_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(ticker));
+  }
 
   // Account form
   protected username = '';
@@ -139,6 +154,7 @@ export class AccountPage implements OnInit {
     this.passkeyError.set(null);
     try {
       this.passkeys.set(await this.auth.addPasskey(this.newPasskeyName.trim() || 'Passkey'));
+      this.now.set(Date.now());
       this.newPasskeyName = defaultPasskeyName();
       this.toast.success('Passkey added – you can sign in with it now.');
     } catch (error) {
@@ -251,6 +267,7 @@ export class AccountPage implements OnInit {
         scope: this.tokenScope,
         expiresInDays: this.tokenExpiry > 0 ? this.tokenExpiry : null,
       });
+      this.now.set(Date.now());
       const { token: _, ...info } = created;
       this.apiTokens.update((list) => [info, ...list]);
       this.createdToken.set(created);

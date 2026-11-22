@@ -196,7 +196,7 @@ describe('AccountPage', () => {
   it('lists API tokens without their value', async () => {
     const { el } = await create(true, true, [passkey], [
       apiToken({ lastUsedAt: '2026-01-02T00:00:00Z', lastUsedIp: '10.0.0.5' }),
-      apiToken({ id: 2, name: 'Script', scope: 'full', expiresAt: '2026-01-05T00:00:00Z', expired: true }),
+      apiToken({ id: 2, name: 'Script', scope: 'full', expiresAt: '2026-01-05T12:00:00Z', expired: true }),
     ]);
     const text = el.querySelector('[aria-labelledby=tokens-title]')!.textContent!;
     expect(text).toContain('Homepage');
@@ -206,6 +206,8 @@ describe('AccountPage', () => {
     expect(text).toContain('never expires');
     expect(text).toContain('Full access');
     expect(text).toContain('Expired');
+    // The exact expiry date and time (local time zone); the relative time is in the tooltip.
+    expect(text).toMatch(/expired 5 Jan 2026, \d{2}:\d{2}/);
   });
 
   it('creates an API token and shows its value once', async () => {
@@ -232,6 +234,22 @@ describe('AccountPage', () => {
     await settle(fixture);
     expect(el.querySelector('.new-token')).toBeNull();
     expect(el.textContent).not.toContain('rw_AbCd1234secret');
+  });
+
+  it('shows a token created after the page opened as just created', async () => {
+    const { fixture, el } = await create();
+    // The page has been open for a minute when the token is created.
+    const later = Date.now() + 60_000;
+    vi.spyOn(Date, 'now').mockReturnValue(later);
+    type(el, '#token-name', 'Homepage');
+    el.querySelector<HTMLButtonElement>('.token-form button[type=submit]')!.click();
+    http
+      .expectOne((r) => r.method === 'POST' && r.url === '/api/auth/api-tokens')
+      .flush({ ...apiToken({ id: 8, createdAt: new Date(later).toISOString() }), token: 'rw_x' });
+    await settle(fixture);
+    const meta = el.querySelector('[aria-labelledby=tokens-title] .item-meta')!.textContent!;
+    vi.restoreAllMocks();
+    expect(meta).toContain('created just now');
   });
 
   it('revokes an API token after confirmation', async () => {
