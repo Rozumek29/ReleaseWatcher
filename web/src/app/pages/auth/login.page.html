@@ -2,49 +2,64 @@
   <div class="auth-brand">
     <span class="logo"><app-icon name="bell" [size]="22" /></span>
     <h1 id="login-title">Sign in to ReleaseWatcher</h1>
+    @if (!passwordLogin()) {
+      <p>Password sign-in is turned off – use a passkey.</p>
+    }
   </div>
 
   @if (error(); as e) {
     <div class="form-error" role="alert"><app-icon name="alert" [size]="16" /> <span>{{ e }}</span></div>
   }
 
-  <form (ngSubmit)="signIn()">
-    <div class="field">
-      <label for="login-username">User name</label>
-      <input
-        id="login-username"
-        class="input"
-        name="username"
-        [(ngModel)]="username"
-        autocomplete="username webauthn"
-        autocapitalize="none"
-        spellcheck="false"
-        required
-      />
-    </div>
-    <div class="field">
-      <label for="login-password">Password</label>
-      <input
-        id="login-password"
-        class="input"
-        type="password"
-        name="password"
-        [(ngModel)]="password"
-        autocomplete="current-password"
-        required
-      />
-    </div>
-    <button type="submit" class="btn btn-block" [disabled]="busy() !== null || !username.trim() || !password">
-      <app-icon name="lock" [size]="16" />
-      {{ busy() === 'password' ? 'Signing in…' : 'Sign in' }}
-    </button>
-  </form>
+  @if (passwordLogin()) {
+    <form (ngSubmit)="signIn()">
+      <div class="field">
+        <label for="login-username">User name</label>
+        <input
+          id="login-username"
+          class="input"
+          name="username"
+          [(ngModel)]="username"
+          autocomplete="username webauthn"
+          autocapitalize="none"
+          spellcheck="false"
+          required
+        />
+      </div>
+      <div class="field">
+        <label for="login-password">Password</label>
+        <input
+          id="login-password"
+          class="input"
+          type="password"
+          name="password"
+          [(ngModel)]="password"
+          autocomplete="current-password"
+          required
+        />
+      </div>
+      <button type="submit" class="btn btn-block" [disabled]="busy() !== null || !username.trim() || !password">
+        <app-icon name="lock" [size]="16" />
+        {{ busy() === 'password' ? 'Signing in…' : 'Sign in' }}
+      </button>
+    </form>
 
-  @if (showPasskey()) {
-    <div class="divider">or</div>
-    <button type="button" class="btn btn-secondary btn-block passkey-btn" (click)="signInWithPasskey()" [disabled]="busy() !== null">
+    @if (showPasskey()) {
+      <div class="divider">or</div>
+      <button type="button" class="btn btn-secondary btn-block passkey-btn" (click)="signInWithPasskey()" [disabled]="busy() !== null">
+        <app-icon name="key" [size]="16" />
+        {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
+      </button>
+    }
+  } @else if (auth.passkeysSupported) {
+    <button type="button" class="btn btn-block passkey-btn passkey-only" (click)="signInWithPasskey()" [disabled]="busy() !== null">
       <app-icon name="key" [size]="16" />
       {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
     </button>
+  } @else {
+    <p class="passkey-help" role="note">
+      Passkeys only work over <strong>HTTPS with a host name</strong> – open ReleaseWatcher at the address you added the
+      passkey on. Lost access? Run <code>--reset-login</code> on the server (see the README).
+    </p>
   }
 </section>

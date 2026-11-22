@@ -30,6 +30,7 @@ const SIGNED_OUT: AuthState = {
   authenticated: false,
   username: null,
   hasPasskeys: false,
+  passwordLogin: true,
 };
 
 /** Login state and all /api/auth calls. */
@@ -39,6 +40,8 @@ export class AuthService {
   private readonly webauthn = inject(WEBAUTHN);
   private readonly baseUrl = '/api/auth';
   private loading: Promise<AuthState> | null = null;
+  /** Set by an explicit sign-out, so the login screen does not open the passkey prompt right away. */
+  private signedOutByUser = false;
 
   /** Null until the first load. */
   readonly state = signal<AuthState | null>(null);
@@ -102,7 +105,15 @@ export class AuthService {
     );
   }
 
+  /** True once after the user signed out (consumed by the login screen). */
+  takeSignedOutByUser(): boolean {
+    const value = this.signedOutByUser;
+    this.signedOutByUser = false;
+    return value;
+  }
+
   async logout(): Promise<void> {
+    this.signedOutByUser = true;
     try {
       await firstValueFrom(this.http.post<void>(`${this.baseUrl}/logout`, {}));
     } finally {

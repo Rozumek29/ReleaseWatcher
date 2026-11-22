@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError, fieldErrors } from '../../core/api.service';
@@ -7,13 +7,14 @@ import { PasskeyInfo, SessionInfo } from '../../core/models';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { Switch } from '../../shared/switch';
 import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 
 /** The single account: user name, password, passkeys and signed-in sessions. */
 @Component({
   selector: 'app-account-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, Icon, RelativeTimePipe],
+  imports: [FormsModule, Icon, RelativeTimePipe, Switch],
   templateUrl: './account.page.html',
   styleUrl: './account.page.scss',
 })
@@ -41,6 +42,14 @@ export class AccountPage implements OnInit {
   protected readonly renaming = signal<string | null>(null);
   protected renameValue = '';
   protected readonly confirmDelete = signal<string | null>(null);
+
+  // Password sign-in (off = passkeys only)
+  protected readonly passwordLogin = computed(() => this.auth.state()?.passwordLogin ?? true);
+  /** The value being confirmed with the current password; null = no change in progress. */
+  protected readonly passwordLoginTarget = signal<boolean | null>(null);
+  protected passwordLoginPassword = '';
+  protected readonly savingPasswordLogin = signal(false);
+  protected readonly passwordLoginError = signal<string | null>(null);
 
   // Sessions
   protected readonly sessions = signal<SessionInfo[]>([]);
@@ -119,6 +128,45 @@ export class AccountPage implements OnInit {
       );
     } finally {
       this.addingPasskey.set(false);
+    }
+  }
+
+  protected startPasswordLoginChange(): void {
+    this.passwordLoginPassword = '';
+    this.passwordLoginError.set(null);
+    this.passwordLoginTarget.set(!this.passwordLogin());
+  }
+
+  protected async savePasswordLogin(): Promise<void> {
+    const target = this.passwordLoginTarget();
+    if (target === null || this.savingPasswordLogin()) {
+      return;
+    }
+    if (!this.passwordLoginPassword) {
+      this.passwordLoginError.set('Enter your current password.');
+      return;
+    }
+    this.savingPasswordLogin.set(true);
+    this.passwordLoginError.set(null);
+    try {
+      await this.auth.updateAccount({
+        currentPassword: this.passwordLoginPassword,
+        passwordLogin: target,
+      });
+      this.passwordLoginPassword = '';
+      this.passwordLoginTarget.set(null);
+      this.toast.success(
+        target
+          ? 'Password sign-in turned on.'
+          : 'Password sign-in turned off – only passkeys sign in now.',
+      );
+      if (!target) {
+        await this.reloadSessions();
+      }
+    } catch (error) {
+      this.passwordLoginError.set(fieldErrors(error)?.['currentPassword'] ?? describeError(error));
+    } finally {
+      this.savingPasswordLogin.set(false);
     }
   }
 

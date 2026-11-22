@@ -8,6 +8,8 @@ export interface Account {
   webauthnUserId: string;
   createdAt: string;
   passwordChangedAt: string;
+  /** False = passkeys only: the password no longer signs in (it still confirms account changes). */
+  passwordLogin: boolean;
 }
 
 export interface Passkey {
@@ -42,6 +44,7 @@ interface AccountRow {
   webauthn_user_id: string;
   created_at: string;
   password_changed_at: string;
+  password_login: number;
 }
 
 interface PasskeyRow {
@@ -105,6 +108,7 @@ export class AuthStore {
           webauthnUserId: r.webauthn_user_id,
           createdAt: r.created_at,
           passwordChangedAt: r.password_changed_at,
+          passwordLogin: r.password_login === 1,
         }
       : null;
   }
@@ -127,6 +131,10 @@ export class AuthStore {
     this.db
       .query('UPDATE account SET password_hash = ?, password_changed_at = ? WHERE id = 1')
       .run(passwordHash, new Date().toISOString());
+  }
+
+  setPasswordLogin(enabled: boolean): void {
+    this.db.query('UPDATE account SET password_login = ? WHERE id = 1').run(enabled ? 1 : 0);
   }
 
   /** Removes the account with all passkeys and sessions (`--reset-login`). */
@@ -208,6 +216,11 @@ export class AuthStore {
   /** Deletes every session except `keepId` (null = all). */
   deleteOtherSessions(keepId: string | null): number {
     return this.db.query('DELETE FROM sessions WHERE id IS NOT ?').run(keepId).changes;
+  }
+
+  /** Deletes every session not signed in with a passkey, except `keepId`. */
+  deleteOtherNonPasskeySessions(keepId: string): number {
+    return this.db.query("DELETE FROM sessions WHERE id IS NOT ? AND method <> 'passkey'").run(keepId).changes;
   }
 
   deleteExpiredSessions(now: string): number {

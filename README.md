@@ -425,6 +425,11 @@ The UI and the API require a login – **one account** that signs in with a **pa
 - **Passkeys** (Account → *Add passkey*) need HTTPS with a host name (or `localhost`). Put the app behind a reverse
   proxy (Caddy, Nginx Proxy Manager, Traefik …) and set `PUBLIC_URL=https://watcher.example.com` and
   `TRUST_PROXY=true`.
+- **Passkeys only:** with at least one passkey, Account → *Allow password sign-in* can be switched off (confirmed with
+  the current password). The password then only confirms account changes, passkey sign-ins require user verification
+  (PIN or biometrics), other sessions opened with the password are signed out and the sign-in screen opens the passkey
+  prompt right away. The last passkey cannot be removed while it is off; lost every passkey? See *Reset the login*
+  below.
 - **Sessions:** HttpOnly `SameSite=Strict` cookie (`Secure` over HTTPS), 30 days, extended while in use; listed and
   revocable on the Account page. Repeated failed logins lock the client out with growing delays, and
   state-changing requests from other sites are refused.
@@ -449,9 +454,9 @@ account is created with them on the first start – sign in with the same creden
 </details>
 
 <details>
-<summary><b>Reset the login</b> (forgot the password, no passkey at hand)</summary>
+<summary><b>Reset the login</b> (forgot the password, no passkey at hand, or lost every passkey with password sign-in off)</summary>
 
-Removes the account, its passkeys and sessions – nothing else:
+Removes the account, its passkeys and sessions – nothing else (the new account signs in with its password again):
 
 ```bash
 # in the container (on the node: prefix each command with `pct exec <vmid> --`)
@@ -626,12 +631,12 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 
 | Method | Route | Description |
 | --- | --- | --- |
-| `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys }` (public) |
+| `GET` | `/api/auth/state` | `{ setupRequired, authenticated, username, hasPasskeys, passwordLogin }` (public) |
 | `POST` | `/api/auth/setup` | `{ "code", "username", "password" }` – first account, only while none exists (public) |
-| `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; `429` after repeated failures) |
+| `POST` | `/api/auth/login` | `{ "username", "password" }` → session cookie (public; `429` after repeated failures, `409` when password sign-in is off) |
 | `POST` | `/api/auth/passkey/options`, `/api/auth/passkey/login` | Passkey sign-in: options with a `challengeId`, then `{ challengeId, response }` (public) |
 | `POST` | `/api/auth/logout` | End the current session |
-| `PUT` | `/api/auth/account` | `{ "currentPassword", "username"?, "newPassword"? }` – a new password signs out other sessions |
+| `PUT` | `/api/auth/account` | `{ "currentPassword", "username"?, "newPassword"?, "passwordLogin"? }` – a new password signs out other sessions; `passwordLogin: false` (passkeys only, `409` without a passkey) signs out other password sessions |
 | `GET` / `POST` | `/api/auth/passkeys` | List passkeys / register one (`{ name, response }` after `POST /api/auth/passkeys/options`) |
 | `PATCH` / `DELETE` | `/api/auth/passkeys/:id` | Rename (`{ name }`) / remove a passkey |
 | `GET` / `DELETE` | `/api/auth/sessions` | List sessions / sign out all other sessions |

@@ -57,6 +57,8 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   hasPasskeys: boolean;
+  /** False when only passkeys sign in (the login screen then starts the passkey prompt right away). */
+  passwordLogin: boolean;
 }
 
 /** Blocks a client after repeated failed logins (exponential lock, per key – usually the IP address). */
@@ -158,6 +160,11 @@ export class AuthService {
     return this.store.getAccount() !== null;
   }
 
+  /** Passkeys only: user verification (PIN, biometrics) is required, so a passkey is never a single factor. */
+  private get passkeysOnly(): boolean {
+    return this.store.getAccount()?.passwordLogin === false;
+  }
+
   /**
    * Creates the account from configured credentials when none exists (migration from the former
    * BASIC_AUTH_USERNAME / BASIC_AUTH_PASSWORD). Returns true when an account was created.
@@ -213,6 +220,7 @@ export class AuthService {
       authenticated: account !== null && session !== null,
       username: session && account ? account.username : null,
       hasPasskeys: account !== null && this.store.listPasskeys().length > 0,
+      passwordLogin: account?.passwordLogin ?? true,
     };
   }
 
@@ -239,6 +247,9 @@ export class AuthService {
   async loginWithPassword(username: string, password: string, ctx: RequestContext): Promise<string> {
     this.checkThrottle(ctx);
     const account = this.store.getAccount();
+    if (account && !account.passwordLogin) {
+      throw new AuthError(409, 'Password sign-in is turned off – sign in with a passkey.');
+    }
     // Always verify a hash, so response times don't reveal whether the user name exists.
     const hash = account?.passwordHash ?? (await this.dummyHash());
     const passwordOk = await Bun.password.verify(password, hash);
@@ -293,10 +304,14 @@ export class AuthService {
     return target && this.store.deleteSession(target.id) ? 1 : 0;
   }
 
-  /** Changes the user name and/or password; the current password is always required. Signs out other sessions. */
+  /**
+   * Changes the user name, the password and/or whether the password signs in; the current password is always
+   * required. A new password signs out other sessions; turning password sign-in off signs out the other sessions
+   * that were not opened with a passkey.
+   */
   async updateAccount(
     session: Session,
-    change: { currentPassword: string; username?: string | null; newPassword?: string | null },
+    change: { currentPassword: string; username?: string | null; newPassword?: string | null; passwordLogin?: boolean | null },
   ): Promise<void> {
     const account = this.store.getAccount();
     if (!account) {
@@ -305,6 +320,10 @@ export class AuthService {
     if (!(await Bun.password.verify(change.currentPassword, account.passwordHash))) {
       throw new AuthError(400, 'The current password is wrong.', 'currentPassword');
     }
+    const passwordLogin = change.passwordLogin ?? account.passwordLogin;
+    if (!passwordLogin && this.store.listPasskeys().length === 0) {
+      throw new AuthError(409, 'Add a passkey before turning off password sign-in.');
+    }
     if (change.username !== undefined && change.username !== null && change.username.trim() !== account.username) {
       this.store.updateUsername(validateUsername(change.username));
     }
@@ -312,6 +331,13 @@ export class AuthService {
       this.store.updatePassword(await Bun.password.hash(validatePassword(change.newPassword, 'newPassword')));
       this.store.deleteOtherSessions(session.id);
       this.options.log.info({}, 'Password changed – other sessions signed out');
+    }
+    if (passwordLogin !== account.passwordLogin) {
+      this.store.setPasswordLogin(passwordLogin);
+      if (!passwordLogin) {
+        this.store.deleteOtherNonPasskeySessions(session.id);
+      }
+      this.options.log.info({ passwordLogin }, passwordLogin ? 'Password sign-in turned on' : 'Password sign-in turned off – passkeys only');
     }
   }
 
@@ -334,7 +360,7 @@ export class AuthService {
       attestationType: 'none',
       excludeCredentials: this.store.listPasskeys().map((p) => ({ id: p.id, transports: p.transports })),
       // Discoverable credentials: signing in needs no user name.
-      authenticatorSelection: { residentKey: 'required', userVerification: 'preferred' },
+      authenticatorSelection: { residentKey: 'required', userVerification: this.passkeysOnly ? 'required' : 'preferred' },
     });
     this.remember(this.registrations, session.id, options.challenge);
     return options;
@@ -380,7 +406,10 @@ export class AuthService {
     if (!this.accountExists) {
       throw new AuthError(409, 'Create the account first.');
     }
-    const options = await generateAuthenticationOptions({ rpID: ctx.rpID, userVerification: 'preferred' });
+    const options = await generateAuthenticationOptions({
+      rpID: ctx.rpID,
+      userVerification: this.passkeysOnly ? 'required' : 'preferred',
+    });
     const challengeId = randomToken(16);
     this.remember(this.logins, challengeId, options.challenge);
     return { challengeId, options };
@@ -402,7 +431,7 @@ export class AuthService {
         expectedOrigin: ctx.origin,
         expectedRPID: ctx.rpID,
         credential: { id: passkey.id, publicKey: passkey.publicKey, counter: passkey.counter, transports: passkey.transports as never },
-        requireUserVerification: false,
+        requireUserVerification: this.passkeysOnly,
       });
     } catch (error) {
       this.throttle.fail(this.throttleKey(ctx));
@@ -421,7 +450,14 @@ export class AuthService {
     return this.store.renamePasskey(id, name.trim().slice(0, 100) || 'Passkey');
   }
 
+  /** Removes a passkey (false = unknown); the last one cannot go while password sign-in is off. */
   deletePasskey(id: string): boolean {
+    if (!this.store.getPasskey(id)) {
+      return false;
+    }
+    if (this.passkeysOnly && this.store.listPasskeys().length === 1) {
+      throw new AuthError(409, 'This is the last passkey – turn on password sign-in before removing it.');
+    }
     return this.store.deletePasskey(id);
   }
 

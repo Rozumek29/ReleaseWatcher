@@ -73,6 +73,7 @@ describe('login', () => {
       authenticated: false,
       username: null,
       hasPasskeys: false,
+      passwordLogin: true,
     });
     assert.equal((await browser.request('GET', '/api/repositories')).status, 401);
     assert.equal((await browser.request('GET', '/api/settings')).status, 401);
@@ -255,6 +256,73 @@ describe('login', () => {
       response: await passkey.authenticate(third.options, PUBLIC_URL),
     });
     assert.equal(removed.status, 401);
+  });
+
+  it('turns off password sign-in (passkeys only) and back on', async () => {
+    await start({ publicUrl: PUBLIC_URL });
+    const browser = await setupAccount();
+    const passwordSession = client();
+    await passwordSession.request('POST', '/api/auth/login', { username: 'admin', password: 'correct horse battery' });
+    const off = { currentPassword: 'correct horse battery', passwordLogin: false };
+
+    // Needs a passkey first – otherwise nobody could sign in any more.
+    const noPasskey = await browser.request('PUT', '/api/auth/account', off);
+    assert.equal(noPasskey.status, 409);
+    assert.match(noPasskey.json().title, /Add a passkey/);
+
+    const passkey = await new SoftwarePasskey().init();
+    const creation = (await browser.request('POST', '/api/auth/passkeys/options')).json();
+    const id = (await browser.request('POST', '/api/auth/passkeys', { response: await passkey.register(creation, PUBLIC_URL) })).json()[0].id;
+    const passkeySession = client();
+    const first = (await passkeySession.request('POST', '/api/auth/passkey/options')).json();
+    await passkeySession.request('POST', '/api/auth/passkey/login', {
+      challengeId: first.challengeId,
+      response: await passkey.authenticate(first.options, PUBLIC_URL),
+    });
+
+    // The current password is still required.
+    assert.equal((await browser.request('PUT', '/api/auth/account', { ...off, currentPassword: 'wrong password!' })).status, 400);
+    const turnedOff = await browser.request('PUT', '/api/auth/account', off);
+    assert.equal(turnedOff.status, 200);
+    assert.equal(turnedOff.json().passwordLogin, false);
+    assert.equal((await client().request('GET', '/api/auth/state')).json().passwordLogin, false);
+
+    // Other password sessions end; this one and passkey sessions stay.
+    assert.equal((await passwordSession.request('GET', '/api/settings')).status, 401);
+    assert.equal((await passkeySession.request('GET', '/api/settings')).status, 200);
+    assert.equal((await browser.request('GET', '/api/settings')).status, 200);
+
+    // The password no longer signs in – even the right one.
+    const login = await client().request('POST', '/api/auth/login', { username: 'admin', password: 'correct horse battery' });
+    assert.equal(login.status, 409);
+    assert.match(login.json().title, /Password sign-in is turned off/);
+
+    // Passkey sign-in now requires user verification.
+    const second = (await client().request('POST', '/api/auth/passkey/options')).json();
+    assert.equal(second.options.userVerification, 'required');
+    assert.equal((await client().request('POST', '/api/auth/passkeys/options')).status, 401);
+    assert.equal((await browser.request('POST', '/api/auth/passkeys/options')).json().authenticatorSelection.userVerification, 'required');
+
+    // The last passkey cannot be removed while the password is off.
+    const removeLast = await browser.request('DELETE', `/api/auth/passkeys/${encodeURIComponent(id)}`);
+    assert.equal(removeLast.status, 409);
+    assert.equal((await browser.request('DELETE', '/api/auth/passkeys/unknown')).status, 404);
+
+    // Turned back on: the password signs in again and the passkey can be removed.
+    assert.equal((await browser.request('PUT', '/api/auth/account', { currentPassword: 'correct horse battery', passwordLogin: true })).json().passwordLogin, true);
+    assert.equal((await client().request('POST', '/api/auth/login', { username: 'admin', password: 'correct horse battery' })).status, 200);
+    assert.equal((await client().request('POST', '/api/auth/passkey/options')).json().options.userVerification, 'preferred');
+    assert.equal((await browser.request('DELETE', `/api/auth/passkeys/${encodeURIComponent(id)}`)).status, 204);
+  });
+
+  it('brings password sign-in back with --reset-login', async () => {
+    await start({ publicUrl: PUBLIC_URL });
+    await setupAccount();
+    store.database.run('UPDATE account SET password_login = 0');
+    new AuthStore(store.database).resetAll();
+    await setupAccount();
+    assert.equal((await client().request('GET', '/api/auth/state')).json().passwordLogin, true);
+    assert.equal((await client().request('POST', '/api/auth/login', { username: 'admin', password: 'correct horse battery' })).status, 200);
   });
 
   it('needs a session to add a passkey', async () => {

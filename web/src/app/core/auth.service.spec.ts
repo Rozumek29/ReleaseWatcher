@@ -13,6 +13,7 @@ const state = (overrides: Partial<AuthState> = {}): AuthState => ({
   authenticated: false,
   username: null,
   hasPasskeys: false,
+  passwordLogin: true,
   ...overrides,
 });
 

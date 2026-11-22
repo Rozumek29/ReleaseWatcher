@@ -75,6 +75,17 @@ form {
   }
 }
 
+.form-error + .passkey-only {
+  margin-top: 16px;
+}
+
+.passkey-help {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
+  text-align: center;
+}
+
 .code-help {
   margin: 0;
   padding-left: 1.1rem;

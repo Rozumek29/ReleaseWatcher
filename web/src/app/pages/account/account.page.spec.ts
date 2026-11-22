@@ -39,7 +39,7 @@ describe('AccountPage', () => {
   let http: HttpTestingController;
   const webauthn = { supported: vi.fn(() => true), authenticate: vi.fn(), register: vi.fn() };
 
-  const create = async (supported = true) => {
+  const create = async (supported = true, passwordLogin = true, passkeys = [passkey]) => {
     webauthn.supported.mockReturnValue(supported);
     await TestBed.configureTestingModule({
       imports: [AccountPage],
@@ -51,10 +51,16 @@ describe('AccountPage', () => {
       ],
     }).compileComponents();
     http = TestBed.inject(HttpTestingController);
-    TestBed.inject(AuthService).state.set({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: true });
+    TestBed.inject(AuthService).state.set({
+      setupRequired: false,
+      authenticated: true,
+      username: 'admin',
+      hasPasskeys: passkeys.length > 0,
+      passwordLogin,
+    });
     const fixture = TestBed.createComponent(AccountPage);
     fixture.detectChanges();
-    http.expectOne('/api/auth/passkeys').flush([passkey]);
+    http.expectOne('/api/auth/passkeys').flush(passkeys);
     http.expectOne('/api/auth/sessions').flush([
       session({ id: 'me', current: true }),
       session({ id: 'phone', method: 'passkey', userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Safari/604.1' }),
@@ -98,6 +104,38 @@ describe('AccountPage', () => {
     http.expectOne('/api/auth/sessions').flush([session({ id: 'me', current: true })]);
     await settle(fixture);
     expect(el.querySelectorAll('.session').length).toBe(1);
+  });
+
+  it('turns password sign-in off with the current password', async () => {
+    const { fixture, el } = await create();
+    const toggle = () => el.querySelector<HTMLButtonElement>('.password-login [role=switch]')!;
+    expect(toggle().getAttribute('aria-checked')).toBe('true');
+    toggle().click();
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('.password-login button[type=submit]')!.click();
+    await settle(fixture);
+    http.expectNone('/api/auth/account');
+    expect(el.querySelector('.password-login .error')?.textContent).toContain('Enter your current password.');
+
+    type(el, '#password-login-current', 'correct horse battery');
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('.password-login button[type=submit]')!.click();
+    const request = http.expectOne('/api/auth/account');
+    expect(request.request.body).toEqual({ currentPassword: 'correct horse battery', passwordLogin: false });
+    request.flush({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: true, passwordLogin: false });
+    await settle(fixture);
+    http.expectOne('/api/auth/sessions').flush([session({ id: 'me', current: true })]);
+    await settle(fixture);
+    expect(toggle().getAttribute('aria-checked')).toBe('false');
+    expect(el.querySelector('#password-login-current')).toBeNull();
+    // The last passkey stays while only passkeys sign in.
+    expect(el.querySelector<HTMLButtonElement>('.list-item .icon-btn')!.disabled).toBe(true);
+  });
+
+  it('needs a passkey before password sign-in can be turned off', async () => {
+    const { el } = await create(true, true, []);
+    expect(el.querySelector<HTMLButtonElement>('.password-login [role=switch]')!.disabled).toBe(true);
+    expect(el.querySelector('.password-login')?.textContent).toContain('Add a passkey to turn this off');
   });
 
   it('adds and removes passkeys', async () => {

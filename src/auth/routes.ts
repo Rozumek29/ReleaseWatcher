@@ -33,6 +33,7 @@ const accountSchema: ObjectSchema = {
     currentPassword: { type: 'string', maxLength: 1000 },
     username: { type: 'string', nullable: true, maxLength: 200 },
     newPassword: { type: 'string', nullable: true, maxLength: 1000 },
+    passwordLogin: { type: 'boolean', nullable: true },
   },
   required: ['currentPassword'],
 };
@@ -143,7 +144,12 @@ export function authRoutes({ auth, context }: AuthRoutesDeps) {
     },
     '/api/auth/account': {
       PUT: async (req: Request) => {
-        const body = await readBody<{ currentPassword: string; username?: string | null; newPassword?: string | null }>(
+        const body = await readBody<{
+          currentPassword: string;
+          username?: string | null;
+          newPassword?: string | null;
+          passwordLogin?: boolean | null;
+        }>(
           req,
           accountSchema,
         );

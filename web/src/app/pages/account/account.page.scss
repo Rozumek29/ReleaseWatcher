@@ -162,6 +162,39 @@
   font-weight: 550;
 }
 
+.password-login {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.toggle-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+
+  app-switch {
+    margin-top: 1px;
+  }
+}
+
+.toggle-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.toggle-label {
+  font-size: 0.9rem;
+  font-weight: 550;
+}
+
+.toggle-text .hint {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 .inline-form {
   display: flex;
   flex-wrap: wrap;

@@ -36,8 +36,14 @@ describe('Sign-in pages', () => {
 
   afterEach(() => http.verify());
 
-  const login = async (hasPasskeys = false, returnUrl?: string) => {
-    TestBed.inject(AuthService).state.set({ setupRequired: false, authenticated: false, username: null, hasPasskeys });
+  const login = async (hasPasskeys = false, returnUrl?: string, passwordLogin = true) => {
+    TestBed.inject(AuthService).state.set({
+      setupRequired: false,
+      authenticated: false,
+      username: null,
+      hasPasskeys,
+      passwordLogin,
+    });
     const fixture = TestBed.createComponent(LoginPage);
     if (returnUrl) {
       fixture.componentRef.setInput('returnUrl', returnUrl);
@@ -108,6 +114,56 @@ describe('Sign-in pages', () => {
     try {
       const unsupported = await login(true);
       expect(unsupported.el.querySelector('.passkey-btn')).toBeNull();
+    } finally {
+      webauthn.supported.mockReturnValue(true);
+    }
+  });
+
+  it('opens the passkey prompt right away when only passkeys sign in', async () => {
+    webauthn.authenticate.mockResolvedValueOnce({ id: 'cred' });
+    const { fixture, el } = await login(true, '/containers', false);
+    expect(el.querySelector('#login-password')).toBeNull();
+    expect(el.textContent).toContain('Password sign-in is turned off');
+    http.expectOne('/api/auth/passkey/options').flush({ challengeId: 'c', options: { challenge: 'x' } });
+    await settle(fixture);
+    const request = http.expectOne('/api/auth/passkey/login');
+    expect(request.request.body).toEqual({ challengeId: 'c', response: { id: 'cred' } });
+    request.flush({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: true, passwordLogin: false });
+    await settle(fixture);
+    expect(navigate).toHaveBeenCalledWith('/containers');
+  });
+
+  it('lets a cancelled passkey prompt be retried with the button', async () => {
+    webauthn.authenticate.mockRejectedValueOnce(new DOMException('cancelled', 'NotAllowedError'));
+    const { fixture, el } = await login(true, undefined, false);
+    http.expectOne('/api/auth/passkey/options').flush({ challengeId: 'c', options: { challenge: 'x' } });
+    await settle(fixture);
+    expect(el.querySelector('.form-error')?.textContent).toContain('cancelled or timed out');
+    webauthn.authenticate.mockResolvedValueOnce({ id: 'cred' });
+    el.querySelector<HTMLButtonElement>('.passkey-only')!.click();
+    http.expectOne('/api/auth/passkey/options').flush({ challengeId: 'd', options: { challenge: 'y' } });
+    await settle(fixture);
+    http.expectOne('/api/auth/passkey/login').flush({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: true, passwordLogin: false });
+    await settle(fixture);
+    expect(navigate).toHaveBeenCalledWith('/');
+  });
+
+  it('does not open the passkey prompt right after signing out', async () => {
+    const auth = TestBed.inject(AuthService);
+    void auth.logout();
+    http.expectOne('/api/auth/logout').flush(null);
+    const { el } = await login(true, undefined, false);
+    http.expectNone('/api/auth/passkey/options');
+    expect(el.querySelector('.passkey-only')?.textContent).toContain('Sign in with a passkey');
+  });
+
+  it('explains what to do when only passkeys sign in but the browser cannot use them', async () => {
+    webauthn.supported.mockReturnValue(false);
+    try {
+      const { el } = await login(true, undefined, false);
+      http.expectNone('/api/auth/passkey/options');
+      expect(el.querySelector('#login-password')).toBeNull();
+      expect(el.querySelector('.passkey-help')?.textContent).toContain('--reset-login');
     } finally {
       webauthn.supported.mockReturnValue(true);
     }

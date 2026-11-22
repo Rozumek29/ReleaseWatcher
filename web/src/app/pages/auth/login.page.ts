@@ -1,12 +1,12 @@
 import { HttpErrorResponse } from '@angular/common/http';
-import { ChangeDetectionStrategy, Component, inject, input, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, inject, input, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { describeError } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { Icon } from '../../shared/icon';
 
-/** Sign-in with the password or a passkey. */
+/** Sign-in with the password or a passkey (passkeys only: the prompt opens right away). */
 @Component({
   selector: 'app-login-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -14,7 +14,7 @@ import { Icon } from '../../shared/icon';
   templateUrl: './login.page.html',
   styleUrl: './auth.scss',
 })
-export class LoginPage {
+export class LoginPage implements OnInit {
   protected readonly auth = inject(AuthService);
   private readonly router = inject(Router);
 
@@ -28,6 +28,16 @@ export class LoginPage {
 
   protected readonly showPasskey = () =>
     this.auth.passkeysSupported && (this.auth.state()?.hasPasskeys ?? false);
+  /** False when only passkeys sign in. */
+  protected readonly passwordLogin = computed(() => this.auth.state()?.passwordLogin ?? true);
+
+  ngOnInit(): void {
+    // Passkeys only: open the prompt without a click – except right after signing out, where it would be in the way.
+    const signedOut = this.auth.takeSignedOutByUser();
+    if (!this.passwordLogin() && this.auth.passkeysSupported && !signedOut) {
+      void this.signInWithPasskey();
+    }
+  }
 
   protected async signIn(): Promise<void> {
     if (!this.username.trim() || !this.password || this.busy()) {
@@ -52,6 +62,9 @@ export class LoginPage {
       await this.router.navigateByUrl(this.safeReturnUrl());
     } catch (error) {
       this.error.set(this.describe(error, kind));
+      if (error instanceof HttpErrorResponse && error.status === 409 && kind === 'password') {
+        void this.auth.load(); // password sign-in was turned off meanwhile – show the passkey screen
+      }
     } finally {
       this.busy.set(null);
     }

@@ -455,6 +455,8 @@ const MIGRATIONS: readonly string[] = [
    CREATE INDEX idx_containers_enabled ON containers (is_enabled, vmid);`,
   // Backup storage per Proxmox node (storage IDs differ between nodes); NULL = the global setting.
   `ALTER TABLE hosts ADD COLUMN backup_storage TEXT;`,
+  // Password sign-in can be turned off (passkeys only); `--reset-login` brings it back with a new account.
+  `ALTER TABLE account ADD COLUMN password_login INTEGER NOT NULL DEFAULT 1;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

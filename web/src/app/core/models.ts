@@ -549,6 +549,8 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   hasPasskeys: boolean;
+  /** False = passkeys only: the login screen has no password form and starts the passkey prompt itself. */
+  passwordLogin: boolean;
 }
 
 export interface PasskeyInfo {
@@ -579,6 +581,8 @@ export interface AccountUpdate {
   currentPassword: string;
   username?: string | null;
   newPassword?: string | null;
+  /** False turns password sign-in off (needs a passkey); the current password still confirms changes. */
+  passwordLogin?: boolean | null;
 }
 
 /** A named SSH key; the private part never leaves the server. */

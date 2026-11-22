@@ -111,7 +111,14 @@
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDelete.set(null)">Keep</button>
                   } @else {
                     <button type="button" class="btn btn-sm btn-ghost" (click)="startRename(p)">Rename</button>
-                    <button type="button" class="icon-btn" (click)="confirmDelete.set(p.id)" [attr.aria-label]="'Remove passkey ' + p.name">
+                    <button
+                      type="button"
+                      class="icon-btn"
+                      (click)="confirmDelete.set(p.id)"
+                      [disabled]="!passwordLogin() && passkeys().length === 1"
+                      [attr.aria-label]="'Remove passkey ' + p.name"
+                      [attr.title]="!passwordLogin() && passkeys().length === 1 ? 'Turn on password sign-in before removing the last passkey' : 'Remove passkey'"
+                    >
                       <app-icon name="trash" [size]="16" />
                     </button>
                   }
@@ -132,6 +139,54 @@
           <app-icon name="plus" [size]="16" /> {{ addingPasskey() ? 'Waiting for the passkey…' : 'Add passkey' }}
         </button>
       </form>
+
+      <div class="password-login">
+        <div class="toggle-row">
+          <app-switch
+            label="Allow password sign-in"
+            [showLabel]="false"
+            [checked]="passwordLogin()"
+            [disabled]="savingPasswordLogin() || (passwordLogin() && passkeys().length === 0)"
+            (toggled)="startPasswordLoginChange()"
+          />
+          <div class="toggle-text">
+            <span class="toggle-label">Allow password sign-in</span>
+            <span class="hint">
+              @if (!passwordLogin()) {
+                Off – only passkeys sign in, with a PIN or biometrics, and the sign-in screen asks for one right away.
+                Lost every passkey? Run <code>--reset-login</code> on the server.
+              } @else if (passkeys().length === 0) {
+                Add a passkey to turn this off and sign in with passkeys only.
+              } @else {
+                Turn off to sign in with passkeys only – the password then only confirms account changes. Other
+                sessions opened with the password are signed out.
+              }
+            </span>
+          </div>
+        </div>
+        @if (passwordLoginTarget() !== null) {
+          <form class="inline-form" (ngSubmit)="savePasswordLogin()">
+            <label for="password-login-current" class="visually-hidden">Current password</label>
+            <input
+              id="password-login-current"
+              class="input"
+              type="password"
+              name="passwordLoginPassword"
+              [(ngModel)]="passwordLoginPassword"
+              autocomplete="current-password"
+              placeholder="Current password"
+              [class.invalid]="passwordLoginError()"
+            />
+            <button type="submit" class="btn btn-sm" [disabled]="savingPasswordLogin()">
+              {{ savingPasswordLogin() ? 'Saving…' : passwordLoginTarget() ? 'Turn on' : 'Turn off' }}
+            </button>
+            <button type="button" class="btn btn-sm btn-ghost" (click)="passwordLoginTarget.set(null)">Cancel</button>
+          </form>
+          @if (passwordLoginError(); as e) {
+            <span class="error" role="alert">{{ e }}</span>
+          }
+        }
+      </div>
     </div>
   </section>
 

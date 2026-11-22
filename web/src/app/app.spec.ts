@@ -30,6 +30,7 @@ describe('App shell', () => {
       authenticated: true,
       username: 'szymon',
       hasPasskeys: false,
+      passwordLogin: true,
     });
     const fixture = TestBed.createComponent(App);
     const http = TestBed.inject(HttpTestingController);
@@ -64,6 +65,7 @@ describe('App shell', () => {
       authenticated: false,
       username: null,
       hasPasskeys: false,
+      passwordLogin: true,
     });
     const fixture = TestBed.createComponent(App);
     const http = TestBed.inject(HttpTestingController);
@@ -74,7 +76,7 @@ describe('App shell', () => {
 
   it('signs out from the sidebar', async () => {
     const auth = TestBed.inject(AuthService);
-    auth.state.set({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: false });
+    auth.state.set({ setupRequired: false, authenticated: true, username: 'admin', hasPasskeys: false, passwordLogin: true });
     const fixture = TestBed.createComponent(App);
     const http = TestBed.inject(HttpTestingController);
     const navigate = vi.spyOn(TestBed.inject(Router), 'navigateByUrl').mockResolvedValue(true);
