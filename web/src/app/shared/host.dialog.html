@@ -5,7 +5,7 @@
         <app-icon name="server" [size]="22" />
         <div class="head-text">
           <h2 id="host-dialog-title">{{ title(d) }}</h2>
-          <p>{{ d.type === 'proxmox' ? 'ReleaseWatcher runs pct and qm on the node over SSH.' : 'ReleaseWatcher runs apt and your update commands over SSH.' }}</p>
+          <p>{{ type() === 'proxmox' ? 'ReleaseWatcher runs pct and qm on the node over SSH.' : 'ReleaseWatcher runs apt and your update commands over SSH.' }}</p>
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
           <app-icon name="close" />
@@ -13,6 +13,30 @@
       </header>
 
       <div class="dialog-body">
+        @if (canChooseType(d)) {
+          <div class="field">
+            <span class="label" id="host-type-label">Type</span>
+            <div class="type-choices" role="radiogroup" aria-labelledby="host-type-label">
+              @for (c of typeChoices; track c.type) {
+                <button
+                  type="button"
+                  class="type-choice"
+                  role="radio"
+                  [attr.aria-checked]="type() === c.type"
+                  [class.active]="type() === c.type"
+                  (click)="type.set(c.type)"
+                >
+                  <app-icon [name]="c.icon" [size]="20" />
+                  <span class="type-text">
+                    <span class="type-label">{{ c.label }}</span>
+                    <span class="type-hint">{{ c.hint }}</span>
+                  </span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+
         <div class="field">
           <label for="host-address">Address</label>
           <input
@@ -20,7 +44,7 @@
             class="input mono"
             name="address"
             [(ngModel)]="address"
-            placeholder="pve.lan or 192.168.1.10"
+            [placeholder]="type() === 'proxmox' ? 'pve.lan or 192.168.1.10' : 'vps.example.com or 203.0.113.10'"
             autocomplete="off"
             spellcheck="false"
             required
@@ -80,7 +104,7 @@
           </span>
         </div>
 
-        @if (d.type === 'proxmox' && d.host) {
+        @if (type() === 'proxmox' && d.host) {
           <div class="field">
             <label for="host-backup">Backup storage</label>
             <select id="host-backup" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">

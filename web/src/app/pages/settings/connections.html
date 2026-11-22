@@ -8,11 +8,8 @@
         <p>Machines ReleaseWatcher connects to over SSH.</p>
       </div>
       <div class="head-actions">
-        <button type="button" class="btn btn-sm btn-secondary" (click)="addHost('server')" [disabled]="hosts() === null">
-          <app-icon name="plus" [size]="14" /> Add server
-        </button>
-        <button type="button" class="btn btn-sm" (click)="addHost('proxmox')" [disabled]="hosts() === null">
-          <app-icon name="plus" [size]="14" /> Add Proxmox node
+        <button type="button" class="btn btn-sm" (click)="addHost()" [disabled]="hosts() === null">
+          <app-icon name="plus" [size]="14" /> Add host
         </button>
       </div>
     </div>

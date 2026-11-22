@@ -61,8 +61,9 @@ export class ConnectionsPanel implements OnInit {
     return this.busy().has(key);
   }
 
-  protected addHost(type: HostType): void {
-    this.editingHost.set({ type, host: null });
+  /** One dialog for every host: the type is picked inside. */
+  protected addHost(): void {
+    this.editingHost.set({ type: 'server', host: null, chooseType: true });
   }
 
   protected editHost(host: Host): void {

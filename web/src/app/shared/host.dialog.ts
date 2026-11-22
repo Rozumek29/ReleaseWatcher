@@ -14,13 +14,21 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError, fieldErrors } from '../core/api.service';
 import { BackupStorage, Host, HostInput, HostType, SshKey } from '../core/models';
 import { BackdropClose } from './backdrop-close';
-import { Icon } from './icon';
+import { Icon, IconName } from './icon';
 
 /** What the dialog edits: a new host of `type` (host null) or an existing host. */
 export interface HostDialogData {
   type: HostType;
   host: Host | null;
+  /** New host: the user picks the type in the dialog (`type` is preselected). */
+  chooseType?: boolean;
 }
+
+/** Choices of the type picker. */
+export const HOST_TYPE_CHOICES: readonly { type: HostType; label: string; icon: IconName; hint: string }[] = [
+  { type: 'server', label: 'Server', icon: 'server', hint: 'A VPS or any Linux machine – apt and your update commands.' },
+  { type: 'proxmox', label: 'Proxmox node', icon: 'box', hint: 'Its containers and VMs – pct and qm on the node.' },
+];
 
 /**
  * Adds or edits a host: address, login user and the SSH key it accepts. Used by Settings → Connections and by the
@@ -48,6 +56,9 @@ export class HostDialog {
   protected port: number | null = 22;
   protected user = 'root';
   protected sshKeyId: number | null = null;
+  /** Type of the host being added or edited (can change only while adding with `chooseType`). */
+  protected readonly type = signal<HostType>('server');
+  protected readonly typeChoices = HOST_TYPE_CHOICES;
   /** Proxmox node: its backup storage ('' = none, no backups). */
   protected backupStorage = '';
 
@@ -66,6 +77,7 @@ export class HostDialog {
       const dialog = this.dialog().nativeElement;
       if (data) {
         const host = data.host;
+        this.type.set(host?.type ?? data.type);
         this.name = host?.name ?? '';
         this.address = host?.address ?? '';
         this.port = host?.port ?? 22;
@@ -125,8 +137,14 @@ export class HostDialog {
   }
 
   protected title(data: HostDialogData): string {
-    const what = data.type === 'proxmox' ? 'Proxmox node' : 'server';
-    return data.host ? `Edit ${data.host.name}` : `Add ${what}`;
+    if (data.host) return `Edit ${data.host.name}`;
+    if (data.chooseType) return 'Add host';
+    return this.type() === 'proxmox' ? 'Add Proxmox node' : 'Add server';
+  }
+
+  /** Whether the type picker is shown (adding from Settings → Connections). */
+  protected canChooseType(data: HostDialogData): boolean {
+    return data.host === null && data.chooseType === true;
   }
 
   protected async save(): Promise<void> {
@@ -139,14 +157,14 @@ export class HostDialog {
       port,
       user: this.user.trim() || null,
       sshKeyId: this.sshKeyId,
-      ...(data.type === 'proxmox' && data.host ? { backupStorage: this.backupStorage.trim() || null } : {}),
+      ...(this.type() === 'proxmox' && data.host ? { backupStorage: this.backupStorage.trim() || null } : {}),
     };
     this.saving.set(true);
     this.errors.set({});
     this.saveError.set(null);
     try {
       const host = await firstValueFrom(
-        data.host ? this.api.updateHost(data.host.id, input) : this.api.addHost({ ...input, type: data.type }),
+        data.host ? this.api.updateHost(data.host.id, input) : this.api.addHost({ ...input, type: this.type() }),
       );
       this.saved.emit(host);
     } catch (error) {

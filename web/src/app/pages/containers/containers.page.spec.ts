@@ -203,6 +203,7 @@ describe('ContainersPage', () => {
     http.expectOne('/api/ssh-keys').flush([]);
     await settle(fixture);
     expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add server');
+    expect(el.querySelector('app-host-dialog [role=radiogroup]')).toBeNull();
   });
 
   it('disables the actions of a target whose host has no SSH key', async () => {

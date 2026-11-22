@@ -176,7 +176,8 @@ Connections live in **Settings → Connections**:
   **Generate key** creates an Ed25519 key pair on the server and shows its public key to copy into
   `~/.ssh/authorized_keys`; **Add key** pastes an existing private key. Private keys are encrypted at rest and never
   returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
-- **Hosts** – **Add Proxmox node** (as many as you have) with its address, port, SSH user (`root`, or a user allowed
+- **Hosts** – **Add host** opens one dialog for both kinds: pick *Server* or *Proxmox node* (as many nodes as you
+  have), then its address, port, SSH user (`root`, or a user allowed
   to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node has its own backup storage
   (**Edit** → *Backup storage*; none = no backups before updates of its guests). The Machines page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
   on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
@@ -193,8 +194,8 @@ dedicated to it.
 <details>
 <summary><b>Servers (VPS and other Linux machines)</b></summary>
 
-A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Machines page or
-Settings → Connections) takes its address, port, user and SSH key; it is watched right away:
+A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. **Add server** (Machines page) or
+**Add host** → *Server* (Settings → Connections) takes its address, port, user and SSH key; it is watched right away:
 
 - Commands run directly on the server (`sh -lc` over SSH; a user other than `root` needs passwordless `sudo`).
 - apt is checked with `apt list --upgradable` and upgraded with `apt-get upgrade` (not `dist-upgrade`), without a

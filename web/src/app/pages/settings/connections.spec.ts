@@ -64,8 +64,9 @@ describe('ConnectionsPanel', () => {
     expect(el.textContent).toContain('3 watched machine(s)');
     expect(el.textContent).toContain('SHA256:fp1');
     expect(el.textContent).toContain('Used by 1 host(s)');
-    // More Proxmox nodes can be added.
-    expect(el.textContent).toContain('Add Proxmox node');
+    // One button adds every kind of host (the type is picked in the dialog).
+    expect(el.textContent).toContain('Add host');
+    expect(el.textContent).not.toContain('Add Proxmox node');
     expect(el.textContent).toContain('Backups: none');
     const removes = [...el.querySelectorAll<HTMLButtonElement>('button.btn-danger-ghost')];
     // Host with machines, key in use: disabled; the unused key can be removed.
@@ -75,10 +76,19 @@ describe('ConnectionsPanel', () => {
   it('adds a Proxmox node with the only key preselected', async () => {
     const { http, fixture, el, button, changed } = await setup([], [key(1)]);
     expect(el.textContent).toContain('No hosts yet');
-    button('Add Proxmox node').click();
+    button('Add host').click();
     await settle(fixture);
     http.expectOne('/api/ssh-keys').flush([key(1)]);
     await settle(fixture);
+    const choices = [...el.querySelectorAll<HTMLButtonElement>('app-host-dialog [role=radio]')];
+    expect(choices.map((c) => [c.querySelector('.type-label')?.textContent, c.getAttribute('aria-checked')])).toEqual([
+      ['Server', 'true'],
+      ['Proxmox node', 'false'],
+    ]);
+    choices[1]!.click();
+    await settle(fixture);
+    expect(choices[1]!.getAttribute('aria-checked')).toBe('true');
+    expect(el.querySelector('app-host-dialog .head-text p')?.textContent).toContain('pct and qm');
     const address = el.querySelector<HTMLInputElement>('#host-address')!;
     address.value = 'pve.lan';
     address.dispatchEvent(new Event('input'));
@@ -98,7 +108,7 @@ describe('ConnectionsPanel', () => {
 
   it('shows field errors of a host', async () => {
     const { http, fixture, el, button } = await setup([], []);
-    button('Add Proxmox node').click();
+    button('Add host').click();
     await settle(fixture);
     http.expectOne('/api/ssh-keys').flush([]);
     await settle(fixture);
@@ -113,11 +123,13 @@ describe('ConnectionsPanel', () => {
 
   it('adds a server', async () => {
     const { http, fixture, el, button } = await setup([host(1)], [key(1, { hostCount: 1 })]);
-    button('Add server').click();
+    button('Add host').click();
     await settle(fixture);
     http.expectOne('/api/ssh-keys').flush([key(1, { hostCount: 1 })]);
     await settle(fixture);
-    expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add server');
+    // A server is the default choice.
+    expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add host');
+    expect(el.querySelector('app-host-dialog .head-text p')?.textContent).toContain('apt');
     const address = el.querySelector<HTMLInputElement>('#host-address')!;
     address.value = 'vps.example.com';
     address.dispatchEvent(new Event('input'));
