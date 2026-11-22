@@ -180,6 +180,25 @@ export class RepositoriesPage {
     });
   }
 
+  /** A version entered by hand that is not the latest release can be set to it in one click. */
+  protected canMarkInstalled(repo: WatchedRepository): boolean {
+    return (
+      repo.installedVersionSource === 'manual' &&
+      repo.lastSeenTag !== null &&
+      repo.installedVersion !== repo.lastSeenTag &&
+      repo.updateAvailable !== false
+    );
+  }
+
+  protected async markInstalled(repo: WatchedRepository): Promise<void> {
+    await this.withBusy(repo.id, async () => {
+      const updated = await firstValueFrom(this.api.markRepositoryInstalled(repo.id));
+      this.replace(updated);
+      this.toast.success(`${repo.fullName}: ${updated.installedVersion} marked as installed.`);
+      void this.statusService.refresh();
+    });
+  }
+
   protected async remove(repo: WatchedRepository): Promise<void> {
     this.confirmDeleteId.set(null);
     await this.withBusy(repo.id, async () => {

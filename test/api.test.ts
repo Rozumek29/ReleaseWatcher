@@ -545,6 +545,67 @@ describe('HTTP API', () => {
     assert.equal(kept.json().installedVersionUrl, 'https://widget.lan/api/version');
   });
 
+  it('takes an installed version entered by hand when no URL is set', async () => {
+    const { id } = (await add('acme/widget')).json();
+    const put = (payload: object) =>
+      inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+
+    const manual = (await put({ installedVersion: ' 0.5.0 ' })).json();
+    assert.equal(manual.installedVersion, '0.5.0');
+    assert.equal(manual.installedVersionSource, 'manual');
+    assert.equal(manual.updateAvailable, true); // latest release is v1
+
+    // A check keeps it and does not announce releases that are already installed.
+    await put({ installedVersion: 'v2' });
+    source.releases = [release('v3', 3), release('v2', 2), release('v1', 1)];
+    const checked = (await inject({ method: 'POST', url: `/api/repositories/${id}/check` })).json();
+    assert.equal(checked.repository.installedVersion, 'v2');
+    assert.deepEqual(
+      notifier.sent.map((n) => n.release.tag),
+      ['v3'],
+    );
+
+    // Not together with a version URL.
+    const both = await put({ installedVersionUrl: 'https://widget.lan/api/version', installedVersion: '1.0.0' });
+    assert.equal(both.statusCode, 400);
+    assert.ok(both.json().errors.installedVersion);
+
+    // Switching to a URL replaces it; removing the URL drops the version read from it.
+    const fromUrl = (await put({ installedVersionUrl: 'https://widget.lan/api/version' })).json();
+    assert.equal(fromUrl.installedVersionSource, 'url');
+    assert.equal(fromUrl.installedVersion, '0.9.0');
+    const none = (await put({ installedVersionUrl: null })).json();
+    assert.equal(none.installedVersion, null);
+    assert.equal(none.installedVersionSource, 'none');
+  });
+
+  it('marks the latest release as installed', async () => {
+    const { id } = (await add('acme/widget')).json();
+    const marked = await inject({ method: 'POST', url: `/api/repositories/${id}/mark-installed` });
+    assert.equal(marked.statusCode, 200);
+    assert.equal(marked.json().installedVersion, 'v1');
+    assert.equal(marked.json().installedVersionSource, 'manual');
+    assert.equal(marked.json().updateAvailable, false);
+
+    // Clearing it (null) removes the installed version.
+    const cleared = await inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: false, isEnabled: true, installedVersion: null },
+    });
+    assert.equal(cleared.json().installedVersion, null);
+
+    await inject({
+      method: 'PUT',
+      url: `/api/repositories/${id}`,
+      payload: { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://widget.lan/api/version' },
+    });
+    const withUrl = await inject({ method: 'POST', url: `/api/repositories/${id}/mark-installed` });
+    assert.equal(withUrl.statusCode, 409);
+
+    assert.equal((await inject({ method: 'POST', url: '/api/repositories/999/mark-installed' })).statusCode, 404);
+  });
+
   it('tests an installed-version URL without saving it', async () => {
     const ok = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v' } });
     assert.deepEqual(ok.json(), { version: '0.9.0', preview: '"0.9.0"' });

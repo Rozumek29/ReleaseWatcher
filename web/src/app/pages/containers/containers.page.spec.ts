@@ -517,6 +517,29 @@ describe('ContainersPage', () => {
     expect(withButton).toEqual(['Outdated', 'Unknown']);
   });
 
+  it('marks the latest version as installed for an app without a version command', async () => {
+    const base = container().apps[0]!;
+    const manual = { ...base, id: 2, name: 'Manual', versionCommand: null, installedVersion: '1.30.0', latestVersion: '1.32.0', updateAvailable: true };
+    const { fixture, el } = await create([container({ apps: [{ ...base, id: 1, name: 'Scripted' }, manual] })]);
+    const markButtons = () =>
+      [...el.querySelectorAll<HTMLButtonElement>('.item button')].filter((b) => b.textContent?.includes('Mark as installed'));
+    expect(markButtons().length).toBe(1); // only the app without a version command
+
+    markButtons()[0]!.click();
+    await settle(fixture);
+    const request = http.expectOne('/api/containers/1/apps/2/mark-installed');
+    expect(request.request.method).toBe('POST');
+    request.flush({ ...manual, installedVersion: '1.32.0', updateAvailable: false });
+    await settle(fixture);
+    http.expectOne('/api/containers/1').flush(
+      container({ apps: [{ ...base, id: 1, name: 'Scripted' }, { ...manual, installedVersion: '1.32.0', updateAvailable: false }] }),
+    );
+    await settle(fixture);
+    http.match('/api/status').forEach((r) => r.flush(null));
+
+    expect(markButtons().length).toBe(0);
+  });
+
   it('adds a container picked from the node', async () => {
     const { fixture, el } = await create([]);
 

@@ -50,89 +50,111 @@
             Installed version
           </legend>
           <p class="group-hint">
-            If you self-host this app, point to an endpoint that returns its version (e.g. Vaultwarden's
-            <code>/api/version</code>). You'll see whether an update is available, notifications show the installed
-            version, and releases you already run are not announced.
+            If you run this app, tell ReleaseWatcher which version you have – read from an endpoint that returns it
+            (e.g. Vaultwarden's <code>/api/version</code>) or entered by hand. You'll see whether an update is
+            available, notifications show the installed version, releases you already run are not announced and
+            vulnerabilities are compared with it.
           </p>
 
           <div class="field">
-            <label for="version-url">Version URL</label>
-            <input id="version-url" class="input mono" name="url" [(ngModel)]="url" placeholder="https://vault.home.lan/api/version" autocomplete="off" spellcheck="false" />
+            <label for="version-source">Installed version from</label>
+            <select id="version-source" class="input" name="source" [(ngModel)]="source">
+              <option value="none">Nothing (no comparison)</option>
+              <option value="url">A version URL</option>
+              <option value="manual">Entered by hand</option>
+            </select>
           </div>
 
-          <div class="field">
-            <label for="version-field">JSON field <span class="optional">optional</span></label>
-            <input id="version-field" class="input mono" name="field" [(ngModel)]="field" placeholder="auto-detect, or e.g. data.version" autocomplete="off" spellcheck="false" />
-            <span class="hint">Leave empty to detect it automatically (plain text, a JSON string, or keys like <code>version</code>).</span>
-          </div>
-
-          <div class="field">
-            <div class="headers-head">
-              <label id="headers-label">Request headers <span class="optional">optional</span></label>
-              @if (headers.length > 0) {
-                <button type="button" class="btn btn-ghost btn-sm" (click)="showValues.set(!showValues())">
-                  {{ showValues() ? 'Hide values' : 'Show values' }}
-                </button>
-              }
+          @if (source === 'manual') {
+            <div class="field">
+              <label for="manual-version">Installed version</label>
+              <input id="manual-version" class="input mono" name="manualVersion" [(ngModel)]="manualVersion" [placeholder]="repository()?.lastSeenTag ?? '1.34.1'" maxlength="100" autocomplete="off" spellcheck="false" />
+              <span class="hint">
+                Update it after upgrading – or use <em>Mark as installed</em> on the repository to set it to the latest release.
+              </span>
             </div>
-            @if (headers.length > 0) {
-              <div class="headers" role="group" aria-labelledby="headers-label">
-                @for (h of headers; track h.id; let i = $index) {
-                  <div class="header-row">
-                    <input
-                      class="input mono"
-                      [name]="'header-name-' + h.id"
-                      [(ngModel)]="h.name"
-                      placeholder="Header name"
-                      autocomplete="off"
-                      spellcheck="false"
-                      [attr.aria-label]="'Header ' + (i + 1) + ' name'"
-                    />
-                    <input
-                      class="input mono"
-                      [name]="'header-value-' + h.id"
-                      [(ngModel)]="h.value"
-                      [type]="showValues() ? 'text' : 'password'"
-                      [placeholder]="h.saved ? 'Saved – leave empty to keep' : 'Value'"
-                      autocomplete="off"
-                      spellcheck="false"
-                      [attr.aria-label]="'Header ' + (i + 1) + ' value'"
-                    />
-                    <button type="button" class="icon-btn" (click)="removeHeader(h)" [attr.aria-label]="'Remove header ' + (h.name || i + 1)" title="Remove">
-                      <app-icon name="trash" [size]="15" />
-                    </button>
-                  </div>
+          }
+
+          @if (source === 'url') {
+            <div class="field">
+              <label for="version-url">Version URL</label>
+              <input id="version-url" class="input mono" name="url" [(ngModel)]="url" placeholder="https://vault.home.lan/api/version" autocomplete="off" spellcheck="false" />
+            </div>
+
+            <div class="field">
+              <label for="version-field">JSON field <span class="optional">optional</span></label>
+              <input id="version-field" class="input mono" name="field" [(ngModel)]="field" placeholder="auto-detect, or e.g. data.version" autocomplete="off" spellcheck="false" />
+              <span class="hint">Leave empty to detect it automatically (plain text, a JSON string, or keys like <code>version</code>).</span>
+            </div>
+
+            <div class="field">
+              <div class="headers-head">
+                <label id="headers-label">Request headers <span class="optional">optional</span></label>
+                @if (headers.length > 0) {
+                  <button type="button" class="btn btn-ghost btn-sm" (click)="showValues.set(!showValues())">
+                    {{ showValues() ? 'Hide values' : 'Show values' }}
+                  </button>
                 }
               </div>
-            }
-            <div class="header-actions">
-              <button type="button" class="btn btn-secondary btn-sm" (click)="addHeader()" [disabled]="headers.length >= 10">
-                <app-icon name="plus" [size]="14" /> Add header
+              @if (headers.length > 0) {
+                <div class="headers" role="group" aria-labelledby="headers-label">
+                  @for (h of headers; track h.id; let i = $index) {
+                    <div class="header-row">
+                      <input
+                        class="input mono"
+                        [name]="'header-name-' + h.id"
+                        [(ngModel)]="h.name"
+                        placeholder="Header name"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [attr.aria-label]="'Header ' + (i + 1) + ' name'"
+                      />
+                      <input
+                        class="input mono"
+                        [name]="'header-value-' + h.id"
+                        [(ngModel)]="h.value"
+                        [type]="showValues() ? 'text' : 'password'"
+                        [placeholder]="h.saved ? 'Saved – leave empty to keep' : 'Value'"
+                        autocomplete="off"
+                        spellcheck="false"
+                        [attr.aria-label]="'Header ' + (i + 1) + ' value'"
+                      />
+                      <button type="button" class="icon-btn" (click)="removeHeader(h)" [attr.aria-label]="'Remove header ' + (h.name || i + 1)" title="Remove">
+                        <app-icon name="trash" [size]="15" />
+                      </button>
+                    </div>
+                  }
+                </div>
+              }
+              <div class="header-actions">
+                <button type="button" class="btn btn-secondary btn-sm" (click)="addHeader()" [disabled]="headers.length >= 10">
+                  <app-icon name="plus" [size]="14" /> Add header
+                </button>
+                @if (!hasAuthorization()) {
+                  <button type="button" class="btn btn-ghost btn-sm" (click)="addAuthorization()">+ Authorization</button>
+                }
+              </div>
+              <span class="hint">E.g. <code>Authorization: Bearer …</code> or <code>X-Api-Key</code>. Values are stored on the server and never shown again.</span>
+            </div>
+
+            <div class="test-row">
+              <button type="button" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="testing() || !url.trim()">
+                <app-icon name="refresh" [size]="14" [class.spin]="testing()" />
+                {{ testing() ? 'Testing…' : 'Test URL' }}
               </button>
-              @if (!hasAuthorization()) {
-                <button type="button" class="btn btn-ghost btn-sm" (click)="addAuthorization()">+ Authorization</button>
+              @if (testResult(); as r) {
+                <span class="test-ok">
+                  <app-icon name="check" [size]="14" />
+                  Detected <strong class="mono">{{ r.version }}</strong>
+                </span>
+              }
+              @if (testError(); as e) {
+                <span class="test-error"><app-icon name="alert" [size]="14" /> {{ e }}</span>
               }
             </div>
-            <span class="hint">E.g. <code>Authorization: Bearer …</code> or <code>X-Api-Key</code>. Values are stored on the server and never shown again.</span>
-          </div>
-
-          <div class="test-row">
-            <button type="button" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="testing() || !url.trim()">
-              <app-icon name="refresh" [size]="14" [class.spin]="testing()" />
-              {{ testing() ? 'Testing…' : 'Test URL' }}
-            </button>
             @if (testResult(); as r) {
-              <span class="test-ok">
-                <app-icon name="check" [size]="14" />
-                Detected <strong class="mono">{{ r.version }}</strong>
-              </span>
+              <pre class="preview" aria-label="Response preview">{{ r.preview }}</pre>
             }
-            @if (testError(); as e) {
-              <span class="test-error"><app-icon name="alert" [size]="14" /> {{ e }}</span>
-            }
-          </div>
-          @if (testResult(); as r) {
-            <pre class="preview" aria-label="Response preview">{{ r.preview }}</pre>
           }
         </fieldset>
 

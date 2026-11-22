@@ -18,6 +18,8 @@ export interface WatchedRepository {
   /** Header names only – values are secrets and never leave the server. */
   installedVersionHeaders: { name: string; hasValue: boolean }[];
   installedVersion: string | null;
+  /** Where the installed version comes from: the version URL, entered by hand, or nowhere. */
+  installedVersionSource: InstalledVersionSource;
   installedVersionCheckedAt: string | null;
   installedVersionError: string | null;
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
@@ -33,6 +35,8 @@ export interface WatchedRepository {
   /** Security advisories (GitHub, OSV.dev) published for the repository. */
   advisories: AdvisorySummary;
 }
+
+export type InstalledVersionSource = 'none' | 'url' | 'manual';
 
 export type AdvisorySource = 'github' | 'osv';
 
@@ -84,6 +88,8 @@ export interface UpdateRepositoryRequest {
   installedVersionUrl?: string | null;
   installedVersionField?: string | null;
   installedVersionHeaders?: HeaderInput[] | null;
+  /** Installed version entered by hand (only without a URL); omit to keep, null to clear. */
+  installedVersion?: string | null;
   /** Omit to keep, null to remove the repository's own token. */
   githubToken?: string | null;
   /** OSV.dev package; omit to keep, null to remove. */
@@ -523,6 +529,8 @@ export interface ContainerAppRequest {
   updateCommand: string | null;
   useTty: boolean;
   timeoutSeconds: number | null;
+  /** Installed version entered by hand (only without a version command); omit to keep, null to clear. */
+  installedVersion?: string | null;
 }
 
 /** A container (`pct list`) or virtual machine (`qm list`) found on the node. */

@@ -26,6 +26,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     installedVersionField: null,
   installedVersionHeaders: [],
     installedVersion: null,
+    installedVersionSource: 'none',
     installedVersionCheckedAt: null,
     installedVersionError: null,
     installedVersions: [],
@@ -91,6 +92,41 @@ describe('RepositoriesPage', () => {
     [...el.querySelectorAll<HTMLButtonElement>('.tab')].find((t) => t.textContent?.includes('Updates'))!.click();
     await settle(fixture);
     expect(el.querySelectorAll('.row').length).toBe(1);
+  });
+
+  it('marks the latest release as installed only for versions entered by hand', async () => {
+    const markButton = (row: Element | undefined) =>
+      [...(row?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => b.textContent?.includes('Mark as installed'));
+    const manual = repo(1, 'dani-garcia/vaultwarden', {
+      installedVersion: '1.31.0',
+      installedVersionSource: 'manual',
+      lastSeenTag: '1.32.0',
+      updateAvailable: true,
+    });
+    const { el, fixture } = await render([
+      manual,
+      repo(2, 'jellyfin/jellyfin', {
+        installedVersion: '10.9.0',
+        installedVersionSource: 'url',
+        installedVersionUrl: 'https://jf.lan/version',
+        lastSeenTag: 'v10.10.3',
+        updateAvailable: true,
+      }),
+    ]);
+    const rows = [...el.querySelectorAll('.row')];
+    expect(markButton(rows[1])).toBeUndefined(); // read from a URL
+    expect(rows[0]?.querySelector('.installed')?.getAttribute('title')).toBe('Entered by hand');
+
+    markButton(rows[0])!.click();
+    await settle(fixture);
+    const request = http.expectOne('/api/repositories/1/mark-installed');
+    expect(request.request.method).toBe('POST');
+    request.flush({ ...manual, installedVersion: '1.32.0', updateAvailable: false });
+    await settle(fixture);
+    http.match('/api/status').forEach((r) => r.flush(null));
+
+    expect(markButton(el.querySelectorAll('.row')[0])).toBeUndefined();
+    expect(el.querySelector('.row .installed')?.textContent).toContain('1.32.0');
   });
 
   it('keeps repositories sorted by repository name, not by owner', async () => {

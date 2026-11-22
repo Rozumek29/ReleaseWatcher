@@ -367,6 +367,13 @@
         <label for="app-version">Version command <span class="optional">optional</span></label>
         <input id="app-version" class="input mono" [ngModel]="f.versionCommand" (ngModelChange)="setField('versionCommand', $event)" placeholder="cat /opt/vaultwarden_version.txt" autocomplete="off" spellcheck="false" />
       </div>
+      @if (!f.versionCommand.trim()) {
+        <div class="field">
+          <label for="app-installed">Installed version <span class="optional">optional</span></label>
+          <input id="app-installed" class="input mono" [ngModel]="f.installedVersion" (ngModelChange)="setField('installedVersion', $event)" placeholder="1.34.1" maxlength="100" autocomplete="off" spellcheck="false" />
+          <span class="hint">Without a version command, enter the version you run – or use <em>Mark as installed</em> after updating.</span>
+        </div>
+      }
       <div class="field">
         <label for="app-source">Latest version from</label>
         <select id="app-source" class="input" [ngModel]="f.latestSource" (ngModelChange)="setField('latestSource', $event)">

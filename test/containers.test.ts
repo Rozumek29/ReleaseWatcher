@@ -392,6 +392,56 @@ describe('containers API', () => {
     assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, aptPending: 1, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
   });
 
+  it('takes the installed version of an app without a version command by hand and marks the latest as installed', async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repo = (await request('GET', '/api/repositories')).json()[0];
+    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Widget',
+      latestSource: 'github',
+      repositoryId: repo.id,
+      installedVersion: '1.30.0',
+    });
+    assert.equal(created.status, 201);
+    const appId = created.json().id;
+    assert.equal(created.json().installedVersion, '1.30.0');
+
+    // A check keeps the version entered by hand and compares it with the latest.
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.apps[0].installedVersion, '1.30.0');
+    assert.equal(dto.apps[0].updateAvailable, true);
+    // The repository's vulnerabilities are compared with it too.
+    assert.deepEqual((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersions, ['1.30.0']);
+
+    const marked = await request('POST', `/api/containers/${container.id}/apps/${appId}/mark-installed`);
+    assert.equal(marked.status, 200);
+    assert.equal(marked.json().installedVersion, 'v1.32.0');
+    assert.equal(marked.json().updateAvailable, false);
+
+    // Only without a version command.
+    const both = await request('PUT', `/api/containers/${container.id}/apps/${appId}`, {
+      name: 'Widget',
+      latestSource: 'github',
+      repositoryId: repo.id,
+      versionCommand: 'cat /opt/vw_version.txt',
+      installedVersion: '1.0.0',
+    });
+    assert.equal(both.status, 400);
+    assert.ok(both.json().errors.installedVersion);
+    await request('PUT', `/api/containers/${container.id}/apps/${appId}`, {
+      name: 'Widget',
+      latestSource: 'github',
+      repositoryId: repo.id,
+      versionCommand: 'cat /opt/vw_version.txt',
+    });
+    const withCommand = await request('POST', `/api/containers/${container.id}/apps/${appId}/mark-installed`);
+    assert.equal(withCommand.status, 409);
+    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.equal(dto.apps[0].installedVersion, null); // the command reads it from now on
+  });
+
   const getContainer = async (id: number) => {
     const { ContainerStore } = await import('../src/proxmox/store.ts');
     return new ContainerStore(store.database, store.secretBox).get(id)!;

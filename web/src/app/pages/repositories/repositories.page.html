@@ -170,7 +170,7 @@
               </span>
             }
             @if (repo.installedVersion) {
-              <span class="meta-item installed" [title]="'Read from ' + repo.installedVersionUrl">
+              <span class="meta-item installed" [title]="repo.installedVersionUrl ? 'Read from ' + repo.installedVersionUrl : 'Entered by hand'">
                 <app-icon name="server" [size]="14" />
                 installed <span class="mono">{{ repo.installedVersion }}</span>
                 @if (repo.updateAvailable) {
@@ -212,6 +212,12 @@
               <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(repo)">Yes</button>
               <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteId.set(null)">No</button>
             } @else {
+              @if (canMarkInstalled(repo)) {
+                <button type="button" class="btn btn-sm btn-secondary" (click)="markInstalled(repo)" [disabled]="isBusy(repo.id)" [title]="'Set the installed version to ' + repo.lastSeenTag">
+                  <app-icon name="check" [size]="14" />
+                  Mark as installed
+                </button>
+              }
               <button type="button" class="btn btn-sm btn-secondary" (click)="checkNow(repo)" [disabled]="isBusy(repo.id)">
                 <app-icon name="refresh" [size]="14" [class.spin]="isBusy(repo.id)" />
                 Check

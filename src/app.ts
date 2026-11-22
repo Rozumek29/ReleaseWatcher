@@ -274,6 +274,13 @@ function decodeAdvisoryCursor(value: string): AdvisoryCursor {
   throw new RequestValidationError('cursor is not valid – load the list from the first page again.');
 }
 
+/** A repository without a version URL keeps the installed version entered by hand (`refreshInstalledVersion`). */
+const installedVersionSource = (r: Pick<WatchedRepository, 'installedVersionUrl' | 'installedVersion'>): 'none' | 'url' | 'manual' =>
+  r.installedVersionUrl ? 'url' : r.installedVersion ? 'manual' : 'none';
+
+/** Longest installed version that can be entered by hand. */
+const MANUAL_VERSION_MAX_LENGTH = 100;
+
 /** Public shape of a watched repository (internal fields like the ETag are not exposed). */
 export const toDto = (
   r: WatchedRepository,
@@ -298,6 +305,8 @@ export const toDto = (
   // Only names are exposed; values may contain credentials.
   installedVersionHeaders: r.installedVersionHeaders.map((h) => ({ name: h.name, hasValue: h.value.length > 0 })),
   installedVersion: r.installedVersion,
+  /** Where the installed version comes from: the version URL, entered by hand, or nowhere. */
+  installedVersionSource: installedVersionSource(r),
   installedVersionCheckedAt: r.installedVersionCheckedAt,
   installedVersionError: r.installedVersionError,
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
@@ -337,6 +346,7 @@ const updateRepositorySchema: ObjectSchema = {
     installedVersionUrl: { type: 'string', nullable: true, maxLength: 2000 },
     installedVersionField: { type: 'string', nullable: true, maxLength: 200 },
     installedVersionHeaders: headersSchema,
+    installedVersion: { type: 'string', nullable: true, maxLength: MANUAL_VERSION_MAX_LENGTH },
     githubToken: { type: 'string', nullable: true, maxLength: 1000 },
     osvEcosystem: { type: 'string', nullable: true, maxLength: 50 },
     osvPackage: { type: 'string', nullable: true, maxLength: 300 },
@@ -711,6 +721,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       installedVersionUrl?: string | null;
       installedVersionField?: string | null;
       installedVersionHeaders?: HeaderInput[] | null;
+      /** Installed version entered by hand (only without a version URL); omit = keep, null/"" = none. */
+      installedVersion?: string | null;
       /** Omit = keep, null/"" = remove (use the global token). */
       githubToken?: string | null;
       /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
@@ -719,6 +731,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }>(req, updateRepositorySchema);
     if (!repo) {
       return problem(404, 'Repository not found.');
+    }
+    const manualVersion = body.installedVersion === undefined ? undefined : body.installedVersion?.trim() || null;
+    const finalUrl = body.installedVersionUrl === undefined ? repo.installedVersionUrl : body.installedVersionUrl?.trim() || null;
+    if (manualVersion && finalUrl) {
+      return validationProblem('installedVersion', 'Remove the version URL to enter the installed version by hand.');
     }
     if (repo.includePrereleases !== body.includePrereleases) {
       // Filter changed: force a full fetch on the next check.
@@ -758,12 +775,19 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         url !== repo.installedVersionUrl ||
         field !== repo.installedVersionField ||
         JSON.stringify(headers) !== JSON.stringify(repo.installedVersionHeaders);
+      if (!url && repo.installedVersionUrl) {
+        // The version read from the removed URL is not one the user entered.
+        repo.installedVersion = null;
+      }
       repo.installedVersionUrl = url;
       repo.installedVersionField = field;
       repo.installedVersionHeaders = headers;
       if (changed) {
         await checker.refreshInstalledVersion(repo);
       }
+    }
+    if (manualVersion !== undefined && !repo.installedVersionUrl) {
+      repo.installedVersion = manualVersion;
     }
 
     let osvChanged = false;
@@ -785,6 +809,23 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       await checker.refreshAdvisories(repo);
     }
 
+    store.save(repo);
+    return Response.json(repositoryDto(repo));
+  };
+
+  // Sets the installed version entered by hand to the latest release ("Mark as installed").
+  const markRepositoryInstalled = (rawId: string) => {
+    const repo = findRepository(rawId);
+    if (!repo) {
+      return problem(404, 'Repository not found.');
+    }
+    if (repo.installedVersionUrl) {
+      return problem(409, 'The installed version is read from the version URL – remove it to set the version by hand.');
+    }
+    if (!repo.lastSeenTag) {
+      return problem(409, 'No release of this repository is known yet.');
+    }
+    repo.installedVersion = repo.lastSeenTag;
     store.save(repo);
     return Response.json(repositoryDto(repo));
   };
@@ -1007,6 +1048,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           PUT: (req) => updateRepository(req, req.params.id),
           DELETE: (req) =>
             store.delete(parseId(req.params.id)) ? new Response(null, { status: 204 }) : problem(404, 'Repository not found.'),
+        },
+        '/api/repositories/:id/mark-installed': {
+          POST: (req) => markRepositoryInstalled(req.params.id),
         },
         '/api/repositories/:id/check': {
           POST: async (req) => {

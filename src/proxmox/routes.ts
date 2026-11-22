@@ -126,6 +126,9 @@ async function readUpdateOptions<T = { backup?: boolean | null }>(req: Request, 
   return validate(json, schema, 'body') as Partial<T>;
 }
 
+/** Longest installed version that can be entered by hand. */
+const MANUAL_VERSION_MAX_LENGTH = 100;
+
 const appSchema: ObjectSchema = {
   type: 'object',
   properties: {
@@ -137,6 +140,7 @@ const appSchema: ObjectSchema = {
     updateCommand: { type: 'string', nullable: true, maxLength: COMMAND_MAX_LENGTH },
     useTty: { type: 'boolean' },
     timeoutSeconds: { type: 'integer', nullable: true },
+    installedVersion: { type: 'string', nullable: true, maxLength: MANUAL_VERSION_MAX_LENGTH },
   },
   required: ['name', 'latestSource'],
 };
@@ -150,6 +154,8 @@ interface AppBody {
   updateCommand?: string | null;
   useTty?: boolean;
   timeoutSeconds?: number | null;
+  /** Installed version entered by hand (only without a version command); omit = keep, null/"" = none. */
+  installedVersion?: string | null;
 }
 
 const blankToNull = (value: string | null | undefined): string | null => value?.trim() || null;
@@ -292,6 +298,18 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
   const findContainer = (rawId: string) => containers.get(parseId(rawId));
 
   /** Validates an application body; returns the input or a problem response. */
+  /** The installed version entered by hand: undefined = keep, null = none; only apps without a version command take one. */
+  const manualAppVersion = (body: AppBody, input: AppInput): string | null | undefined | Response => {
+    if (body.installedVersion === undefined) {
+      return undefined;
+    }
+    const version = blankToNull(body.installedVersion);
+    if (version && input.versionCommand) {
+      return validationProblem('installedVersion', 'Remove the version command to enter the installed version by hand.');
+    }
+    return input.versionCommand ? undefined : version;
+  };
+
   const toAppInput = (body: AppBody, current: ContainerApp | null): AppInput | Response => {
     const name = body.name.trim();
     if (!name) {
@@ -785,7 +803,15 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (input instanceof Response) {
           return input;
         }
+        const manual = manualAppVersion(body, input);
+        if (manual instanceof Response) {
+          return manual;
+        }
         const app = containers.addApp(container.id, input);
+        if (manual) {
+          app.installedVersion = manual;
+          containers.saveApp(app);
+        }
         return Response.json(appDto(app), {
           status: 201,
           headers: { location: `/api/containers/${container.id}/apps/${app.id}` },
@@ -804,6 +830,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         if (input instanceof Response) {
           return input;
         }
+        const manual = manualAppVersion(body, input);
+        if (manual instanceof Response) {
+          return manual;
+        }
         const sourceChanged =
           input.latestSource !== app.latestSource ||
           input.repositoryId !== app.repositoryId ||
@@ -813,6 +843,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         // Values read with the old configuration would be misleading.
         if (sourceChanged) app.latestVersion = null;
         if (versionChanged) app.installedVersion = null;
+        if (manual !== undefined) app.installedVersion = manual;
         containers.saveApp(app);
         return Response.json(appDto(app));
       },
@@ -820,6 +851,24 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         containers.deleteApp(parseId(req.params.id), parseId(req.params.appId, 'params/appId'))
           ? new Response(null, { status: 204 })
           : problem(404, 'Application not found.'),
+    },
+    // Sets the installed version of an app without a version command to its latest version ("Mark as installed").
+    '/api/containers/:id/apps/:appId/mark-installed': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/mark-installed'>) => {
+        const app = containers.getApp(parseId(req.params.id), parseId(req.params.appId, 'params/appId'));
+        if (!app) {
+          return problem(404, 'Application not found.');
+        }
+        if (app.versionCommand) {
+          return problem(409, `The installed version of ${app.name} is read by its version command.`);
+        }
+        if (!app.latestVersion) {
+          return problem(409, `The latest version of ${app.name} is not known yet – check the container first.`);
+        }
+        app.installedVersion = app.latestVersion;
+        containers.saveApp(app);
+        return Response.json(appDto(app));
+      },
     },
     '/api/containers/:id/apps/:appId/update': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/update'>) =>

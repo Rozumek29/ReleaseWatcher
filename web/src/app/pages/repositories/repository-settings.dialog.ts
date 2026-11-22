@@ -12,7 +12,12 @@ import {
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { HeaderInput, InstalledVersionTestResult, WatchedRepository } from '../../core/models';
+import {
+  HeaderInput,
+  InstalledVersionSource,
+  InstalledVersionTestResult,
+  WatchedRepository,
+} from '../../core/models';
 
 /** Editable header row. `saved` = a value exists on the server; an empty value field keeps it. */
 interface HeaderRow {
@@ -45,6 +50,10 @@ export class RepositorySettingsDialog {
 
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
 
+  /** Where the installed version comes from. */
+  protected source: InstalledVersionSource = 'none';
+  /** Installed version entered by hand (source = manual). */
+  protected manualVersion = '';
   protected url = '';
   protected field = '';
   protected includePrereleases = false;
@@ -70,6 +79,8 @@ export class RepositorySettingsDialog {
       const repo = this.repository();
       const dialog = this.dialog().nativeElement;
       if (repo) {
+        this.source = repo.installedVersionSource;
+        this.manualVersion = repo.installedVersionSource === 'manual' ? (repo.installedVersion ?? '') : '';
         this.url = repo.installedVersionUrl ?? '';
         this.field = repo.installedVersionField ?? '';
         this.includePrereleases = repo.includePrereleases;
@@ -120,14 +131,17 @@ export class RepositorySettingsDialog {
     this.saving.set(true);
     this.saveError.set(null);
     const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
+    const fromUrl = this.source === 'url';
     try {
       const updated = await firstValueFrom(
         this.api.updateRepository(repo.id, {
           includePrereleases: this.includePrereleases,
           isEnabled: this.isEnabled,
-          installedVersionUrl: this.url.trim() || null,
-          installedVersionField: this.field.trim() || null,
-          installedVersionHeaders: this.headerInputs(),
+          installedVersionUrl: fromUrl ? this.url.trim() || null : null,
+          installedVersionField: fromUrl ? this.field.trim() || null : null,
+          installedVersionHeaders: fromUrl ? this.headerInputs() : [],
+          // A version read from the URL is not sent back; otherwise the value entered by hand (or none).
+          ...(fromUrl ? {} : { installedVersion: this.source === 'manual' ? this.manualVersion.trim() || null : null }),
           // The token is never sent back to the UI: empty = keep, "Remove" = null.
           ...(this.token.trim() ? { githubToken: this.token.trim() } : this.removeToken ? { githubToken: null } : {}),
           // Both or neither: an ecosystem without a package removes the OSV.dev package.

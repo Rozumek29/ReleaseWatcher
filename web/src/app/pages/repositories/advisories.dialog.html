@@ -19,7 +19,7 @@
           } @else if (repo.installedVersions.length === 1) {
             Compared with the installed version <span class="mono">{{ repo.installedVersions[0] }}</span>.
           } @else {
-            Set an installed-version URL in the repository settings or link the repository to a container app to see
+            Set the installed version in the repository settings (a URL or by hand) or link the repository to a container app to see
             which advisories affect your installation.
           }
           @if (repo.advisories.checkedAt) {

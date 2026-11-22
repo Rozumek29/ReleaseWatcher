@@ -195,6 +195,35 @@ describe('ContainerSettingsDialog', () => {
     expect(el.querySelector('.app-form')).toBeNull();
   });
 
+  it('takes the installed version by hand only without a version command', async () => {
+    const base = container().apps[0]!;
+    const { fixture, el } = await open(
+      container({ apps: [{ ...base, versionCommand: null, installedVersion: '1.30.0' }] }),
+    );
+    el.querySelector<HTMLButtonElement>(`[aria-label="Edit ${base.name}"]`)!.click();
+    await settle(fixture);
+    expect(el.querySelector<HTMLInputElement>('#app-installed')!.value).toBe('1.30.0');
+    type(el, '#app-installed', ' 1.31.0 ');
+
+    [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
+    const request = http.expectOne(`/api/containers/1/apps/${base.id}`);
+    expect(request.request.body.installedVersion).toBe('1.31.0');
+    request.flush({ ...base, versionCommand: null, installedVersion: '1.31.0' });
+    await settle(fixture);
+
+    // A version command reads it instead: the field disappears and nothing is sent.
+    el.querySelector<HTMLButtonElement>(`[aria-label="Edit ${base.name}"]`)!.click();
+    await settle(fixture);
+    type(el, '#app-version', 'cat /opt/vw_version.txt');
+    await settle(fixture);
+    expect(el.querySelector('#app-installed')).toBeNull();
+    [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
+    const second = http.expectOne(`/api/containers/1/apps/${base.id}`);
+    expect('installedVersion' in second.request.body).toBe(false);
+    second.flush(base);
+    await settle(fixture);
+  });
+
   it('edits an application in place and keeps the list sorted by name', async () => {
     const base = container().apps[0]!;
     const app = (id: number, name: string) => ({ ...base, id, name });

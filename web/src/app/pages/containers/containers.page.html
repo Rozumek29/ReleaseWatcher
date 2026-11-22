@@ -649,18 +649,31 @@
                     </label>
                     <button type="button" class="btn btn-sm" (click)="updateApp(c, a)">Yes</button>
                     <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
-                  } @else if (a.updateCommand && a.updateAvailable !== false) {
-                    <!-- Hidden when up to date; shown when an update is available or the state is unknown. -->
-                    <button
-                      type="button"
-                      class="btn btn-sm"
-                      [class.btn-secondary]="!a.updateAvailable"
-                      (click)="ask('app-' + c.id + '-' + a.id, c)"
-                      [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
-                      [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
-                    >
-                      <app-icon name="arrowUp" [size]="14" /> Update
-                    </button>
+                  } @else {
+                    @if (canMarkInstalled(a)) {
+                      <button
+                        type="button"
+                        class="btn btn-sm btn-secondary"
+                        (click)="markAppInstalled(c, a)"
+                        [disabled]="isBusy(c)"
+                        [title]="'Set the installed version to ' + a.latestVersion"
+                      >
+                        <app-icon name="check" [size]="14" /> Mark as installed
+                      </button>
+                    }
+                    @if (a.updateCommand && a.updateAvailable !== false) {
+                      <!-- Hidden when up to date; shown when an update is available or the state is unknown. -->
+                      <button
+                        type="button"
+                        class="btn btn-sm"
+                        [class.btn-secondary]="!a.updateAvailable"
+                        (click)="ask('app-' + c.id + '-' + a.id, c)"
+                        [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)"
+                        [title]="blockedWhileStopped(c) ? 'Start the container to update it' : 'Run: ' + a.updateCommand"
+                      >
+                        <app-icon name="arrowUp" [size]="14" /> Update
+                      </button>
+                    }
                   }
                 </div>
                 @if (a.error) {

@@ -704,6 +704,26 @@ export class ContainersPage {
     });
   }
 
+  /** An app without a version command whose version (entered by hand) is not the latest one. */
+  protected canMarkInstalled(app: ContainerApp): boolean {
+    return (
+      !app.versionCommand &&
+      app.latestVersion !== null &&
+      app.installedVersion !== app.latestVersion &&
+      app.updateAvailable !== false
+    );
+  }
+
+  /** Sets the installed version of the app to its latest version and reloads the container (its counters change). */
+  protected async markAppInstalled(container: Container, app: ContainerApp): Promise<void> {
+    await this.withBusy(container.id, async () => {
+      const updated = await firstValueFrom(this.api.markAppInstalled(container.id, app.id));
+      this.replace(await firstValueFrom(this.api.getContainer(container.id)));
+      this.toast.success(`${app.name}: ${updated.installedVersion} marked as installed.`);
+      void this.statusService.refresh();
+    });
+  }
+
   private async withBusy(id: number, action: () => Promise<void>): Promise<void> {
     this.busyIds.update((ids) => new Set(ids).add(id));
     try {

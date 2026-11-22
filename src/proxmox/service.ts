@@ -1465,6 +1465,12 @@ export class ContainerService {
       } else {
         errors.push(`version command: ${result?.exitCode === 0 ? 'printed nothing' : describeStep(result)}`);
       }
+    } else {
+      // Entered by hand: keep a value saved while the check was running ("Mark as installed").
+      const saved = this.deps.containers.getApp(app.containerId, app.id);
+      if (saved) {
+        app.installedVersion = saved.installedVersion;
+      }
     }
 
     switch (app.latestSource) {

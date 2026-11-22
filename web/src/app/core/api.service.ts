@@ -49,6 +49,11 @@ export class ApiService {
     return this.http.put<WatchedRepository>(`${this.baseUrl}/repositories/${id}`, request);
   }
 
+  /** Sets the installed version (entered by hand) to the latest release. */
+  markRepositoryInstalled(id: number): Observable<WatchedRepository> {
+    return this.http.post<WatchedRepository>(`${this.baseUrl}/repositories/${id}/mark-installed`, {});
+  }
+
   deleteRepository(id: number): Observable<void> {
     return this.http.delete<void>(`${this.baseUrl}/repositories/${id}`);
   }
@@ -276,6 +281,14 @@ export class ApiService {
     return this.http.put<ContainerApp>(
       `${this.baseUrl}/containers/${containerId}/apps/${appId}`,
       request,
+    );
+  }
+
+  /** Sets the installed version of an app without a version command to its latest version. */
+  markAppInstalled(containerId: number, appId: number): Observable<ContainerApp> {
+    return this.http.post<ContainerApp>(
+      `${this.baseUrl}/containers/${containerId}/apps/${appId}/mark-installed`,
+      {},
     );
   }
 

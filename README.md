@@ -34,8 +34,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 - Watch any public or private repository (`owner/repo` or a GitHub URL); pre-releases are opt-in per repository.
 - Notifications on **Discord** (webhook) and by **e-mail** (built-in SMTP client) – one message per release or one
   summary per check run.
-- **Installed version** of your self-hosted instance (e.g. Vaultwarden's `/api/version`): see
-  *Update available 1.34.1 → 1.34.3* at a glance, and skip releases you already run.
+- **Installed version** of your self-hosted instance (e.g. Vaultwarden's `/api/version`) – or entered by hand for
+  apps without one: see *Update available 1.34.1 → 1.34.3* at a glance, and skip releases you already run.
 - **Vulnerabilities** of every watched repository from GitHub security advisories and **OSV.dev** (sources switchable
   in Settings): a *Vulnerabilities* page shows which ones affect your installed version, and new ones are notified.
 - Rate-limit friendly: conditional requests with ETags, optional token (global or per repository).
@@ -129,6 +129,11 @@ or an explicit JSON path such as `data.version` – and **Test URL** previews th
 (`Authorization: Bearer …`, `X-Api-Key`) are stored encrypted and never returned by the API. Releases you already
 run (installed ≥ release) are not announced, and Discord messages include the installed version.
 
+Apps without such an endpoint (desktop apps, firmware, external services) can take the installed version **by hand**:
+choose *Installed version from → Entered by hand* and type it (e.g. `1.34.1`). It is used like a version read from a
+URL – update badge, skipped notifications, vulnerability impact – and kept until you change it. After upgrading,
+**Mark as installed** on the repository sets it to the latest release in one click.
+
 ### Vulnerabilities
 
 Known vulnerabilities are read on their own schedule, `ADVISORY_CHECK_CRON` (default `0 */6 * * *` – every 6 hours),
@@ -146,7 +151,7 @@ digest mode they send one summary together. **Settings → General → Vulnerabi
 - Vulnerabilities reported by both sources (same GHSA/CVE id) are listed once. Withdrawn ones are dropped; switching a
   source off removes its entries.
 - The vulnerable range (e.g. `>= 1.0.0, < 1.32.1`) is compared with the **installed versions**: the one read from the
-  repository's installed-version URL plus those read by the *version command* of every container app linked to the
+  repository's installed-version URL (or entered by hand) plus those of every container app linked to the
   repository (*latest version from* a watched GitHub repository). A vulnerability affects the installation when any of
   these versions is in range; without any version its impact is shown as *Installed version unknown*. A range without
   an upper bound (e.g. `>= 0.104.0`) is capped by the patched version (`0.135.0` → `>= 0.104.0, < 0.135.0`), so newer
@@ -238,7 +243,8 @@ A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. 
 - **apt check:** `apt-get update` + `apt list --upgradable`; upgrade = `apt-get -y upgrade` + `apt-get -y autoremove`, keeping existing
   config files.
 - **Applications** per container:
-  - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`,
+  - *version command* – prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`; without one the
+    installed version can be entered by hand, and **Mark as installed** sets it to the latest version,
   - *latest version* – the newest release of a watched GitHub repository, a command, or none,
   - *update command* – e.g. `update` (community-scripts) or `cd /opt/app && ./pull.sh`. Enable **TTY** for scripts
     that need a terminal. Update commands run with `PHS_SILENT=1` and `DEBIAN_FRONTEND=noninteractive`, so
@@ -597,7 +603,8 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
 | `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `githubToken` and the OSV.dev package: omit = keep, `null` = remove |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `installedVersion` (entered by hand, only without a URL – `400` otherwise), `githubToken` and the OSV.dev package: omit = keep, `null` = remove. The response has `installedVersionSource` (`none`/`url`/`manual`) |
+| `POST` | `/api/repositories/:id/mark-installed` | Set the installed version (entered by hand) to the latest release; `409` with an installed-version URL or before the first release is known |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately (including security advisories); a new release also starts a check of the enabled containers with a linked app (`containerChecks` = their number) |
 | `GET` | `/api/repositories/:id/advisories` | Vulnerabilities of the repository, newest first, with `source` (`github`/`osv`), `affectsInstalled` (`true` when any installed version is affected, `false` when all are safe, `null` when unknown) and `affectedVersions` |
@@ -646,8 +653,9 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers/:id/restart` | Restart a running container (`pct reboot`) or schedule a reboot of the host → `202` (`409` while updates run, for a stopped container, or – for the host – while any task runs) |
 | `POST` | `/api/containers/:id/apt-upgrade` | Start `apt-get upgrade` (host: `dist-upgrade`, no backup) → `202`; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/home-assistant-update` | Install Home Assistant updates of a Home Assistant OS VM → `202`; `{ "backup"?, "ids"? }` (`ids` from `homeAssistant.updates`, omitted = every installable one; `409` when one cannot be installed or installing is switched off for the VM) |
-| `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds" }` |
+| `POST` | `/api/containers/:id/apps` | `{ "name", "versionCommand", "latestSource": "none" \| "github" \| "command", "repositoryId", "latestCommand", "updateCommand", "useTty", "timeoutSeconds", "installedVersion"? }` – `installedVersion` is entered by hand, only without a `versionCommand` (`400` otherwise); omit = keep, `null` = remove |
 | `PUT` / `DELETE` | `/api/containers/:id/apps/:appId` | Edit / remove an application |
+| `POST` | `/api/containers/:id/apps/:appId/mark-installed` | Set the installed version of an app without a version command to its latest version; `409` with a version command or while the latest version is unknown |
 | `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container (nothing is saved) |
 | `GET` | `/api/containers/:id/runs` | Recent runs (without output) |

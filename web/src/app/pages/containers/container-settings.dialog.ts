@@ -41,6 +41,8 @@ interface AppForm {
   updateCommand: string;
   useTty: boolean;
   timeoutSeconds: number;
+  /** Installed version entered by hand (used only without a version command). */
+  installedVersion: string;
 }
 
 const DEFAULT_TIMEOUT_SECONDS = 1800;
@@ -55,6 +57,7 @@ const emptyForm = (): AppForm => ({
   updateCommand: '',
   useTty: false,
   timeoutSeconds: DEFAULT_TIMEOUT_SECONDS,
+  installedVersion: '',
 });
 
 /** Applications in alphabetical order, like the server lists them. */
@@ -214,6 +217,7 @@ export class ContainerSettingsDialog {
       updateCommand: app.updateCommand ?? '',
       useTty: app.useTty,
       timeoutSeconds: app.timeoutSeconds,
+      installedVersion: app.versionCommand ? '' : (app.installedVersion ?? ''),
     });
   }
 
@@ -243,9 +247,12 @@ export class ContainerSettingsDialog {
     if (!container || !form || this.savingApp()) {
       return;
     }
+    const versionCommand = form.versionCommand.trim() || null;
     const request: ContainerAppRequest = {
       name: form.name.trim(),
-      versionCommand: form.versionCommand.trim() || null,
+      versionCommand,
+      // Without a version command the installed version is the one entered by hand.
+      ...(versionCommand ? {} : { installedVersion: form.installedVersion.trim() || null }),
       latestSource: form.latestSource,
       repositoryId: form.latestSource === 'github' ? form.repositoryId : null,
       latestCommand: form.latestSource === 'command' ? form.latestCommand.trim() || null : null,

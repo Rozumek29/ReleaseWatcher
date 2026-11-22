@@ -23,6 +23,7 @@ const repo: WatchedRepository = {
   installedVersionField: null,
   installedVersionHeaders: [],
   installedVersion: null,
+  installedVersionSource: 'none',
   installedVersionCheckedAt: null,
   installedVersionError: null,
   installedVersions: [],
@@ -48,6 +49,11 @@ describe('RepositorySettingsDialog', () => {
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('#version-url')).toBeNull(); // source "Nothing"
+    const source = el.querySelector<HTMLSelectElement>('#version-source')!;
+    source.value = 'url';
+    source.dispatchEvent(new Event('change'));
+    await settle(fixture);
     const url = el.querySelector<HTMLInputElement>('#version-url')!;
     url.value = 'https://vault.lan/api/version';
     url.dispatchEvent(new Event('input'));
@@ -76,6 +82,7 @@ describe('RepositorySettingsDialog', () => {
     fixture.componentRef.setInput('repository', {
       ...repo,
       installedVersionUrl: 'https://vault.lan/api/version',
+      installedVersionSource: 'url',
       installedVersionHeaders: [{ name: 'Authorization', hasValue: true }],
     });
     await settle(fixture);
@@ -151,5 +158,58 @@ describe('RepositorySettingsDialog', () => {
     const request = http.expectOne('/api/repositories/7');
     expect(request.request.body.osvEcosystem).toBe('Go');
     expect(request.request.body.osvPackage).toBe('github.com/dani-garcia/vaultwarden');
+  });
+
+  it('saves an installed version entered by hand and clears the URL', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', {
+      ...repo,
+      installedVersionUrl: 'https://vault.lan/api/version',
+      installedVersionSource: 'url',
+      installedVersion: '1.31.0',
+    });
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+
+    const source = el.querySelector<HTMLSelectElement>('#version-source')!;
+    source.value = 'manual';
+    source.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(el.querySelector('#version-url')).toBeNull();
+    const manual = el.querySelector<HTMLInputElement>('#manual-version')!;
+    expect(manual.value).toBe(''); // the version read from the URL is not offered as typed
+    manual.value = ' 1.30.0 ';
+    manual.dispatchEvent(new Event('input'));
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.installedVersionUrl).toBeNull();
+    expect(request.request.body.installedVersion).toBe('1.30.0');
+  });
+
+  it('does not send the version read from the URL back as one entered by hand', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', {
+      ...repo,
+      installedVersionUrl: 'https://vault.lan/api/version',
+      installedVersionSource: 'url',
+      installedVersion: '1.31.0',
+    });
+    await settle(fixture);
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.installedVersionUrl).toBe('https://vault.lan/api/version');
+    expect('installedVersion' in request.request.body).toBe(false);
   });
 });
