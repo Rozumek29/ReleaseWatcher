@@ -7,6 +7,7 @@ import { loadConfig } from './config.ts';
 import { RepositoryStore } from './db.ts';
 import { embeddedUi } from './embedded-ui.ts';
 import { GitHubReleaseSource } from './github.ts';
+import { serviceCommand, setUpService } from './install.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
 import { OsvApiClient } from './osv.ts';
@@ -14,11 +15,25 @@ import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 import { localVersionUrl } from './version.ts';
 
-// `--version` prints the version and exits before touching the configuration, the database or the port – usable as
-// the version command of the container app that runs ReleaseWatcher itself.
-if (process.argv.includes('--version')) {
+// `--version` / `-v` prints the version and exits before touching the configuration, the database or the port –
+// usable as the version command of the container app that runs ReleaseWatcher itself.
+if (process.argv.includes('--version') || process.argv.includes('-v')) {
   console.log(`v${APP_VERSION}`); // same form as the release tags (v1.2.3)
   process.exit(0);
+}
+
+// `--install` sets the executable up as a systemd service (and updates an existing install), `--uninstall [--purge]`
+// removes it – also before the configuration and the database are touched.
+const service = serviceCommand(process.argv);
+if (service) {
+  process.exit(
+    await setUpService(service, {
+      executable: process.execPath,
+      compiled: embeddedUi.size > 0,
+      platform: process.platform,
+      purge: process.argv.includes('--purge'),
+    }),
+  );
 }
 
 const config = loadConfig();

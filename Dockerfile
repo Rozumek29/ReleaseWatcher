@@ -15,6 +15,9 @@ RUN bun run --cwd web build
 COPY tsconfig.json ./
 COPY scripts ./scripts
 COPY src ./src
+# Embedded for `releasewatcher --install` (src/install.ts).
+COPY deploy ./deploy
+COPY .env.example ./
 # Version shown in the UI (the release workflow passes the Git tag); empty = package.json.
 ARG VERSION=
 # Bun runtime embedded in the executable; empty = from the image's platform (TARGETARCH, set by BuildKit):

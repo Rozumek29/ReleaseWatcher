@@ -299,7 +299,7 @@ A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. 
 | --- | --- | --- |
 | [Docker](#docker) | any Docker host | Docker |
 | [`bun run deploy`](#proxmox-lxc-one-command) | a dedicated Proxmox LXC, installed from your computer | Bun + SSH access to the node |
-| [Manual](#manual-install-systemd) | any Linux x64 or arm64 machine | nothing – one executable |
+| [Native](#native-install-systemd) (`releasewatcher --install`) | any Linux x64 or arm64 machine with systemd | nothing – one executable |
 
 ### Docker
 
@@ -367,14 +367,36 @@ keeps the configuration, the account and the data.
 | `--baseline` | build for older x64 CPUs without AVX2 (see [Docker](#docker)) |
 | `--arm64` | build for a 64-bit ARM node |
 
-`deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`.
+`deploy/install.sh` can also be run by hand inside the container: `sh install.sh <dir with the files>`. Without a
+clone of the repository, use the release executable's [`--install`](#native-install-systemd) instead.
 
-### Manual install (systemd)
+### Native install (systemd)
 
 The release executable `releasewatcher-<version>-linux-x64` contains everything (Bun runtime + UI) – no Bun, Node
-or Docker needed. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB disk is plenty. On older x64 CPUs without
-AVX2 download `releasewatcher-<version>-linux-x64-baseline.tar.xz` instead (see [Docker](#docker)), on 64-bit ARM
-`releasewatcher-<version>-linux-arm64.tar.xz`. As root:
+or Docker needed – and installs itself as a systemd service. A Debian/Ubuntu LXC with 1 CPU, 512 MB RAM and 2 GB
+disk is plenty. On older x64 CPUs without AVX2 download `releasewatcher-<version>-linux-x64-baseline.tar.xz` instead
+(see [Docker](#docker)), on 64-bit ARM `releasewatcher-<version>-linux-arm64.tar.xz`. As root on the target machine
+(or copy the archive there first, e.g. `pct push <ct> <file> /root/<file>` on the Proxmox node):
+
+```bash
+wget https://github.com/rozumek29/releasewatcher/releases/download/v1.4.0/releasewatcher-1.4.0-linux-x64.tar.xz
+tar -xJf releasewatcher-1.4.0-linux-x64.tar.xz   # needs xz-utils
+./releasewatcher-1.4.0-linux-x64 --install
+```
+
+`--install` runs the same script as [`bun run deploy`](#proxmox-lxc-one-command) (`deploy/install.sh`, embedded in the
+executable): it installs the OpenSSH client if missing, creates the system user `releasewatcher`, copies itself to
+`/opt/releasewatcher/releasewatcher`, writes the unit `/etc/systemd/system/releasewatcher.service` and the
+configuration template `/etc/releasewatcher/releasewatcher.env`, starts the service and prints the address and the
+**setup code**. The downloaded file can be deleted afterwards.
+
+To **update**, run `--install` with the newer executable the same way: it replaces the executable (the previous one is
+kept as `releasewatcher.previous`), refreshes the unit and restarts the service; configuration, account and data stay.
+`releasewatcher --uninstall` removes the service and the executable but keeps `/var/lib/releasewatcher` and
+`/etc/releasewatcher`; `--uninstall --purge` also removes them, the logs and the system user.
+
+<details>
+<summary><b>Step by step without <code>--install</code></b></summary>
 
 ```bash
 # 1. Dependencies (the OpenSSH client reaches the Proxmox node)
@@ -400,14 +422,16 @@ systemctl daemon-reload && systemctl enable --now releasewatcher
 cat /var/lib/releasewatcher/setup-code               # one-time code to create the account
 ```
 
+</details>
+
 Open `http://<container-ip>:8080`. Logs: `journalctl -u releasewatcher -f` (JSON lines).
 
 <details>
 <summary><b>Operating a native install</b></summary>
 
-- **Update:** replace `/opt/releasewatcher/releasewatcher` and `systemctl restart releasewatcher` (migrations run on
-  start). Keep the old file to roll back.
-- **Version:** `releasewatcher --version` prints the installed version and exits – use it as the *version command*
+- **Update:** `./releasewatcher-<new version>-linux-x64 --install`, or replace `/opt/releasewatcher/releasewatcher`
+  and `systemctl restart releasewatcher` (migrations run on start). Keep the old file to roll back.
+- **Version:** `releasewatcher --version` (or `-v`) prints the installed version and exits – use it as the *version command*
   when ReleaseWatcher's own container is on the Machines page.
 - **SSH key as a file:** `install -m 640 -g releasewatcher id_ed25519 /etc/releasewatcher/proxmox_key` and set
   `PROXMOX_SSH_KEY_FILE=/etc/releasewatcher/proxmox_key`.
@@ -706,10 +730,11 @@ src/
   auth/              account, passkeys, sessions, setup code, routes
   notifiers/         Notifier interface, dispatcher (types, digest), Discord, e-mail + SMTP client
   proxmox/           SSH client, pct/apt parsing, store, service (checks, updates, runs), scheduler, routes
+  install.ts         --install / --uninstall: runs the embedded deploy/ scripts
   cron.ts · http.ts · validation.ts · log.ts · static-ui.ts · embedded-ui.ts
 test/                bun:test tests
 web/                 Angular UI (builds into public/)
-deploy/              systemd unit + install.sh for native installs
+deploy/              systemd unit + install.sh / uninstall.sh for native installs (embedded for --install)
 scripts/             compile, package, deploy-lxc, ensure-web
 ```
 

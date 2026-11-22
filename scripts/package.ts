@@ -34,7 +34,8 @@ if (!args.includes('--skip-build')) {
 // 1. Folder for Bun.
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });
-for (const entry of ['src', 'public', 'README.md', '.env.example', 'Dockerfile', 'docker-compose.yml']) {
+// `deploy/` is imported by src/install.ts.
+for (const entry of ['src', 'public', 'deploy', 'README.md', '.env.example', 'Dockerfile', 'docker-compose.yml']) {
   cpSync(join(root, entry), join(out, entry), { recursive: true });
 }
 // Runtime-only package.json: no workspaces, no dev tooling – only the runtime dependencies.

@@ -6,6 +6,8 @@
 # The directory (default: the script's directory) must contain `releasewatcher-linux-x64` and
 # `releasewatcher.service`; optionally `.env.example` (template for the first configuration) and
 # `releasewatcher.db` (database to start with – used only when none exists yet, or with FORCE_DB=1).
+# RELEASEWATCHER_BINARY=<file> installs that executable instead of `releasewatcher-linux-x64` (`releasewatcher
+# --install` passes itself this way).
 # Safe to run again: it replaces the executable (keeping the previous one for a rollback), keeps the configuration
 # and the data, and restarts the service. `scripts/deploy-lxc.ts` runs it for you from your computer.
 set -eu
@@ -16,12 +18,13 @@ DATA_DIR=/var/lib/releasewatcher
 CONF_DIR=/etc/releasewatcher
 ENV_FILE=$CONF_DIR/releasewatcher.env
 UNIT=/etc/systemd/system/releasewatcher.service
+BINARY=${RELEASEWATCHER_BINARY:-$SRC/releasewatcher-linux-x64}
 
 say() { printf '\033[1;34m»\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Run as root."
-[ -f "$SRC/releasewatcher-linux-x64" ] || die "$SRC/releasewatcher-linux-x64 not found."
+[ -f "$BINARY" ] || die "$BINARY not found."
 [ -f "$SRC/releasewatcher.service" ] || die "$SRC/releasewatcher.service not found."
 command -v systemctl >/dev/null 2>&1 || die "systemd is required."
 
@@ -43,14 +46,18 @@ install -d -o releasewatcher -g releasewatcher -m 750 "$DATA_DIR"
 install -d -m 755 "$APP_DIR"
 install -d -o root -g releasewatcher -m 750 "$CONF_DIR"
 
-if [ -f "$APP_DIR/releasewatcher" ]; then
-  say "Updating the executable (previous one kept as $APP_DIR/releasewatcher.previous)"
-  cp -p "$APP_DIR/releasewatcher" "$APP_DIR/releasewatcher.previous"
+if [ "$BINARY" -ef "$APP_DIR/releasewatcher" ]; then
+  say "Keeping the installed executable"
 else
-  say "Installing the executable"
+  if [ -f "$APP_DIR/releasewatcher" ]; then
+    say "Updating the executable (previous one kept as $APP_DIR/releasewatcher.previous)"
+    cp -p "$APP_DIR/releasewatcher" "$APP_DIR/releasewatcher.previous"
+  else
+    say "Installing the executable"
+  fi
+  install -m 755 "$BINARY" "$APP_DIR/releasewatcher.new"
+  mv -f "$APP_DIR/releasewatcher.new" "$APP_DIR/releasewatcher"
 fi
-install -m 755 "$SRC/releasewatcher-linux-x64" "$APP_DIR/releasewatcher.new"
-mv -f "$APP_DIR/releasewatcher.new" "$APP_DIR/releasewatcher"
 
 install -m 644 "$SRC/releasewatcher.service" "$UNIT"
 
