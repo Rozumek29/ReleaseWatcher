@@ -617,7 +617,14 @@
             @for (a of c.apps; track a.id) {
               <div class="item">
                 <div class="item-main">
-                  <span class="item-name"><app-icon name="server" [size]="14" /> {{ a.name }}</span>
+                  <span class="item-name">
+                    @if (a.iconUrls.length > 0) {
+                      <app-avatar [icons]="a.iconUrls" [name]="a.name" [size]="18" />
+                    } @else {
+                      <app-icon name="server" [size]="14" />
+                    }
+                    {{ a.name }}
+                  </span>
                   <span class="versions mono">
                     {{ a.installedVersion ?? '?' }}
                     @if (a.latestVersion) {

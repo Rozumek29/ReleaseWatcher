@@ -45,6 +45,7 @@ interface Row {
   osv_ecosystem: string | null;
   osv_package: string | null;
   advisory_baselines: string | null;
+  icon: string | null;
 }
 
 interface AdvisoryRow {
@@ -122,6 +123,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   osvEcosystem: r.osv_ecosystem,
   osvPackage: r.osv_package,
   advisoryBaselines: parseStringArray(r.advisory_baselines),
+  icon: r.icon,
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -145,6 +147,7 @@ interface PageRow extends AdvisoryRow {
   owner: string;
   name: string;
   installed_version: string | null;
+  icon: string | null;
 }
 
 /** Filters of the Vulnerabilities page; omitted = no filter. */
@@ -168,7 +171,7 @@ export interface AdvisoryCursor {
 
 export interface AdvisoryPageRow {
   advisory: SecurityAdvisory;
-  repository: { id: number; owner: string; name: string; installedVersion: string | null };
+  repository: { id: number; owner: string; name: string; installedVersion: string | null; icon: string | null };
   affects: boolean | null;
   affectedVersions: string[];
   cursor: AdvisoryCursor;
@@ -471,6 +474,8 @@ const MIGRATIONS: readonly string[] = [
      last_used_at TEXT,
      last_used_ip TEXT
    );`,
+  // Custom icon of a repository: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); NULL = owner avatar.
+  `ALTER TABLE watched_repositories ADD COLUMN icon TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -592,7 +597,7 @@ export class RepositoryStore {
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?, installed_version = ?,
            installed_version_checked_at = ?, installed_version_error = ?, github_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
-           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?
+           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?
          WHERE id = ?`,
       )
       .run(
@@ -616,6 +621,7 @@ export class RepositoryStore {
         repo.osvEcosystem,
         repo.osvPackage,
         repo.advisoryBaselines.length > 0 ? JSON.stringify(repo.advisoryBaselines) : null,
+        repo.icon,
         repo.id,
       );
   }
@@ -799,7 +805,7 @@ export class RepositoryStore {
     params.push(limit + 1);
     const rows = this.db
       .query<PageRow, SQLQueryBindings[]>(
-        `SELECT a.*, r.owner, r.name, r.installed_version
+        `SELECT a.*, r.owner, r.name, r.installed_version, r.icon
          FROM repository_advisories a JOIN watched_repositories r ON r.id = a.repository_id
          ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY a.impact DESC, a.severity_rank DESC, a.published_at DESC, a.repository_id DESC, a.advisory_id DESC
@@ -810,7 +816,7 @@ export class RepositoryStore {
       hasMore: rows.length > limit,
       rows: rows.slice(0, limit).map((r) => ({
         advisory: toAdvisory(r),
-        repository: { id: r.repository_id, owner: r.owner, name: r.name, installedVersion: r.installed_version },
+        repository: { id: r.repository_id, owner: r.owner, name: r.name, installedVersion: r.installed_version, icon: r.icon },
         affects: impactOfRank(r.impact ?? 1),
         affectedVersions: parseStringArray(r.affected_versions),
         cursor: {

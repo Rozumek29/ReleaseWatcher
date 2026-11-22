@@ -16,7 +16,7 @@ import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './a
 import { AuthStore } from './auth/store.ts';
 import { ReleaseChecker } from './checker.ts';
 import type { AdvisoryCursor, AdvisoryFilter, RepositoryStore } from './db.ts';
-import { fullName, ownerAvatarUrl, parseRepositoryName, type WatchedRepository } from './domain.ts';
+import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import { errorMessage, noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
@@ -293,6 +293,10 @@ export const toDto = (
   fullName: fullName(r),
   url: `https://github.com/${fullName(r)}`,
   avatarUrl: ownerAvatarUrl(r.owner),
+  /** Custom icon as entered (URL or `sh:<slug>`); null = the owner's avatar. */
+  icon: r.icon,
+  /** Image URLs of the custom icon, best first (the UI falls back to `avatarUrl`). */
+  iconUrls: iconUrls(r.icon),
   includePrereleases: r.includePrereleases,
   isEnabled: r.isEnabled,
   lastSeenTag: r.lastSeenTag,
@@ -350,6 +354,7 @@ const updateRepositorySchema: ObjectSchema = {
     githubToken: { type: 'string', nullable: true, maxLength: 1000 },
     osvEcosystem: { type: 'string', nullable: true, maxLength: 50 },
     osvPackage: { type: 'string', nullable: true, maxLength: 300 },
+    icon: { type: 'string', nullable: true, maxLength: ICON_MAX_LENGTH },
   },
   required: ['includePrereleases', 'isEnabled'],
 };
@@ -663,6 +668,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           owner: row.repository.owner,
           url: `https://github.com/${fullName(row.repository)}`,
           avatarUrl: ownerAvatarUrl(row.repository.owner),
+          iconUrls: iconUrls(row.repository.icon),
           installedVersion: row.repository.installedVersion,
           installedVersions: installedVersions(row.repository.installedVersion, linked.get(row.repository.id)),
         },
@@ -728,6 +734,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
       osvEcosystem?: string | null;
       osvPackage?: string | null;
+      /** Image URL or `sh:<slug>`; omit = keep, null/"" = owner avatar. */
+      icon?: string | null;
     }>(req, updateRepositorySchema);
     if (!repo) {
       return problem(404, 'Repository not found.');
@@ -736,6 +744,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     const finalUrl = body.installedVersionUrl === undefined ? repo.installedVersionUrl : body.installedVersionUrl?.trim() || null;
     if (manualVersion && finalUrl) {
       return validationProblem('installedVersion', 'Remove the version URL to enter the installed version by hand.');
+    }
+    const icon = body.icon === undefined ? undefined : body.icon?.trim() || null;
+    const iconError = icon ? validateIcon(icon) : null;
+    if (iconError) {
+      return validationProblem('icon', iconError);
+    }
+    if (icon !== undefined) {
+      repo.icon = icon;
     }
     if (repo.includePrereleases !== body.includePrereleases) {
       // Filter changed: force a full fetch on the next check.

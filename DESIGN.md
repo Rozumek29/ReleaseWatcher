@@ -137,6 +137,7 @@ Use CSS custom properties – **never hard-code colours** in component styles.
 | `--border` / `--border-strong` | card & divider borders / input & secondary button borders |
 | `--accent`, `--accent-strong`, `--accent-soft`, `--accent-contrast` | primary actions, links (`strong`), active nav & focus rings (`soft`), text on accent |
 | `--success(-soft)`, `--warning(-soft)`, `--danger(-soft)`, `--danger-border` | status text / status backgrounds |
+| `--logo-on-dark` / `--logo-on-light` | backdrops for previews of single-colour logos (selfh.st light/dark variants), the same in both themes |
 | `--shadow-sm` (cards), `--shadow-lg` (dialogs, toasts, open mobile sidebar) | elevation |
 | `--radius` (12px) | cards |
 
@@ -200,7 +201,10 @@ Shared components in `web/src/app/shared/`:
   adding its path data to `ICONS` in `icon.ts` (copy from lucide.dev, subpaths separated by `" M"`); do not add an
   icon font or image files. Default size 18; 16 in buttons, 14 in small buttons, 12 in badges, 20–22 in headers/empty states.
 - `<app-switch [checked] label (toggled)>` – the only on/off control (no bare checkboxes for settings).
-- `<app-avatar [src] [name] [size]>` – repository owner avatar with a letter fallback.
+- `<app-avatar [icons] [src] [name] [size]>` – repository icon: the custom icon URLs (`iconUrls`, tried in order, shown
+  as a logo), then the owner avatar (`src`), then a letter fallback.
+- `<app-icon-picker-dialog [value] [suggestion] (picked) (closed)>` – visual picker for selfh.st/icons (search, light/dark
+  variants); emits `sh:<slug>`. The icon list (`index.json`) is fetched by the browser from jsDelivr once per page load.
 - `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
 - `appInView` directive – emits `(inView)` when the element nears the viewport (`IntersectionObserver`); used for
   infinite scrolling: put `appInView` on a *Show N more* button below the list, so it also works by click and without the

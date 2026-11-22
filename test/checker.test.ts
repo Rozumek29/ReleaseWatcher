@@ -46,6 +46,17 @@ describe('ReleaseChecker', () => {
     assert.equal(store.get(repo.id)?.lastSeenTag, 'v2');
   });
 
+  it('passes the custom icon of the repository to the notifiers', async () => {
+    const repo = store.add('acme', 'widget', false);
+    repo.icon = 'sh:widget';
+    store.save(repo);
+    source.releases = [release('v1', 1)];
+    await checker.check(repo);
+    source.releases = [release('v2', 2), release('v1', 1)];
+    await checker.check(repo);
+    assert.equal(notifier.sent[0]?.icon, 'sh:widget');
+  });
+
   it('reads the installed version and the releases at the same time', async () => {
     let releasesRequested = false;
     const getRecentReleases = source.getRecentReleases.bind(source);

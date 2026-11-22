@@ -371,6 +371,7 @@ describe('containers API', () => {
     assert.equal(dto.apps[0].installedVersion, '1.30.0');
     assert.equal(dto.apps[0].latestVersion, 'v1.32.0');
     assert.equal(dto.apps[0].repositoryFullName, 'acme/widget');
+    assert.deepEqual(dto.apps[0].iconUrls, []);
     assert.equal(dto.apps[0].updateAvailable, true);
     assert.equal(dto.updatesAvailable, 2);
     assert.equal(dto.lastError, null);
@@ -378,6 +379,11 @@ describe('containers API', () => {
     const finished = (await request('GET', `/api/runs/${run.id}`)).json();
     assert.equal(finished.status, 'succeeded');
     assert.match(finished.output, /Vaultwarden: installed 1\.30\.0, latest v1\.32\.0/);
+
+    // The application inherits the custom icon of its repository.
+    await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, icon: 'https://img.test/vw.png' });
+    const withIcon = (await request('GET', `/api/containers/${container.id}`)).json();
+    assert.deepEqual(withIcon.apps[0].iconUrls, ['https://img.test/vw.png']);
 
     // First check (on add) notified about apt; the app update is new → one more notification.
     assert.equal(notifier.containerSent.length, 2);

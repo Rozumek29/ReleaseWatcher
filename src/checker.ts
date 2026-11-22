@@ -270,6 +270,7 @@ export class ReleaseChecker {
         owner: repo.owner,
         repository: repo.name,
         advisory,
+        icon: repo.icon,
         installedVersion: shownVersions.length > 0 ? shownVersions.join(', ') : null,
         affectsInstalled: impact.affects,
       });
@@ -308,6 +309,7 @@ export class ReleaseChecker {
               owner: repo.owner,
               repository: repo.name,
               release,
+              icon: repo.icon,
               installedVersion: repo.installedVersion,
             });
             notifiedCount++;

@@ -2,7 +2,7 @@
   @if (repository(); as repo) {
     <div class="dialog-card">
       <header class="dialog-head">
-        <app-avatar [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <app-avatar [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
         <div class="head-text">
           <h2 id="advisories-title">Security advisories</h2>
           <p class="mono">{{ repo.fullName }}</p>

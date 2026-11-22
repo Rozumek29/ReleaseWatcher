@@ -1,6 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
+import { SELFHST_INDEX_URL } from '../../core/api.service';
 import { settle } from '../../testing';
 import { WatchedRepository } from '../../core/models';
 import { RepositorySettingsDialog } from './repository-settings.dialog';
@@ -12,6 +13,8 @@ const repo: WatchedRepository = {
   fullName: 'dani-garcia/vaultwarden',
   url: 'https://github.com/dani-garcia/vaultwarden',
   avatarUrl: 'https://avatars.githubusercontent.com/dani-garcia?s=64',
+  icon: null,
+  iconUrls: [],
   includePrereleases: false,
   isEnabled: true,
   lastSeenTag: '1.32.0',
@@ -36,6 +39,78 @@ const repo: WatchedRepository = {
 };
 
 describe('RepositorySettingsDialog', () => {
+  it('previews a selfh.st icon while typing and saves it', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', repo);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const preview = () => el.querySelector<HTMLImageElement>('.dialog-head app-avatar img')!.getAttribute('src');
+    expect(preview()).toBe(repo.avatarUrl);
+    const icon = el.querySelector<HTMLInputElement>('#repo-icon')!;
+    icon.value = 'sh:vaultwarden-light';
+    icon.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(preview()).toBe('https://cdn.jsdelivr.net/gh/selfhst/icons/svg/vaultwarden-light.svg');
+
+    // An image that fails to load falls back to the next format, then to the owner's avatar.
+    el.querySelector('.dialog-head app-avatar img')!.dispatchEvent(new Event('error'));
+    await settle(fixture);
+    expect(preview()).toBe('https://cdn.jsdelivr.net/gh/selfhst/icons/png/vaultwarden-light.png');
+
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.icon).toBe('sh:vaultwarden-light');
+  });
+
+  it('fills the icon from the visual picker', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', repo);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Browse'))!.click();
+    await settle(fixture);
+    http
+      .expectOne(SELFHST_INDEX_URL)
+      .flush([{ Name: 'Vaultwarden', Reference: 'vaultwarden', SVG: 'Yes', Light: 'No', Dark: 'No', Category: '', Tags: '' }]);
+    await settle(fixture);
+    // The search starts with the repository name.
+    el.querySelector<HTMLButtonElement>('app-icon-picker-dialog .tile')!.click();
+    await settle(fixture);
+    expect(el.querySelector<HTMLInputElement>('#repo-icon')!.value).toBe('sh:vaultwarden');
+    expect(el.querySelector('app-icon-picker-dialog .dialog-card')).toBeNull();
+  });
+
+  it('sends null to use the owner avatar again', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', { ...repo, icon: 'https://example.com/a.png', iconUrls: ['https://example.com/a.png'] });
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const icon = el.querySelector<HTMLInputElement>('#repo-icon')!;
+    expect(icon.value).toBe('https://example.com/a.png');
+    icon.value = '';
+    icon.dispatchEvent(new Event('input'));
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    expect(http.expectOne('/api/repositories/7').request.body.icon).toBeNull();
+  });
+
   it('saves the installed-version URL when the form is submitted', async () => {
     await TestBed.configureTestingModule({
       imports: [RepositorySettingsDialog],

@@ -4,6 +4,16 @@
   gap: 12px 24px;
 }
 
+.icon-row {
+  display: flex;
+  gap: 6px;
+
+  .input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
 .headers-head {
   display: flex;
   align-items: center;

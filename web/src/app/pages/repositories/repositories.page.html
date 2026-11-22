@@ -119,7 +119,7 @@
   <ul class="list" [class.grid]="preferences.repositoryLayout() === 'grid'">
     @for (repo of visible(); track repo.id; let i = $index) {
       <li class="card row enter" [style.--i]="i" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
-        <app-avatar class="avatar" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <app-avatar class="avatar" [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
         <div class="main">
           <div class="title-line">
             <a [href]="repo.url" target="_blank" rel="noopener" class="name">

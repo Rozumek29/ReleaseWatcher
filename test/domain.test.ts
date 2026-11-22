@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { MAX_NOTIFICATIONS_PER_CHECK, parseRepositoryName, selectNewReleases } from '../src/domain.ts';
+import { iconUrls, MAX_NOTIFICATIONS_PER_CHECK, parseRepositoryName, selectNewReleases, validateIcon } from '../src/domain.ts';
 import { dayIso, release } from './helpers.ts';
 
 describe('parseRepositoryName', () => {
@@ -56,5 +56,38 @@ describe('selectNewReleases', () => {
     const result = selectNewReleases({ ...base, lastSeenPublishedAt: dayIso(0) }, releases);
     assert.equal(result.newReleases.length, MAX_NOTIFICATIONS_PER_CHECK);
     assert.equal(result.newReleases.at(-1)?.tag, 'v8');
+  });
+});
+
+describe('custom icons', () => {
+  const cdn = 'https://cdn.jsdelivr.net/gh/selfhst/icons';
+
+  it('resolves the selfh.st shorthand to the CDN, SVG first', () => {
+    assert.deepEqual(iconUrls('sh:frigate'), [`${cdn}/svg/frigate.svg`, `${cdn}/png/frigate.png`, `${cdn}/webp/frigate.webp`]);
+    assert.deepEqual(iconUrls('SH:Home-Assistant-Dark'), [
+      `${cdn}/svg/home-assistant-dark.svg`,
+      `${cdn}/png/home-assistant-dark.png`,
+      `${cdn}/webp/home-assistant-dark.webp`,
+    ]);
+  });
+
+  it('uses only an explicit format', () => {
+    assert.deepEqual(iconUrls('sh:frigate.png'), [`${cdn}/png/frigate.png`]);
+  });
+
+  it('passes image URLs through and ignores missing or invalid icons', () => {
+    assert.deepEqual(iconUrls('https://example.com/a.svg'), ['https://example.com/a.svg']);
+    assert.deepEqual(iconUrls(null), []);
+    assert.deepEqual(iconUrls('javascript:alert(1)'), []);
+  });
+
+  it('validates icons', () => {
+    assert.equal(validateIcon('sh:frigate-light'), null);
+    assert.equal(validateIcon('http://nas.lan/icon.png'), null);
+    assert.match(validateIcon('sh:../etc') ?? '', /selfh\.st icon name/);
+    assert.match(validateIcon('data:image/png;base64,AAAA') ?? '', /http:\/\/ or https:\/\//);
+    assert.match(validateIcon('https://user:pw@example.com/a.png') ?? '', /credentials/);
+    assert.match(validateIcon('frigate') ?? '', /image URL/);
+    assert.match(validateIcon(`https://example.com/${'a'.repeat(2000)}`) ?? '', /at most/);
   });
 });

@@ -7,6 +7,8 @@ export interface ReleaseNotification {
   owner: string;
   repository: string;
   release: ReleaseInfo;
+  /** Custom icon of the repository (URL or `sh:<slug>`); null/omitted = the owner's avatar. */
+  icon?: string | null;
   /** Version currently running in the user's environment, when an installed-version URL is configured. */
   installedVersion?: string | null;
 }
@@ -16,6 +18,8 @@ export interface VulnerabilityNotification {
   owner: string;
   repository: string;
   advisory: SecurityAdvisory;
+  /** Custom icon of the repository (URL or `sh:<slug>`); null/omitted = the owner's avatar. */
+  icon?: string | null;
   /** Version currently running, when an installed-version URL is configured. */
   installedVersion: string | null;
   /** True/false when the installed version could be compared with the vulnerable ranges, otherwise null. */

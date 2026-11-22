@@ -1,5 +1,5 @@
 import type { RepositoryStore } from '../db.ts';
-import { fullName } from '../domain.ts';
+import { fullName, iconUrls } from '../domain.ts';
 import { errorMessage, problem, validationProblem } from '../http.ts';
 import { maskSecret } from '../settings.ts';
 import { validateCron } from '../cron.ts';
@@ -205,6 +205,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       latestSource: a.latestSource,
       repositoryId: a.repositoryId,
       repositoryFullName: repo ? fullName(repo) : null,
+      /** Custom icon of the linked repository (best first); empty = none, the UI shows its generic icon. */
+      iconUrls: repo ? iconUrls(repo.icon) : [],
       latestCommand: a.latestCommand,
       updateCommand: a.updateCommand,
       useTty: a.useTty,

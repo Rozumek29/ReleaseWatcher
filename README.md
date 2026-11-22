@@ -38,6 +38,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
   apps without one: see *Update available 1.34.1 → 1.34.3* at a glance, and skip releases you already run.
 - **Vulnerabilities** of every watched repository from GitHub security advisories and **OSV.dev** (sources switchable
   in Settings): a *Vulnerabilities* page shows which ones affect your installed version, and new ones are notified.
+- **Custom icons** per repository – an image URL or a [selfh.st/icons](https://selfh.st/icons/) name like
+  `sh:frigate` – instead of the owner's avatar, also shown next to linked applications on the Machines page.
 - Rate-limit friendly: conditional requests with ETags, optional token (global or per repository).
 
 **Proxmox LXC containers**
@@ -143,6 +145,16 @@ Apps without such an endpoint (desktop apps, firmware, external services) can ta
 choose *Installed version from → Entered by hand* and type it (e.g. `1.34.1`). It is used like a version read from a
 URL – update badge, skipped notifications, vulnerability impact – and kept until you change it. After upgrading,
 **Mark as installed** on the repository sets it to the latest release in one click.
+
+**Icon** (repository settings): by default a repository shows the avatar of its owner – for apps published under a
+personal account that is the developer's photo, not the app's logo. Enter an image URL (`https://…/logo.svg`) or an
+icon name from [selfh.st/icons](https://selfh.st/icons/) with the `sh:` prefix, as in Homepage or Homarr: `sh:frigate`,
+`sh:frigate-light`, `sh:frigate-dark` – or click **Browse** to pick one visually: a searchable grid of all selfh.st
+icons with their light and dark variants (the list is loaded by your browser from jsDelivr). It resolves to the jsDelivr CDN
+(`https://cdn.jsdelivr.net/gh/selfhst/icons/svg/<name>.svg`, then the PNG and WebP versions); `sh:<name>.png` picks a
+format. When the icon can't be loaded, the owner's avatar is shown. Applications on the Machines page that take their
+latest version from the repository show its icon too. Discord notifications use it as the author icon – as PNG,
+since Discord shows no SVG (an SVG URL falls back to the owner's avatar there).
 
 ### Vulnerabilities
 
@@ -613,7 +625,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | --- | --- | --- |
 | `GET` | `/api/repositories` | List watched repositories |
 | `POST` | `/api/repositories` | `{ "repository": "owner/repo", "includePrereleases": false, "githubToken"?: "github_pat_…" }` |
-| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"? }` – a header with `value: null` keeps the saved value; `installedVersion` (entered by hand, only without a URL – `400` otherwise), `githubToken` and the OSV.dev package: omit = keep, `null` = remove. The response has `installedVersionSource` (`none`/`url`/`manual`) |
+| `PUT` | `/api/repositories/:id` | `{ "includePrereleases", "isEnabled", "installedVersionUrl"?, "installedVersionField"?, "installedVersionHeaders"?: [{ "name", "value" }], "installedVersion"?, "githubToken"?, "osvEcosystem"?, "osvPackage"?, "icon"? }` – a header with `value: null` keeps the saved value; `installedVersion` (entered by hand, only without a URL – `400` otherwise), `githubToken`, the OSV.dev package and `icon` (an http(s) image URL or `sh:<selfh.st name>`): omit = keep, `null` = remove. The response has `installedVersionSource` (`none`/`url`/`manual`) and `iconUrls` (the resolved icon URLs, best first; empty = owner avatar `avatarUrl`) |
 | `POST` | `/api/repositories/:id/mark-installed` | Set the installed version (entered by hand) to the latest release; `409` with an installed-version URL or before the first release is known |
 | `DELETE` | `/api/repositories/:id` | Stop watching |
 | `POST` | `/api/repositories/:id/check` | Check immediately (including security advisories); a new release also starts a check of the enabled containers with a linked app (`containerChecks` = their number) |

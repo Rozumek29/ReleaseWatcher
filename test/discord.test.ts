@@ -26,6 +26,18 @@ describe('DiscordNotifier', () => {
     assert.equal(embed?.footer?.text, 'Released by bob');
   });
 
+  it('uses a raster version of the custom repository icon as the author icon', () => {
+    const icon = (value: string | null) =>
+      buildDiscordPayload({ owner: 'acme', repository: 'widget', release: release('v1', 1), icon: value }, options).embeds[0]?.author.icon_url;
+    assert.equal(icon('sh:frigate-light'), 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/frigate-light.png');
+    assert.equal(icon('sh:frigate.svg'), 'https://cdn.jsdelivr.net/gh/selfhst/icons/png/frigate.png');
+    assert.equal(icon('sh:frigate.webp'), 'https://cdn.jsdelivr.net/gh/selfhst/icons/webp/frigate.webp');
+    assert.equal(icon('https://example.com/logo.png'), 'https://example.com/logo.png');
+    // Discord can't show SVG: the owner's avatar instead.
+    assert.equal(icon('https://example.com/logo.svg?v=2'), 'https://avatars.githubusercontent.com/acme?s=128');
+    assert.equal(icon(null), 'https://avatars.githubusercontent.com/acme?s=128');
+  });
+
   it('truncates long release notes', () => {
     const payload = buildDiscordPayload(
       { owner: 'acme', repository: 'widget', release: { ...release('v1', 1), body: 'x'.repeat(5000) } },

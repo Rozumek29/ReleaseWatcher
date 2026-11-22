@@ -1,0 +1,140 @@
+.dialog {
+  width: min(720px, calc(100vw - 32px));
+  height: min(680px, calc(100dvh - 48px));
+  overflow: hidden;
+}
+
+.dialog-card {
+  height: 100%;
+}
+
+.head-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.dialog-head p {
+  margin: 2px 0 0;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.picker-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dialog-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  gap: 12px;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 6px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    background 0.12s ease,
+    border-color 0.12s ease,
+    transform 0.12s ease;
+
+  &:hover {
+    background: var(--hover);
+  }
+
+  &:active {
+    transform: scale(0.97);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent);
+  }
+
+  &.selected {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+
+  &.skeleton {
+    height: 84px;
+    cursor: default;
+  }
+
+  app-avatar {
+    background: transparent;
+    box-shadow: none;
+  }
+}
+
+/* Single-colour variants need a contrasting backdrop in either theme. */
+.on-dark .tile app-avatar {
+  background: var(--logo-on-dark);
+}
+
+.on-light .tile app-avatar {
+  background: var(--logo-on-light);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.tile-name {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 0.88rem;
+
+  span {
+    flex: 1 1 240px;
+  }
+}
+
+.more {
+  align-self: center;
+}
+
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  }
+}

@@ -39,6 +39,8 @@ export interface WatchedRepository {
    * read of a source only stores a baseline, so enabling a source or changing the package does not flood notifications.
    */
   advisoryBaselines: string[];
+  /** Custom icon: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = the owner's avatar. */
+  icon: string | null;
 }
 
 /** Source-agnostic description of a single release. */
@@ -57,6 +59,76 @@ export interface ReleaseInfo {
 /** Avatar of the repository owner (user or organization); served by GitHub without an API call. */
 export const ownerAvatarUrl = (owner: string, size = 64): string =>
   `https://avatars.githubusercontent.com/${encodeURIComponent(owner)}?s=${size}`;
+
+/** Longest custom icon value (URL or `sh:` shorthand). */
+export const ICON_MAX_LENGTH = 2000;
+
+/** jsDelivr mirror of https://github.com/selfhst/icons (the CDN behind selfh.st/icons). */
+const SELFHST_CDN = 'https://cdn.jsdelivr.net/gh/selfhst/icons';
+const SELFHST_FORMATS = ['svg', 'png', 'webp'] as const;
+/** `sh:<slug>` with an optional format, e.g. `sh:frigate`, `sh:frigate-light`, `sh:frigate.png`. */
+const SELFHST_PATTERN = /^sh:(?<slug>[a-z0-9]+(?:[-_][a-z0-9]+)*)(?:\.(?<format>svg|png|webp))?$/;
+
+/**
+ * Checks a custom icon value: an http(s) image URL or the `sh:<slug>` shorthand of selfh.st/icons.
+ * Returns an error message for the user, or null when the value is valid.
+ */
+export function validateIcon(icon: string): string | null {
+  if (icon.length > ICON_MAX_LENGTH) {
+    return `The icon must be at most ${ICON_MAX_LENGTH} characters long.`;
+  }
+  if (/^sh:/i.test(icon)) {
+    return SELFHST_PATTERN.test(icon.toLowerCase())
+      ? null
+      : 'Use a selfh.st icon name like sh:frigate or sh:frigate-light (letters, digits and dashes).';
+  }
+  let url: URL;
+  try {
+    url = new URL(icon);
+  } catch {
+    return 'Enter an image URL (https://…) or a selfh.st icon name like sh:frigate.';
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    return 'The icon URL must start with http:// or https://.';
+  }
+  if (url.username || url.password) {
+    return 'The icon URL must not contain credentials.';
+  }
+  return null;
+}
+
+/**
+ * Image URLs of a custom icon, best first; the UI tries them in order and falls back to the owner's avatar.
+ * `sh:<slug>` resolves to the selfh.st/icons CDN – SVG first, then PNG and WebP (not every icon has an SVG).
+ * An explicit format (`sh:<slug>.png`) is used alone. Empty for no or an invalid icon.
+ */
+export function iconUrls(icon: string | null): string[] {
+  if (!icon) {
+    return [];
+  }
+  const shorthand = icon.toLowerCase().match(SELFHST_PATTERN);
+  if (shorthand) {
+    const slug = shorthand.groups?.['slug'] ?? '';
+    const format = shorthand.groups?.['format'];
+    const formats = format ? [format] : SELFHST_FORMATS;
+    return formats.map((f) => `${SELFHST_CDN}/${f}/${slug}.${f}`);
+  }
+  return validateIcon(icon) === null ? [icon] : [];
+}
+
+/**
+ * One raster image URL of a custom icon, for clients that can't show SVG (Discord embeds): `sh:<slug>` → the PNG of
+ * selfh.st/icons (or the WebP when asked for), an image URL as it is unless it points to an SVG. Null = use the avatar.
+ */
+export function rasterIconUrl(icon: string | null): string | null {
+  const urls = iconUrls(icon);
+  if (icon && SELFHST_PATTERN.test(icon.toLowerCase())) {
+    const slug = icon.toLowerCase().match(SELFHST_PATTERN)?.groups?.['slug'] ?? '';
+    return urls.find((u) => !u.endsWith('.svg')) ?? `${SELFHST_CDN}/png/${slug}.png`;
+  }
+  const url = urls[0];
+  return url && !/\.svg$/i.test(new URL(url).pathname) ? url : null;
+}
 
 export const fullName = (repo: Pick<WatchedRepository, 'owner' | 'name'>): string => `${repo.owner}/${repo.name}`;
 

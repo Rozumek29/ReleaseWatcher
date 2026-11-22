@@ -1,0 +1,125 @@
+<dialog
+  #dialog
+  class="dialog"
+  (close)="close()"
+  appBackdropClose
+  (backdropClose)="close()"
+  aria-labelledby="icon-picker-title"
+>
+  @if (value() !== null) {
+    <div class="dialog-card">
+      <header class="dialog-head">
+        <div class="head-icon"><app-icon name="image" [size]="20" /></div>
+        <div class="head-text">
+          <h2 id="icon-picker-title">Choose an icon</h2>
+          <p>
+            From
+            <a href="https://selfh.st/icons/" target="_blank" rel="noopener noreferrer"
+              >selfh.st/icons</a
+            >
+            @if (icons().length > 0) {
+              · {{ icons().length }} icons
+            }
+          </p>
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="picker-tools">
+        <div class="search">
+          <app-icon name="search" [size]="16" />
+          <label for="icon-search" class="visually-hidden">Search icons</label>
+          <input
+            id="icon-search"
+            class="input"
+            type="search"
+            placeholder="Search, e.g. frigate"
+            autocomplete="off"
+            spellcheck="false"
+            [value]="query()"
+            (input)="search($any($event.target).value)"
+          />
+        </div>
+        <div class="tabs" role="tablist" aria-label="Variant">
+          @for (v of variants; track v.id) {
+            <button
+              type="button"
+              class="tab"
+              role="tab"
+              [class.active]="variant() === v.id"
+              [attr.aria-selected]="variant() === v.id"
+              (click)="setVariant(v.id)"
+            >
+              {{ v.label }}
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="dialog-body">
+        @if (loading()) {
+          <div class="grid" aria-busy="true">
+            @for (i of [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]; track i) {
+              <div class="tile skeleton"></div>
+            }
+          </div>
+        } @else if (error(); as e) {
+          <div class="note">
+            <app-icon name="alert" [size]="16" />
+            <span>
+              The icon list could not be loaded ({{ e }}). Check the connection to cdn.jsdelivr.net,
+              or close this and type the name, e.g. <code>sh:frigate</code>.
+            </span>
+            <button type="button" class="btn btn-secondary btn-sm" (click)="retry()">
+              Try again
+            </button>
+          </div>
+        } @else if (matches().length === 0) {
+          <div class="note">
+            <app-icon name="search" [size]="16" />
+            <span
+              >No icon matches “{{ query() }}”
+              @if (variant() !== 'default') {
+                in the {{ variant() }} variant
+              }
+              . Try another name, or request it on selfh.st.</span
+            >
+          </div>
+        } @else {
+          <div
+            class="grid"
+            [class.on-dark]="variant() === 'light'"
+            [class.on-light]="variant() === 'dark'"
+          >
+            @for (icon of shown(); track icon.reference) {
+              <button
+                type="button"
+                class="tile"
+                [class.selected]="isSelected(icon)"
+                [attr.aria-pressed]="isSelected(icon)"
+                [title]="shorthand(icon)"
+                (click)="pick(icon)"
+              >
+                <app-avatar [icons]="previewUrls(icon)" [name]="icon.name" [size]="40" />
+                <span class="tile-name">{{ icon.name }}</span>
+              </button>
+            }
+          </div>
+          @if (shown().length < matches().length) {
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm more"
+              appInView
+              (inView)="showMore()"
+              (click)="showMore()"
+            >
+              Show {{ matches().length - shown().length }} more
+            </button>
+          }
+        }
+      </div>
+    </div>
+  }
+</dialog>

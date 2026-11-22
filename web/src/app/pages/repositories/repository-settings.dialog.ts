@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   ElementRef,
   effect,
   inject,
@@ -27,6 +28,8 @@ interface HeaderRow {
   saved: boolean;
 }
 import { Avatar } from '../../shared/avatar';
+import { IconPickerDialog } from '../../shared/icon-picker.dialog';
+import { iconUrls } from '../../shared/icon-urls';
 import { Icon } from '../../shared/icon';
 import { OSV_ECOSYSTEMS } from '../../shared/severity';
 import { Switch } from '../../shared/switch';
@@ -36,7 +39,7 @@ import { BackdropClose } from '../../shared/backdrop-close';
 @Component({
   selector: 'app-repository-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, Avatar, Icon, Switch],
+  imports: [BackdropClose, FormsModule, Avatar, Icon, IconPickerDialog, Switch],
   templateUrl: './repository-settings.dialog.html',
   styleUrl: './repository-settings.dialog.scss',
 })
@@ -66,6 +69,11 @@ export class RepositorySettingsDialog {
   protected osvPackage = '';
   protected readonly ecosystems = OSV_ECOSYSTEMS;
   protected readonly showValues = signal(false);
+  /** Custom icon as typed (URL or `sh:<slug>`); the header previews it. */
+  protected readonly icon = signal('');
+  protected readonly iconPreview = computed(() => iconUrls(this.icon()));
+  /** Value the icon picker opens with; null = closed. */
+  protected readonly picking = signal<string | null>(null);
   private nextHeaderId = 1;
 
   protected readonly saving = signal(false);
@@ -89,6 +97,8 @@ export class RepositorySettingsDialog {
         this.removeToken = false;
         this.osvEcosystem = repo.osvEcosystem ?? '';
         this.osvPackage = repo.osvPackage ?? '';
+        this.icon.set(repo.icon ?? '');
+        this.picking.set(null);
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
         this.testResult.set(null);
@@ -147,6 +157,7 @@ export class RepositorySettingsDialog {
           // Both or neither: an ecosystem without a package removes the OSV.dev package.
           osvEcosystem: hasOsv ? this.osvEcosystem : null,
           osvPackage: hasOsv ? this.osvPackage.trim() : null,
+          icon: this.icon().trim() || null,
         }),
       );
       this.saved.emit(updated);

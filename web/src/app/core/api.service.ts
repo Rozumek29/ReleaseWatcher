@@ -1,6 +1,6 @@
 import { HttpClient, HttpErrorResponse, HttpParams } from '@angular/common/http';
 import { Injectable, inject } from '@angular/core';
-import { Observable } from 'rxjs';
+import { map, Observable } from 'rxjs';
 import {
   AddRepositoryRequest,
   AdvisoryPage,
@@ -24,6 +24,7 @@ import {
   RunPage,
   RunSummary,
   SecurityAdvisory,
+  SelfhstIcon,
   SettingsPatch,
   SshKey,
   TestNotificationResult,
@@ -32,10 +33,43 @@ import {
   WatchedRepository,
 } from './models';
 
+/** Icon list of https://github.com/selfhst/icons, served by jsDelivr (CORS enabled) – loaded by the browser. */
+export const SELFHST_INDEX_URL = 'https://cdn.jsdelivr.net/gh/selfhst/icons/index.json';
+
+interface SelfhstIndexEntry {
+  Name?: string;
+  Reference?: string;
+  SVG?: string;
+  Light?: string;
+  Dark?: string;
+  Category?: string;
+  Tags?: string;
+}
+
 @Injectable({ providedIn: 'root' })
 export class ApiService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = '/api';
+
+  /** All icons of selfh.st/icons (about 3,000) – an external request, not one to the ReleaseWatcher API. */
+  getSelfhstIcons(): Observable<SelfhstIcon[]> {
+    const yes = (value: string | undefined) => value?.toLowerCase() === 'yes';
+    return this.http.get<SelfhstIndexEntry[]>(SELFHST_INDEX_URL).pipe(
+      map((entries) =>
+        entries
+          .filter((e) => !!e.Reference && !!e.Name)
+          .map((e) => ({
+            name: e.Name!,
+            reference: e.Reference!,
+            svg: yes(e.SVG),
+            light: yes(e.Light),
+            dark: yes(e.Dark),
+            category: e.Category ?? '',
+            tags: (e.Tags ?? '').split(',').map((t) => t.trim()).filter(Boolean),
+          })),
+      ),
+    );
+  }
 
   getRepositories(): Observable<WatchedRepository[]> {
     return this.http.get<WatchedRepository[]>(`${this.baseUrl}/repositories`);

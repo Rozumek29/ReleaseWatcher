@@ -27,6 +27,7 @@ const advisory = (id: string, extra: Partial<RepositoryAdvisory> = {}): Reposito
     owner: 'acme',
     url: 'https://github.com/acme/app',
     avatarUrl: 'https://avatars.githubusercontent.com/acme?s=64',
+    iconUrls: [],
     installedVersion: null,
     installedVersions: [],
   },
@@ -82,7 +83,7 @@ describe('VulnerabilitiesPage', () => {
     return { el: fixture.nativeElement as HTMLElement, fixture };
   }
 
-  const vault = { id: 2, fullName: 'dani-garcia/vaultwarden', owner: 'dani-garcia', url: 'https://github.com/dani-garcia/vaultwarden', avatarUrl: '', installedVersion: '1.30.0', installedVersions: ['1.30.0'] };
+  const vault = { id: 2, fullName: 'dani-garcia/vaultwarden', owner: 'dani-garcia', url: 'https://github.com/dani-garcia/vaultwarden', avatarUrl: '', iconUrls: [], installedVersion: '1.30.0', installedVersions: ['1.30.0'] };
   const crit = advisory('GHSA-crit', {
     severity: 'critical',
     cvssScore: 9.8,

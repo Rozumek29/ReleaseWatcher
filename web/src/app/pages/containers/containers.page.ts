@@ -20,6 +20,7 @@ import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
 import { HostDialog, HostDialogData } from '../../shared/host.dialog';
+import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
@@ -40,6 +41,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
     FormsModule,
     DatePipe,
     RouterLink,
+    Avatar,
     Icon,
     RelativeTimePipe,
     ContainerSettingsDialog,

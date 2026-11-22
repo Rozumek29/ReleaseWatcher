@@ -64,6 +64,19 @@ describe('ContainersPage', () => {
     expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
   });
 
+  it('shows the custom icon of the linked repository next to an application', async () => {
+    const base = container();
+    const iconUrls = ['https://cdn.jsdelivr.net/gh/selfhst/icons/svg/vaultwarden.svg'];
+    const { el } = await create([container({ apps: base.apps.map((a) => ({ ...a, iconUrls })) })]);
+    expect(el.querySelector('.item-name app-avatar img')?.getAttribute('src')).toBe(iconUrls[0]);
+  });
+
+  it('keeps the generic icon for an application without a custom icon', async () => {
+    const { el } = await create([container()]);
+    expect(el.querySelector('.item-name app-avatar')).toBeNull();
+    expect(el.querySelector('.item-name app-icon')).not.toBeNull();
+  });
+
   it('shows Home Assistant updates and installs an app update after a confirmation', async () => {
     const vm = container({
       kind: 'vm',

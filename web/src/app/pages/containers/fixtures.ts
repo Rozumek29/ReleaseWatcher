@@ -128,6 +128,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
       latestSource: 'github',
       repositoryId: 3,
       repositoryFullName: 'dani-garcia/vaultwarden',
+      iconUrls: [],
       latestCommand: null,
       updateCommand: 'update',
       useTty: true,

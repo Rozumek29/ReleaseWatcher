@@ -6,6 +6,10 @@ export interface WatchedRepository {
   url: string;
   /** Avatar of the owner (user or organization). */
   avatarUrl: string;
+  /** Custom icon as entered: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = owner avatar. */
+  icon: string | null;
+  /** Image URLs of the custom icon, best first; empty without one. Shown before `avatarUrl`. */
+  iconUrls: string[];
   includePrereleases: boolean;
   isEnabled: boolean;
   lastSeenTag: string | null;
@@ -95,6 +99,22 @@ export interface UpdateRepositoryRequest {
   /** OSV.dev package; omit to keep, null to remove. */
   osvEcosystem?: string | null;
   osvPackage?: string | null;
+  /** Image URL or `sh:<slug>`; omit to keep, null for the owner avatar. */
+  icon?: string | null;
+}
+
+/** One icon of selfh.st/icons (from its `index.json`). */
+export interface SelfhstIcon {
+  name: string;
+  /** Slug used in `sh:<reference>` and in the CDN paths. */
+  reference: string;
+  /** Has an SVG (all icons have PNG and WebP). */
+  svg: boolean;
+  /** Has `-light` / `-dark` variants. */
+  light: boolean;
+  dark: boolean;
+  category: string;
+  tags: string[];
 }
 
 /** A header sent to the server. `value: null` keeps the value already saved under that name. */
@@ -282,6 +302,8 @@ export interface RepositoryAdvisory extends SecurityAdvisory {
     owner: string;
     url: string;
     avatarUrl: string;
+    /** Custom icon of the repository, best first; empty without one. */
+    iconUrls: string[];
     installedVersion: string | null;
     /** Own installed version plus those of linked container apps. */
     installedVersions: string[];
@@ -350,6 +372,8 @@ export interface ContainerApp {
   latestSource: LatestSource;
   repositoryId: number | null;
   repositoryFullName: string | null;
+  /** Custom icon of the linked repository, best first; empty = none. */
+  iconUrls: string[];
   latestCommand: string | null;
   updateCommand: string | null;
   useTty: boolean;

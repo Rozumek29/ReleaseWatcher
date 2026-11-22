@@ -15,6 +15,8 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     fullName,
     url: `https://github.com/${fullName}`,
     avatarUrl: `https://avatars.githubusercontent.com/${owner}?s=64`,
+    icon: null,
+    iconUrls: [],
     includePrereleases: false,
     isEnabled: true,
     lastSeenTag: 'v1.0.0',

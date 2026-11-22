@@ -2,7 +2,7 @@
   @if (repository(); as repo) {
     <form class="dialog-card" (ngSubmit)="save()">
       <header class="dialog-head">
-        <app-avatar [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <app-avatar [icons]="iconPreview()" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
         <div class="head-text">
           <h2 id="repo-settings-title">Repository settings</h2>
           <p class="mono">{{ repo.fullName }}</p>
@@ -16,6 +16,32 @@
         <div class="switches">
           <app-switch label="Active" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
           <app-switch label="Include pre-releases" [checked]="includePrereleases" (toggled)="includePrereleases = !includePrereleases" />
+        </div>
+
+        <div class="field">
+          <label for="repo-icon">Icon <span class="optional">optional</span></label>
+          <div class="icon-row">
+            <input
+              id="repo-icon"
+              class="input mono"
+              name="icon"
+              [ngModel]="icon()"
+              (ngModelChange)="icon.set($event)"
+              placeholder="sh:frigate or https://…/logo.svg"
+              maxlength="2000"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <button type="button" class="btn btn-secondary" (click)="picking.set(icon())">
+              <app-icon name="image" [size]="16" /> Browse
+            </button>
+          </div>
+          <span class="hint">
+            An image URL or an icon name from
+            <a href="https://selfh.st/icons/" target="_blank" rel="noopener noreferrer">selfh.st/icons</a> with the
+            <code>sh:</code> prefix, e.g. <code>sh:frigate</code> or <code>sh:frigate-light</code>. Leave empty to use the
+            owner's avatar (also shown when the icon can't be loaded).
+          </span>
         </div>
 
         <div class="field">
@@ -207,3 +233,10 @@
     </form>
   }
 </dialog>
+
+<app-icon-picker-dialog
+  [value]="picking()"
+  [suggestion]="repository()?.name ?? ''"
+  (picked)="icon.set($event); picking.set(null)"
+  (closed)="picking.set(null)"
+/>

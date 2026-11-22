@@ -118,7 +118,7 @@
           </div>
           <a class="summary" [href]="a.htmlUrl" target="_blank" rel="noopener">{{ a.summary }}</a>
           <div class="repo-line">
-            <app-avatar [src]="a.repository.avatarUrl" [name]="a.repository.owner" [size]="20" />
+            <app-avatar [icons]="a.repository.iconUrls" [src]="a.repository.avatarUrl" [name]="a.repository.owner" [size]="20" />
             <a [href]="a.repository.url" target="_blank" rel="noopener" class="repo-name">{{ a.repository.fullName }}</a>
             <span class="muted">·</span>
             <span class="mono muted">{{ a.id }}</span>

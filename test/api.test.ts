@@ -113,6 +113,7 @@ describe('HTTP API', () => {
       owner: 'acme',
       url: 'https://github.com/acme/widget',
       avatarUrl: 'https://avatars.githubusercontent.com/acme?s=64',
+      iconUrls: [],
       installedVersion: '0.9.0',
       installedVersions: ['0.9.0'],
     });
@@ -258,6 +259,38 @@ describe('HTTP API', () => {
     // Omitted = keep, null = remove.
     assert.equal((await put({})).json().osvPackage, 'widget');
     assert.equal((await put({ osvEcosystem: null, osvPackage: null })).json().osvEcosystem, null);
+  });
+
+  it('sets a custom icon of a repository as a URL or a selfh.st shorthand', async () => {
+    const created = (await add('acme/widget')).json();
+    assert.equal(created.icon, null);
+    assert.deepEqual(created.iconUrls, []);
+    const put = (payload: object) =>
+      inject({ method: 'PUT', url: `/api/repositories/${created.id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+
+    const shorthand = (await put({ icon: ' sh:frigate-light ' })).json();
+    assert.equal(shorthand.icon, 'sh:frigate-light');
+    assert.deepEqual(shorthand.iconUrls, [
+      'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/frigate-light.svg',
+      'https://cdn.jsdelivr.net/gh/selfhst/icons/png/frigate-light.png',
+      'https://cdn.jsdelivr.net/gh/selfhst/icons/webp/frigate-light.webp',
+    ]);
+    // Omitted = keep.
+    assert.equal((await put({})).json().icon, 'sh:frigate-light');
+
+    const url = (await put({ icon: 'https://example.com/logo.png' })).json();
+    assert.deepEqual([url.icon, url.iconUrls], ['https://example.com/logo.png', ['https://example.com/logo.png']]);
+
+    for (const icon of ['ftp://example.com/logo.png', 'sh:Not valid!', 'logo.png']) {
+      const response = await put({ icon });
+      assert.equal(response.statusCode, 400, icon);
+      assert.ok(response.json().errors.icon, icon);
+    }
+    assert.equal((await inject(`/api/repositories`)).json()[0].icon, 'https://example.com/logo.png');
+
+    // null / "" = back to the owner's avatar.
+    const reset = (await put({ icon: '' })).json();
+    assert.deepEqual([reset.icon, reset.iconUrls], [null, []]);
   });
 
   it('marks API responses as not cacheable', async () => {

@@ -1,4 +1,4 @@
-import { ownerAvatarUrl } from '../domain.ts';
+import { ownerAvatarUrl, rasterIconUrl } from '../domain.ts';
 import {
   advisoryIds,
   affectedVersions,
@@ -16,6 +16,9 @@ import {
   type UpdateResultNotification,
   type VulnerabilityNotification,
 } from './notifier.ts';
+
+/** Author icon of a repository embed: its custom icon (Discord shows no SVG) or the owner's avatar. */
+const repositoryIconUrl = (n: { owner: string; icon?: string | null }): string => rasterIconUrl(n.icon ?? null) ?? ownerAvatarUrl(n.owner, 128);
 
 export interface DiscordOptions {
   /** Channel webhook URL (Channel settings → Integrations → Webhooks). Null disables the notifier. */
@@ -122,7 +125,7 @@ export function buildDiscordPayload(notification: ReleaseNotification, options: 
         author: {
           name: repo,
           url: notificationRepoUrl(notification),
-          icon_url: ownerAvatarUrl(notification.owner, 128),
+          icon_url: repositoryIconUrl(notification),
         },
         ...(release.authorLogin
           ? { footer: { text: `Released by ${release.authorLogin}`, ...(release.authorAvatarUrl ? { icon_url: release.authorAvatarUrl } : {}) } }
@@ -164,7 +167,7 @@ export function buildVulnerabilityPayload(
         ...(versions ? { description: truncate(versions, 1000) } : {}),
         color: SEVERITY_COLORS[advisory.severity] ?? SEVERITY_COLORS['unknown'],
         timestamp: advisory.publishedAt,
-        author: { name: repo, url: notificationRepoUrl(notification), icon_url: ownerAvatarUrl(notification.owner, 128) },
+        author: { name: repo, url: notificationRepoUrl(notification), icon_url: repositoryIconUrl(notification) },
         fields: [
           { name: 'Advisory', value: advisoryIds(notification), inline: true },
           {
