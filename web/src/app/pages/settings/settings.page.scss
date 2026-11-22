@@ -286,14 +286,30 @@
   }
 }
 
-.storage-row {
-  display: flex;
-  gap: 8px;
-  align-items: center;
+.field > .label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
 
-  select {
-    flex: 1;
+.node-storages {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 4px;
+  font-size: 0.88rem;
+
+  li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
     min-width: 0;
+  }
+
+  span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

@@ -34,7 +34,7 @@ import type { NodeShell } from './proxmox/ssh.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import { type KeyTool, SshKeygen } from './hosts/keys.ts';
 import { hostRoutes } from './hosts/routes.ts';
-import { seedProxmoxHost } from './hosts/seed.ts';
+import { seedNodeBackupStorage, seedProxmoxHost } from './hosts/seed.ts';
 import { type ShellFactory, ShellPool } from './hosts/shells.ts';
 import { HostStore } from './hosts/store.ts';
 import {
@@ -366,7 +366,6 @@ const settingsSchema: ObjectSchema = {
     advisoryCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckConcurrency: { type: 'integer', nullable: true },
-    backupStorage: { type: 'string', nullable: true, maxLength: 100 },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
     smtpHost: { type: 'string', nullable: true, maxLength: 253 },
     smtpPort: { type: 'integer', nullable: true },
@@ -482,6 +481,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     keyTool,
     log,
   });
+  // …and its global backup storage into the nodes without their own (once).
+  seedNodeBackupStorage({
+    hosts: hostStore,
+    legacy: settings.legacyBackupStorage(),
+    clearLegacy: () => settings.clearLegacyBackupStorage(),
+    log,
+  });
   const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
   await auth.bootstrap(deps.auth?.bootstrap ?? null);
   auth.ensureSetupCode();
@@ -553,8 +559,6 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         checkConcurrencySource: settings.sourceOf('containerCheckConcurrency'),
         minCheckConcurrency: MIN_CHECK_CONCURRENCY,
         maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
-        backupStorage: current.backupStorage,
-        backupStorageSource: settings.sourceOf('backupStorage'),
         backupBeforeUpdate: current.backupBeforeUpdate,
         backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
       },
@@ -914,7 +918,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           scheduler,
           updater,
           backupDefaults: (hostId) => ({
-            storage: (hostId === null ? null : hostStore.getHost(hostId)?.backupStorage) ?? settings.current.backupStorage,
+            storage: hostId === null ? null : (hostStore.getHost(hostId)?.backupStorage ?? null),
             enabled: settings.current.backupBeforeUpdate,
           }),
           isProxmoxHost: (hostId) => hostStore.getHost(hostId)?.type === 'proxmox',

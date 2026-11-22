@@ -177,8 +177,8 @@ Connections live in **Settings → Connections**:
   `~/.ssh/authorized_keys`; **Add key** pastes an existing private key. Private keys are encrypted at rest and never
   returned; keys with a passphrase are not supported. A key used by a host cannot be removed.
 - **Hosts** – **Add Proxmox node** (as many as you have) with its address, port, SSH user (`root`, or a user allowed
-  to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node can have its own backup storage
-  (otherwise the default from Settings → Containers is used). The Machines page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
+  to run `pct`/`qm` through passwordless `sudo`) and one of the keys; each node has its own backup storage
+  (**Edit** → *Backup storage*; none = no backups before updates of its guests). The Machines page picks the node to add guests from. **Test connection** runs `pveversion` on it. A host key is trusted
   on the first connection and pinned in `known_hosts` next to the database; **Forget host key** removes the pinned key
   after the machine was reinstalled.
 
@@ -271,8 +271,8 @@ Settings → Connections) takes its address, port, user and SSH key; it is watch
   ticked; a second click updates the ticked containers one after another: apt
   first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
   update skips the rest of that container. A container with several pending updates has its own **Update all (n)**.
-- **Backups before updates:** choose a backup storage (e.g. Proxmox Backup Server or `local`) and a default in
-  Settings; containers can override it and every confirmation has a **Backup first** checkbox. The backup is a
+- **Backups before updates:** choose the backup storage of each node (e.g. Proxmox Backup Server or `local`, in
+  Settings → Connections → node → Edit) and a default in Settings → Containers; containers can override it and every confirmation has a **Backup first** checkbox. The backup is a
   `vzdump` in snapshot mode (zstd, except on PBS); retention follows the storage's prune settings; a failed backup
   stops the update.
 - **Resilient runs:** backups, upgrades and updates run on the node as transient systemd units
@@ -520,7 +520,7 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 | `SSH_KNOWN_HOSTS_FILE` | `<database dir>/known_hosts` | Pinned host keys (trust on first use). |
 | `CONTAINER_CHECK_CRON` | `0 */6 * * *` | Default check schedule (5-field cron, `@daily`, …). |
 | `CONTAINER_CHECK_CONCURRENCY` | `3` | Containers checked at the same time (1–10). |
-| `PROXMOX_BACKUP_STORAGE` | – | Storage for `vzdump` backups made before updates. |
+| `PROXMOX_BACKUP_STORAGE` | – | Storage for `vzdump` backups made before updates, read **once**: given to the Proxmox nodes without their own storage (edited per node in **Settings → Connections** afterwards). |
 | `BACKUP_BEFORE_UPDATE` | `false` | Back up before updates by default. |
 
 </details>
@@ -597,7 +597,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/hosts/:id/forget-host-key` | Remove the pinned SSH host key (after a reinstall) |
 | `POST` | `/api/proxmox/test` | Connect to the Proxmox node, returns `pveversion` output. Like the other `/api/proxmox/*` routes and `POST /api/containers/node` / `add-all`, it takes `?hostId=` (default: the first node); `POST /api/containers` takes `hostId` in the body |
 | `GET` | `/api/proxmox/containers` | Containers (`pct list`) and virtual machines (`qm list`) on the node with `kind` (`lxc` / `vm`) and an `added` flag |
-| `GET` | `/api/proxmox/storages` | Storages that accept backups |
+| `GET` | `/api/proxmox/storages` | Storages of a node (`?hostId=`) that accept backups |
 | `GET` | `/api/containers` | Watched targets (`kind`: `lxc`, `vm`, `node`, `server`) with `hostId`, `hostName`, `configured`, `capabilities`, applications, pending updates, `restartReasons`, `isBusy` and `activeRunId` |
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |

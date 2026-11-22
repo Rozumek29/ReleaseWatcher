@@ -4,7 +4,7 @@ import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { validateHost } from '../src/hosts/domain.ts';
-import { PROXMOX_SEEDED_META } from '../src/hosts/seed.ts';
+import { BACKUP_STORAGE_SEEDED_META, PROXMOX_SEEDED_META } from '../src/hosts/seed.ts';
 import { ShellPool } from '../src/hosts/shells.ts';
 import { HostStore } from '../src/hosts/store.ts';
 import { silentLogger } from '../src/log.ts';
@@ -273,5 +273,38 @@ describe('moving the Proxmox settings into a host', () => {
     const host = (await first.request('POST', '/api/hosts', { type: 'proxmox', address: 'pve.lan' })).json();
     const row = store.database.query<{ host_id: number }, []>('SELECT host_id FROM containers').get()!;
     assert.equal(row.host_id, host.id);
+  });
+});
+
+describe('moving the global backup storage to the Proxmox nodes', () => {
+  it('gives the storage saved in the UI to the nodes without their own, once', async () => {
+    const store = new RepositoryStore(':memory:');
+    const hosts = new HostStore(store.database, store.secretBox);
+    const plain = { port: 22, user: 'root', sshKeyId: null };
+    const pve1 = hosts.addHost({ type: 'proxmox', name: 'pve1', address: 'pve1.lan', backupStorage: null, ...plain });
+    const pve2 = hosts.addHost({ type: 'proxmox', name: 'pve2', address: 'pve2.lan', backupStorage: 'pbs2', ...plain });
+    const vps = hosts.addHost({ type: 'server', name: 'vps', address: 'vps.lan', backupStorage: null, ...plain });
+    store.writeSetting('backupStorage', 'local');
+
+    const h = await start({ store, env: { PROXMOX_BACKUP_STORAGE: 'from-env' } });
+    assert.deepEqual(
+      [pve1, pve2, vps].map((x) => hosts.getHost(x.id)!.backupStorage),
+      ['local', 'pbs2', null],
+    );
+    assert.equal(store.readSettings()['backupStorage'], undefined);
+    assert.ok(hosts.readMeta(BACKUP_STORAGE_SEEDED_META));
+    assert.equal((await h.request('GET', '/api/settings')).json().proxmox.backupStorage, undefined);
+
+    // Cleared later on a node: stays cleared after a restart (the environment value is not applied again).
+    assert.equal((await h.request('PUT', `/api/hosts/${pve1.id}`, { backupStorage: null })).json().backupStorage, null);
+    await h.app.close();
+    await start({ store, env: { PROXMOX_BACKUP_STORAGE: 'from-env' } });
+    assert.equal(hosts.getHost(pve1.id)!.backupStorage, null);
+  });
+
+  it('gives PROXMOX_BACKUP_STORAGE to the node created from PROXMOX_HOST', async () => {
+    const h = await start({ env: { PROXMOX_HOST: 'node.lan', PROXMOX_BACKUP_STORAGE: 'pbs' } });
+    const [seeded] = (await h.request('GET', '/api/hosts')).json();
+    assert.equal(seeded.backupStorage, 'pbs');
   });
 });

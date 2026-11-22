@@ -14,8 +14,6 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     checkConcurrencySource: null,
     minCheckConcurrency: 1,
     maxCheckConcurrency: 10,
-    backupStorage: 'pbs',
-    backupStorageSource: 'ui',
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
   },

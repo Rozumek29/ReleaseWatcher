@@ -84,12 +84,12 @@
           <div class="field">
             <label for="host-backup">Backup storage</label>
             <select id="host-backup" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
-              <option value="">– the global setting (Settings → Containers) –</option>
+              <option value="">– none (no backups before updates) –</option>
               @if (backupStorage && !hasStorage(backupStorage)) {
                 <option [value]="backupStorage">{{ backupStorage }}</option>
               }
               @for (st of storages() ?? []; track st.name) {
-                <option [value]="st.name" [disabled]="st.status !== 'active'">{{ st.name }} ({{ st.type }})</option>
+                <option [value]="st.name" [disabled]="st.status !== 'active'">{{ storageLabel(st) }}</option>
               }
             </select>
             @if (errors()['backupStorage']; as e) {
@@ -98,7 +98,10 @@
             @if (storagesError(); as e) {
               <span class="error">Could not list storages: {{ e }}</span>
             }
-            <span class="hint">Storage of this node for <code>vzdump</code> backups made before updates of its guests.</span>
+            <span class="hint">
+              Storage of this node for <code>vzdump</code> backups made before updates of its guests (snapshot mode; kept
+              according to the storage's retention settings).
+            </span>
           </div>
         }
 

@@ -113,7 +113,8 @@ describe('several Proxmox nodes', () => {
 
   it('backs up to the storage of the guest’s own node', async () => {
     const { pve1, pve2 } = await addNodes();
-    await request('PUT', '/api/settings', { backupStorage: 'local', backupBeforeUpdate: true });
+    await request('PUT', '/api/settings', { backupBeforeUpdate: true });
+    assert.equal((await request('PUT', `/api/hosts/${pve1.id}`, { backupStorage: 'local' })).json().backupStorage, 'local');
     assert.equal((await request('PUT', `/api/hosts/${pve2.id}`, { backupStorage: 'pbs2' })).json().backupStorage, 'pbs2');
     const ct1 = (await request('POST', '/api/containers', { vmid: 100, hostId: pve1.id })).json();
     const ct2 = (await request('POST', '/api/containers', { vmid: 100, hostId: pve2.id })).json();
@@ -128,6 +129,11 @@ describe('several Proxmox nodes', () => {
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.ok(shells['pve2.lan']!.detached.some((d) => d.command.includes('vzdump 100') && d.command.includes("--storage 'pbs2'")));
     assert.equal(shells['pve1.lan']!.detached.length, 0);
+
+    // A node without its own storage makes no backups (there is no global storage to fall back to).
+    await request('PUT', `/api/hosts/${pve2.id}`, { backupStorage: null });
+    assert.equal((await request('GET', `/api/containers/${ct2.id}`)).json().backupStorage, null);
+    assert.equal((await request('POST', `/api/containers/${ct2.id}/apt-upgrade`, { backup: true })).status, 409);
   });
 
   it('restarts one node while another one is busy', async () => {

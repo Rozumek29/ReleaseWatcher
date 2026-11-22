@@ -328,31 +328,24 @@
           </div>
           <div class="proxmox-col">
             <div class="field">
-              <label for="pve-backup-storage">Default backup storage</label>
-              <div class="storage-row">
-                <select id="pve-backup-storage" class="input" name="backupStorage" [(ngModel)]="backupStorage" [class.invalid]="errors()['backupStorage']">
-                  <option value="">– none (no backups before updates) –</option>
-                  @if (backupStorage && !isListed(backupStorage)) {
-                    <option [value]="backupStorage">{{ backupStorage }}</option>
+              <span class="label" id="pve-backup-storage">Backup storage</span>
+              @if (s.proxmox.nodes.length > 0) {
+                <ul class="node-storages" aria-labelledby="pve-backup-storage">
+                  @for (n of s.proxmox.nodes; track n.id) {
+                    <li>
+                      <span>{{ n.name }}</span>
+                      @if (n.backupStorage; as storage) {
+                        <code>{{ storage }}</code>
+                      } @else {
+                        <span class="muted">none – no backups</span>
+                      }
+                    </li>
                   }
-                  @for (st of storages() ?? []; track st.name) {
-                    <option [value]="st.name" [disabled]="st.status !== 'active'">{{ storageLabel(st) }}</option>
-                  }
-                </select>
-                <button type="button" class="btn btn-ghost btn-sm" (click)="loadStorages()" [disabled]="loadingStorages() || !s.proxmox.configured">
-                  <app-icon name="refresh" [size]="14" /> {{ loadingStorages() ? 'Loading…' : 'Reload' }}
-                </button>
-              </div>
-              @if (errors()['backupStorage']; as e) {
-                <span class="error">{{ e }}</span>
-              }
-              @if (storagesError(); as e) {
-                <span class="error">Could not list storages: {{ e }}</span>
+                </ul>
               }
               <span class="hint">
-                {{ sourceLabel(s.proxmox.backupStorageSource) }}. Used by nodes without their own storage (Connections → node →
-                Edit); the list shows the storages of the first node. Backups are made
-                with <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
+                Every Proxmox node has its own storage (Connections → node → Edit). Backups are made with
+                <code>vzdump</code> in snapshot mode (zstd; Proxmox Backup Server compresses itself) and kept according
                 to the storage's retention (prune) settings.
               </span>
             </div>
