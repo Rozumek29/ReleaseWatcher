@@ -74,7 +74,8 @@ interface RunRow {
   started_at: string;
   finished_at: string | null;
   exit_code: number | null;
-  output: string;
+  /** Plain text while running, zstd-compressed (BLOB) once finished – see {@link packOutput}. */
+  output: string | Uint8Array;
 }
 
 function parseJson<T>(json: string | null): T | null {
@@ -185,8 +186,20 @@ const toRun = (r: RunRow): Run => ({
   startedAt: r.started_at,
   finishedAt: r.finished_at,
   exitCode: r.exit_code,
-  output: r.output,
+  output: unpackOutput(r.output),
 });
+
+/** Output shorter than this stays plain text (compression would not pay off). */
+const PACK_OUTPUT_FROM = 512;
+
+/** Console output of a finished run as stored: zstd-compressed (logs shrink about 3–4×), short output as text. */
+export function packOutput(output: string): string | Uint8Array {
+  return output.length < PACK_OUTPUT_FROM ? output : Bun.zstdCompressSync(Buffer.from(output));
+}
+
+function unpackOutput(stored: string | Uint8Array): string {
+  return typeof stored === 'string' ? stored : Buffer.from(Bun.zstdDecompressSync(stored)).toString('utf8');
+}
 
 /** Editable application fields. */
 export type AppInput = Pick<
@@ -194,8 +207,12 @@ export type AppInput = Pick<
   'name' | 'versionCommand' | 'latestSource' | 'repositoryId' | 'latestCommand' | 'updateCommand' | 'useTty' | 'timeoutSeconds'
 >;
 
-/** Runs kept per container; older ones are pruned. */
-export const RUNS_KEPT_PER_CONTAINER = 50;
+/**
+ * Runs kept per container; older ones are pruned. Checks (mostly scheduled, short output) are counted separately from
+ * updates, upgrades and restarts, so frequent checks never push the logs of the last updates out of the history.
+ */
+export const CHECK_RUNS_KEPT = 10;
+export const OTHER_RUNS_KEPT = 30;
 
 /** SQLite persistence of containers, their applications and runs (tables created by `RepositoryStore`). */
 export class ContainerStore {
@@ -451,14 +468,19 @@ export class ContainerStore {
   finishRun(run: Run): void {
     this.db
       .query('UPDATE container_runs SET status = ?, finished_at = ?, exit_code = ?, output = ?, resume = NULL WHERE id = ?')
-      .run(run.status, run.finishedAt, run.exitCode, run.output, run.id);
-    // Keep only the newest runs of this container.
-    this.db
+      .run(run.status, run.finishedAt, run.exitCode, packOutput(run.output), run.id);
+    // Keep only the newest runs of this container (checks and other runs separately).
+    const check = run.kind === 'check' ? 1 : 0;
+    const pruned = this.db
       .query(
-        `DELETE FROM container_runs WHERE container_id = ?1 AND id NOT IN (
-           SELECT id FROM container_runs WHERE container_id = ?1 ORDER BY id DESC LIMIT ?2)`,
+        `DELETE FROM container_runs WHERE container_id = ?1 AND (kind = 'check') = ?2 AND status <> 'running' AND id NOT IN (
+           SELECT id FROM container_runs WHERE container_id = ?1 AND (kind = 'check') = ?2 ORDER BY id DESC LIMIT ?3)`,
       )
-      .run(run.containerId, RUNS_KEPT_PER_CONTAINER);
+      .run(run.containerId, check, check ? CHECK_RUNS_KEPT : OTHER_RUNS_KEPT).changes;
+    if (pruned > 0) {
+      // Give the freed pages back to the file system (the database uses auto_vacuum = INCREMENTAL).
+      this.db.run('PRAGMA incremental_vacuum');
+    }
   }
 
   getRun(id: number): Run | null {
@@ -491,5 +513,29 @@ export class ContainerStore {
          WHERE status = 'running'${includeResumable ? '' : ' AND resume IS NULL'}`,
       )
       .run(new Date().toISOString(), '\n[ReleaseWatcher was restarted while this was running]').changes;
+  }
+
+  /**
+   * Compresses the output of finished runs still stored as plain text (written before compression existed, or
+   * failed by {@link failInterruptedRuns}). Returns the number of compressed runs.
+   */
+  packFinishedOutputs(): number {
+    const rows = this.db
+      .query<{ id: number; output: string }, [number]>(
+        `SELECT id, output FROM container_runs
+         WHERE status <> 'running' AND typeof(output) = 'text' AND length(output) >= ?`,
+      )
+      .all(PACK_OUTPUT_FROM);
+    if (rows.length === 0) {
+      return 0;
+    }
+    const update = this.db.query('UPDATE container_runs SET output = ? WHERE id = ?');
+    this.db.transaction(() => {
+      for (const { id, output } of rows) {
+        update.run(packOutput(output), id);
+      }
+    })();
+    this.db.run('PRAGMA incremental_vacuum');
+    return rows.length;
   }
 }

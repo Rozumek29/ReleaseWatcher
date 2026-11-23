@@ -510,6 +510,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   if (interrupted > 0) {
     log.warn({ count: interrupted }, 'Marked runs interrupted by a restart as failed');
   }
+  const packed = containerStore.packFinishedOutputs();
+  if (packed > 0) {
+    log.info({ count: packed }, 'Compressed the output of earlier runs');
+  }
   const containers = new ContainerService({
     containers: containerStore,
     repositories: store,

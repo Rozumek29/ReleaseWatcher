@@ -481,6 +481,11 @@ const MIGRATIONS: readonly string[] = [
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
 export const SELF_REPOSITORY = { owner: 'rozumek29', name: 'releasewatcher' } as const;
 
+/** `PRAGMA auto_vacuum` value of INCREMENTAL. */
+const AUTO_VACUUM_INCREMENTAL = 2;
+/** Bytes the WAL file keeps on disk after a checkpoint. */
+const WAL_SIZE_LIMIT = 512 * 1024;
+
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
   private readonly db: Database;
@@ -497,13 +502,20 @@ export class RepositoryStore {
     }
     this.db = new Database(path);
     this.secrets = secrets ?? SecretBox.ephemeral();
+    // Freed pages (pruned runs, removed repositories) are given back with `PRAGMA incremental_vacuum` instead of
+    // keeping the file at its largest size. Takes effect at once for a new file; an existing one is converted by
+    // compact() below. Must run before journal_mode = WAL.
+    this.db.run('PRAGMA auto_vacuum = INCREMENTAL');
     this.db.run('PRAGMA journal_mode = WAL');
+    // The WAL file is reused, not shrunk, after a checkpoint – cap what it keeps on disk.
+    this.db.run(`PRAGMA journal_size_limit = ${WAL_SIZE_LIMIT}`);
     // Safe with WAL (no corruption; at most the last commits are lost on a power cut) and avoids an fsync per write.
     this.db.run('PRAGMA synchronous = NORMAL');
     this.db.run('PRAGMA foreign_keys = ON');
     try {
       this.migrate();
       this.encryptSecrets();
+      this.compact();
     } catch (error) {
       this.db.close();
       throw error;
@@ -933,6 +945,19 @@ export class RepositoryStore {
           .run(KEY_CHECK_NAME, this.secrets.encrypt(KEY_CHECK_VALUE));
       }
     })();
+  }
+
+  /**
+   * Converts a database created without auto_vacuum (one VACUUM rewrites the file; quick for a database of a few MB)
+   * and gives back free pages left by earlier deletes.
+   */
+  private compact(): void {
+    const { auto_vacuum: mode } = this.db.query<{ auto_vacuum: number }, []>('PRAGMA auto_vacuum').get()!;
+    if (mode !== AUTO_VACUUM_INCREMENTAL) {
+      this.db.run('VACUUM');
+    } else {
+      this.db.run('PRAGMA incremental_vacuum');
+    }
   }
 
   private migrate(): void {

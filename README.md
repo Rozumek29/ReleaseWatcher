@@ -297,8 +297,8 @@ A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. 
 <details>
 <summary><b>Updates, backups and resources</b></summary>
 
-- **Updates are manual only.** The console output is shown live and kept in the run history (last 50 runs per
-  container). Only one task runs in a container at a time.
+- **Updates are manual only.** The console output is shown live and kept in the run history (per
+  container the last 10 checks and the last 30 other runs – updates, upgrades, restarts). Only one task runs in a container at a time.
 - **Update** (Machines page) first shows checkboxes in the list, with every container that has pending updates
   ticked; a second click updates the ticked containers one after another: apt
   first, then applications. The Proxmox host and stopped containers that may not be started are left out; a failed
