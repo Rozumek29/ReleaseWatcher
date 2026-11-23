@@ -21,8 +21,8 @@ import {
   Notifier,
   RateLimit,
   Run,
+  RunHistoryPage,
   RunPage,
-  RunSummary,
   SecurityAdvisory,
   SelfhstIcon,
   SettingsPatch,
@@ -337,8 +337,12 @@ export class ApiService {
     });
   }
 
-  getContainerRuns(containerId: number): Observable<RunSummary[]> {
-    return this.http.get<RunSummary[]>(`${this.baseUrl}/containers/${containerId}/runs`);
+  /** `cursor` = `nextCursor` of the previous page (null for the newest runs). */
+  getContainerRuns(containerId: number, cursor: string | null = null): Observable<RunHistoryPage> {
+    return this.http.get<RunHistoryPage>(
+      `${this.baseUrl}/containers/${containerId}/runs`,
+      cursor ? { params: { cursor } } : {},
+    );
   }
 
   /** `after` = `outputCursor` of the previous answer: only output written since then is returned. */

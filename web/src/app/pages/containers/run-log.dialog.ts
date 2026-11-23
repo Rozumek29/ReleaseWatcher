@@ -20,6 +20,7 @@ import { kindLabel, targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { BackdropClose } from '../../shared/backdrop-close';
+import { InView } from '../../shared/in-view';
 
 /** What the dialog shows: one run (`runId`) or the history of a container (`runId: null`). */
 export interface RunLogTarget {
@@ -43,7 +44,7 @@ function keepTail(output: string): string {
 @Component({
   selector: 'app-run-log-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, DatePipe, Icon, RelativeTimePipe],
+  imports: [BackdropClose, DatePipe, Icon, InView, RelativeTimePipe],
   templateUrl: './run-log.dialog.html',
   styleUrls: ['./dialog.scss', './run-log.dialog.scss'],
 })
@@ -61,6 +62,9 @@ export class RunLogDialog {
   protected readonly label = targetLabel;
   protected readonly run = signal<Run | null>(null);
   protected readonly history = signal<RunSummary[] | null>(null);
+  /** Cursor of the next history page (null on the last one). */
+  protected readonly nextCursor = signal<string | null>(null);
+  protected readonly loadingMore = signal(false);
   protected readonly error = signal<string | null>(null);
   /** Keep the output scrolled to the end (disabled when the user scrolls up). */
   protected readonly follow = signal(true);
@@ -110,10 +114,35 @@ export class RunLogDialog {
   protected async loadHistory(container: Container): Promise<void> {
     this.stop();
     this.run.set(null);
+    this.nextCursor.set(null);
     try {
-      this.history.set(await firstValueFrom(this.api.getContainerRuns(container.id)));
+      const page = await firstValueFrom(this.api.getContainerRuns(container.id));
+      this.history.set(page.items);
+      this.nextCursor.set(page.nextCursor);
     } catch (error) {
       this.error.set(describeError(error));
+    }
+  }
+
+  /** Loads the next page of the history (infinite scrolling; also a button). */
+  protected async showMore(): Promise<void> {
+    const cursor = this.nextCursor();
+    const container = this.target()?.container;
+    if (!cursor || !container || this.loadingMore()) {
+      return;
+    }
+    this.loadingMore.set(true);
+    try {
+      const page = await firstValueFrom(this.api.getContainerRuns(container.id, cursor));
+      // Ignore the answer when the dialog moved on (another container, or a run was opened).
+      if (this.nextCursor() === cursor && this.target()?.container.id === container.id) {
+        this.history.update((runs) => [...(runs ?? []), ...page.items]);
+        this.nextCursor.set(page.nextCursor);
+      }
+    } catch (error) {
+      this.error.set(describeError(error));
+    } finally {
+      this.loadingMore.set(false);
     }
   }
 

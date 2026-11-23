@@ -503,14 +503,14 @@ export class ContainerStore {
     return row ? toRun(row) : null;
   }
 
-  /** Newest runs of a container, without their output. */
-  listRuns(containerId: number, limit = 20): Omit<Run, 'output'>[] {
+  /** Newest runs of a container, without their output; `beforeId` continues after the last run of the previous page. */
+  listRuns(containerId: number, limit = 20, beforeId: number | null = null): Omit<Run, 'output'>[] {
     return this.db
-      .query<Omit<RunRow, 'output'>, [number, number]>(
+      .query<Omit<RunRow, 'output'>, [number, number | null, number]>(
         `SELECT id, container_id, app_id, kind, trigger, status, started_at, finished_at, exit_code
-         FROM container_runs WHERE container_id = ? ORDER BY id DESC LIMIT ?`,
+         FROM container_runs WHERE container_id = ?1 AND (?2 IS NULL OR id < ?2) ORDER BY id DESC LIMIT ?3`,
       )
-      .all(containerId, limit)
+      .all(containerId, beforeId, limit)
       .map((r) => {
         const { output: _, ...rest } = toRun({ ...r, output: '' });
         return rest;

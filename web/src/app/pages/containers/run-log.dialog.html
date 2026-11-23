@@ -70,6 +70,22 @@
                 </li>
               }
             </ul>
+            @if (nextCursor()) {
+              <button
+                type="button"
+                class="btn btn-secondary btn-sm more-runs"
+                [disabled]="loadingMore()"
+                appInView
+                (inView)="showMore()"
+                (click)="showMore()"
+              >
+                @if (loadingMore()) {
+                  <app-icon name="refresh" [size]="14" class="spin" /> Loading…
+                } @else {
+                  Show older runs
+                }
+              </button>
+            }
           }
         } @else if (!error()) {
           <p class="muted">Loading…</p>

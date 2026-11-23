@@ -588,6 +588,13 @@ export interface RunSummary {
   exitCode: number | null;
 }
 
+/** GET /api/containers/:id/runs – one page of the run history, newest first. */
+export interface RunHistoryPage {
+  items: RunSummary[];
+  /** Cursor of the next page, or null on the last one. */
+  nextCursor: string | null;
+}
+
 export interface Run extends RunSummary {
   output: string;
 }

@@ -681,7 +681,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers/:id/apps/:appId/mark-installed` | Set the installed version of an app without a version command to its latest version; `409` with a version command or while the latest version is unknown |
 | `POST` | `/api/containers/:id/apps/:appId/update` | Run the update command → `202`; `{ "backup"? }` |
 | `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container (nothing is saved) |
-| `GET` | `/api/containers/:id/runs` | Recent runs (without output) |
+| `GET` | `/api/containers/:id/runs` | Run history, newest first, without output: `{ items, nextCursor }`; `?limit=` (1–100, default 20), `?cursor=` = `nextCursor` of the previous page |
 | `GET` | `/api/runs/:id` | One run with its output; while running, pass the previous `outputCursor` as `?after=` to get only new output |
 
 </details>

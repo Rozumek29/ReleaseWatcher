@@ -171,6 +171,31 @@ class UnknownNodeError extends Error {
 }
 
 /** Maps service errors to problem responses; everything else propagates to the global handler. */
+const RUN_PAGE_SIZE = 20;
+const MAX_RUN_PAGE_SIZE = 100;
+
+function runPageLimit(value: string | null): number {
+  if (value === null) {
+    return RUN_PAGE_SIZE;
+  }
+  const limit = Number(value);
+  if (!Number.isInteger(limit) || limit < 1 || limit > MAX_RUN_PAGE_SIZE) {
+    throw new RequestValidationError(`limit must be a whole number from 1 to ${MAX_RUN_PAGE_SIZE}.`);
+  }
+  return limit;
+}
+
+/** Cursor of the run history: the id of the last run of the previous page. */
+function runCursor(value: string | null): number | null {
+  if (value === null || value === '') {
+    return null;
+  }
+  if (!/^[1-9]\d{0,15}$/.test(value)) {
+    throw new RequestValidationError('cursor is not valid – load the history from the first page again.');
+  }
+  return Number(value);
+}
+
 async function guard(action: () => Response | Promise<Response>): Promise<Response> {
   try {
     return await action();
@@ -744,11 +769,20 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
     '/api/containers/:id/runs': {
+      // Paged newest first (keyset): `cursor` = `nextCursor` of the previous page.
       GET: (req: Bun.BunRequest<'/api/containers/:id/runs'>) => {
         const container = findContainer(req.params.id);
-        return container
-          ? Response.json(containers.listRuns(container.id).map(runDto))
-          : problem(404, 'Container not found.');
+        if (!container) {
+          return problem(404, 'Container not found.');
+        }
+        const params = new URL(req.url).searchParams;
+        const limit = runPageLimit(params.get('limit'));
+        const runs = containers.listRuns(container.id, limit + 1, runCursor(params.get('cursor')));
+        const items = runs.slice(0, limit);
+        return Response.json({
+          items: items.map(runDto),
+          nextCursor: runs.length > limit ? String(items.at(-1)!.id) : null,
+        });
       },
     },
     // Suggests applications found in the container with their GitHub repository (nothing is saved).

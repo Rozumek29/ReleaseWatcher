@@ -1,7 +1,7 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { Run, RunPage, RunSummary } from '../../core/models';
+import { Run, RunHistoryPage, RunPage, RunSummary } from '../../core/models';
 import { settle } from '../../testing';
 import { container } from './fixtures';
 import { RunLogDialog } from './run-log.dialog';
@@ -104,19 +104,22 @@ describe('RunLogDialog', () => {
     fixture.componentRef.setInput('target', { container: container(), runId: null });
     await settle(fixture);
 
-    http.expectOne('/api/containers/1/runs').flush([
-      {
-        id: 3,
-        containerId: 1,
-        appId: null,
-        kind: 'check',
-        trigger: 'schedule',
-        status: 'failed',
-        startedAt: '2026-01-01T00:00:00Z',
-        finishedAt: '2026-01-01T00:00:02Z',
-        exitCode: null,
-      },
-    ]);
+    http.expectOne('/api/containers/1/runs').flush({
+      items: [
+        {
+          id: 3,
+          containerId: 1,
+          appId: null,
+          kind: 'check',
+          trigger: 'schedule',
+          status: 'failed',
+          startedAt: '2026-01-01T00:00:00Z',
+          finishedAt: '2026-01-01T00:00:02Z',
+          exitCode: null,
+        },
+      ],
+      nextCursor: null,
+    } satisfies RunHistoryPage);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
@@ -141,5 +144,41 @@ describe('RunLogDialog', () => {
     expect(el.querySelector('.run-status')?.textContent).toContain('Failed');
     expect(el.querySelector('.output')?.textContent).toContain('SSH connection failed');
     expect(el.textContent).toContain('History');
+  });
+
+  it('loads older runs of the history page by page', async () => {
+    const fixture = TestBed.createComponent(RunLogDialog);
+    fixture.componentRef.setInput('target', { container: container(), runId: null });
+    await settle(fixture);
+    const summary = (id: number): RunSummary => ({
+      id,
+      containerId: 1,
+      appId: null,
+      kind: id % 2 ? 'check' : 'apt-upgrade',
+      trigger: 'manual',
+      status: 'succeeded',
+      startedAt: '2026-01-01T00:00:00Z',
+      finishedAt: '2026-01-01T00:00:02Z',
+      exitCode: 0,
+    });
+
+    http
+      .expectOne('/api/containers/1/runs')
+      .flush({ items: [summary(5), summary(4)], nextCursor: '4' } satisfies RunHistoryPage);
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelectorAll('.run-row')).toHaveLength(2);
+
+    // The button below the list loads the next page (by scrolling into view, or by click).
+    const more = el.querySelector<HTMLButtonElement>('.more-runs')!;
+    expect(more.textContent).toContain('Show older runs');
+    more.click();
+    http
+      .expectOne((req) => req.url === '/api/containers/1/runs' && req.params.get('cursor') === '4')
+      .flush({ items: [summary(3)], nextCursor: null } satisfies RunHistoryPage);
+    await settle(fixture);
+
+    expect(el.querySelectorAll('.run-row')).toHaveLength(3);
+    expect(el.querySelector('.more-runs')).toBeNull();
   });
 });

@@ -578,7 +578,7 @@ describe('containers API', () => {
     assert.equal(run?.exitCode, 2);
     assert.match(run?.output ?? '', /merge conflict/);
 
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
+    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
     assert.equal(runs[0].kind, 'app-update');
     assert.equal('output' in runs[0], false);
   });
@@ -966,7 +966,7 @@ describe('containers API', () => {
       await request('POST', `/api/containers/${container.id}/check`);
       await app.containers.wait(container.id);
     }
-    const runs = async () => (await request('GET', `/api/containers/${container.id}/runs`)).json() as { id: number }[];
+    const runs = async () => (await request('GET', `/api/containers/${container.id}/runs`)).json().items as { id: number }[];
     assert.equal((await runs()).length, 4); // the check after adding + 3
 
     const proxmox = async () => (await request('GET', '/api/settings')).json().proxmox;
@@ -987,6 +987,33 @@ describe('containers API', () => {
     await request('POST', `/api/containers/${container.id}/check`);
     await app.containers.wait(container.id);
     assert.equal((await runs()).length, 3);
+  });
+
+  it('pages the run history newest first with a cursor', async () => {
+    const container = await addContainer();
+    const containerStore = new ContainerStore(store.database, store.secretBox);
+    for (let i = 0; i < 4; i++) {
+      const run = containerStore.startRun(container.id, null, 'check', 'schedule');
+      containerStore.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: '' });
+    }
+    const page = async (query: string) => {
+      const response = await request('GET', `/api/containers/${container.id}/runs${query}`);
+      return { status: response.status, body: response.json() };
+    };
+    const all = (await page('')).body as { items: { id: number }[]; nextCursor: string | null };
+    assert.equal(all.items.length, 5); // the check after adding + 4
+    assert.equal(all.nextCursor, null);
+
+    const first = (await page('?limit=2')).body;
+    assert.deepEqual(first.items.map((r: { id: number }) => r.id), all.items.slice(0, 2).map((r) => r.id));
+    const second = (await page(`?limit=2&cursor=${first.nextCursor}`)).body;
+    assert.deepEqual(second.items.map((r: { id: number }) => r.id), all.items.slice(2, 4).map((r) => r.id));
+    const last = (await page(`?limit=2&cursor=${second.nextCursor}`)).body;
+    assert.deepEqual(last.items.map((r: { id: number }) => r.id), [all.items[4]!.id]);
+    assert.equal(last.nextCursor, null);
+
+    assert.equal((await page('?limit=0')).status, 400);
+    assert.equal((await page('?cursor=abc')).status, 400);
   });
 
   it('checks containers in parallel up to the configured limit, one batch command each', async () => {
@@ -1080,7 +1107,7 @@ describe('containers API', () => {
     assert.match(updates[0]!, /vzdump 101/, 'backed up once, before the first update');
     assert.ok(updates[1]!.includes('apt-get -y'));
     assert.match(updates[2]!, /pct exec 101 [\s\S]*\nupdate'$/);
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
+    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
     assert.deepEqual(runs.slice(0, 2).map((r: { kind: string; status: string }) => [r.kind, r.status]), [
       ['app-update', 'succeeded'],
       ['apt-upgrade', 'succeeded'],
@@ -1123,7 +1150,7 @@ describe('containers API', () => {
 
     assert.equal(shell.commands.some((c) => c.includes('vzdump')), false);
     assert.equal(shell.commands.some((c) => /\nupdate'$/.test(c)), false);
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json();
+    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
     assert.equal(runs[0].kind, 'apt-upgrade');
     assert.equal(runs[0].status, 'failed');
   });
