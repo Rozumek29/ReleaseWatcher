@@ -87,7 +87,10 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   (`SshShell` spawns the system `ssh` client – key-only, `BatchMode`; tests use `FakeShell` from
   `test/helpers.ts`, never a real node). Commands inside guests are built with `guestExec()` (`pctExec()` for
   containers, `qmGuestExec()` for virtual machines – the QEMU guest agent returns JSON, decoded by
-  `parseGuestExecResult()`) and `shQuote()` – never interpolate user input into shell strings without them. Node
+  `parseGuestExecResult()`) and `shQuote()` – never interpolate user input into shell strings without them. `pct` and
+  `qm` are Perl tools that need about a second to start, so the batched container check (`buildCheckScript()`) calls
+  `lxc-info` / `lxc-attach` directly and falls back to `pct` only when they fail; keep frequent work in as few `pct`/`qm`
+  calls as possible. Node
   commands that differ per guest kind take a `GuestTarget` (`{ kind, vmid }`) and use `guestCli()` (`pct`/`qm`). `ContainerService` allows one task per container
   and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.

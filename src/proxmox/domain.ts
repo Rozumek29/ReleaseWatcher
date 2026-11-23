@@ -1035,13 +1035,33 @@ export interface CheckBatchResult {
 /** Random section marker – command output cannot fake it. */
 export const newCheckToken = (): string => `@@RW-${crypto.randomUUID().replaceAll('-', '').slice(0, 16)}@@`;
 
+/*
+ * `pct status` and `pct exec` are Perl wrappers that take over a second each to start (they load the PVE modules),
+ * while the LXC tools they call answer in milliseconds. Checks of containers therefore ask `lxc-info` and run
+ * `lxc-attach` directly – exactly what `pct exec` runs (`--keep-env`, without the `SSL_CERT_*` variables PVE sets
+ * for itself) – and fall back to `pct` when the LXC tools are missing or do not know the container (its error
+ * message then explains why). `rw_lxc` remembers which way the status was read, so the steps use the same one.
+ */
+const lxcFastStatus = (vmid: number): string =>
+  [
+    `if command -v lxc-info >/dev/null 2>&1 && command -v lxc-attach >/dev/null 2>&1 && s=$(lxc-info -n ${vmid} -sH 2>/dev/null); then`,
+    `  rc=0; rw_lxc=1; s="status: $(printf %s "$s" | tr '[:upper:]' '[:lower:]')"`,
+    `else`,
+    `  rw_lxc=; s=$(pct status ${vmid} 2>&1); rc=$?`,
+    `fi`,
+  ].join('\n');
+
+const lxcFastExec = (vmid: number, command: string): string =>
+  `if [ -n "$rw_lxc" ]; then (unset SSL_CERT_FILE SSL_CERT_DIR; exec lxc-attach -n ${vmid} --keep-env -- ${command}); ` +
+  `else pct exec ${vmid} -- ${command}; fi`;
+
 /** Extra seconds `qm guest exec` waits for a batched check beyond the sum of its step timeouts. */
 const GUEST_CHECK_GRACE_SECONDS = 30;
 
 /**
  * Builds a single node command that runs `pct status` / `qm status` and – only for a running guest – all `steps`
  * inside it with one `pct exec` / `qm guest exec` (one SSH connection). `target` null = the steps run on the node
- * itself. Every step gets its own timeout (`timeout` from coreutils/busybox when available) and exit code; output
+ * itself. Containers are reached through the LXC tools directly when possible (see {@link lxcFastStatus}). Every step gets its own timeout (`timeout` from coreutils/busybox when available) and exit code; output
  * sections are delimited by `<token> begin <id>` / `<token> end <id> <exit code>` lines. The guest script travels
  * base64-encoded, so user commands are quoted only once.
  */
@@ -1050,7 +1070,9 @@ export function buildCheckScript(target: GuestTarget | null, steps: readonly Che
     // null = the steps run on the node itself, which is running when this script runs at all.
     target === null
       ? `s='status: running'; rc=0`
-      : `s=$(${guestCli(target.kind)} status ${target.vmid} 2>&1); rc=$?`,
+      : target.kind === 'lxc'
+        ? lxcFastStatus(target.vmid)
+        : `s=$(${guestCli(target.kind)} status ${target.vmid} 2>&1); rc=$?`,
     `printf '%s begin status\n%s\n%s end status %s\n' '${token}' "$s" '${token}' "$rc"`,
   ];
   if (steps.length > 0) {
@@ -1072,7 +1094,7 @@ export function buildCheckScript(target: GuestTarget | null, steps: readonly Che
       const exec =
         target.kind === 'vm'
           ? `qm guest exec ${target.vmid} --timeout ${total} -- sh -lc ${decoded} 2>&1`
-          : `pct exec ${target.vmid} -- sh -lc ${decoded}`;
+          : lxcFastExec(target.vmid, `sh -lc ${decoded}`);
       node.push(`case "$s" in *'status: running'*) ${exec} ;; esac`);
     }
   }

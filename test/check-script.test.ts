@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { chmod, mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { delimiter, join } from 'node:path';
 import { describe, it } from 'bun:test';
 import { buildCheckScript, cleanOutput, newCheckToken, parseCheckOutput, shQuote, vzdumpCommand, type CheckStep } from '../src/proxmox/domain.ts';
 
@@ -13,8 +16,16 @@ const GUEST_JSON = [
   'process.stdout.write(JSON.stringify(result, null, 3) + "\\n");',
 ].join('\n');
 
-async function runOnStubNode(script: string, status: 'running' | 'stopped', agent = true) {
+/**
+ * `lxc` set = the node has the LXC tools: `lxc-info` reports that state and `lxc-attach … -- cmd…` (an executable,
+ * since the script `exec`s it) runs cmd locally. Otherwise `lxc-info` fails like for an unknown container.
+ */
+async function runOnStubNode(script: string, status: 'running' | 'stopped', agent = true, lxc?: 'RUNNING' | 'STOPPED') {
+  const bin = await mkdtemp(join(tmpdir(), 'rw-lxc-'));
+  await Bun.write(join(bin, 'lxc-attach'), '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done; shift\nexec "$@"\n');
+  await chmod(join(bin, 'lxc-attach'), 0o755);
   const stub = [
+    lxc ? `lxc-info() { echo '${lxc}'; }` : `lxc-info() { echo "$2 doesn't exist" >&2; return 1; }`,
     'pct() {',
     '  case "$1" in',
     `    status) echo "status: ${status}" ;;`,
@@ -37,10 +48,11 @@ async function runOnStubNode(script: string, status: 'running' | 'stopped', agen
   const proc = Bun.spawn(['sh', '-c', `${stub}\n${script}`], {
     stdout: 'pipe',
     stderr: 'pipe',
-    env: { ...process.env, RW_BUN: process.execPath },
+    env: { ...process.env, RW_BUN: process.execPath, PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`, SSL_CERT_FILE: '/pve/ca.pem' },
   });
   const [stdout, stderr] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
   await proc.exited;
+  await rm(bin, { recursive: true, force: true });
   return cleanOutput(stdout + stderr);
 }
 
@@ -71,6 +83,39 @@ describe('batched check script', () => {
     const output = await runOnStubNode(buildCheckScript({ kind: 'lxc', vmid: 102 }, steps, token), 'stopped');
     const result = parseCheckOutput(output, token);
     assert.deepEqual(result.status, { exitCode: 0, output: 'status: stopped' });
+    assert.equal(result.steps.size, 0);
+  });
+
+  it('asks the LXC tools directly when the node has them (pct starts slowly)', async () => {
+    const token = newCheckToken();
+    const withEnv: CheckStep[] = [...steps, { id: 'env', script: 'echo "ssl=${SSL_CERT_FILE-unset}"', timeoutSeconds: 10 }];
+    // The stub `pct` reports "stopped" – a running status shows that it was not asked.
+    const result = parseCheckOutput(await runOnStubNode(buildCheckScript({ kind: 'lxc', vmid: 101 }, withEnv, token), 'stopped', true, 'RUNNING'), token);
+    assert.deepEqual(result.status, { exitCode: 0, output: 'status: running' });
+    assert.deepEqual(result.steps.get('v1'), { exitCode: 0, output: "it's 1.2.3" });
+    assert.equal(result.steps.get('v2')?.exitCode, 3);
+    assert.equal(result.steps.get('l2')?.exitCode, 124);
+    // Like `pct exec`: the SSL variables PVE sets for itself do not reach the container.
+    assert.deepEqual(result.steps.get('env'), { exitCode: 0, output: 'ssl=unset' });
+  });
+
+  it('reads a stopped container from the LXC tools and runs nothing in it', async () => {
+    const token = newCheckToken();
+    const script = buildCheckScript({ kind: 'lxc', vmid: 102 }, steps, token);
+    const result = parseCheckOutput(await runOnStubNode(script, 'running', true, 'STOPPED'), token);
+    assert.deepEqual(result.status, { exitCode: 0, output: 'status: stopped' });
+    assert.equal(result.steps.size, 0);
+  });
+
+  it('falls back to pct when the LXC tools do not know the container', async () => {
+    const token = newCheckToken();
+    const script = buildCheckScript({ kind: 'lxc', vmid: 999 }, steps, token).replace(
+      'pct status 999',
+      `{ echo "Configuration file 'nodes/pve/lxc/999.conf' does not exist" >&2; false; }`,
+    );
+    const result = parseCheckOutput(await runOnStubNode(script, 'running'), token);
+    assert.equal(result.status?.exitCode, 1);
+    assert.match(result.status?.output ?? '', /999\.conf' does not exist/);
     assert.equal(result.steps.size, 0);
   });
 
