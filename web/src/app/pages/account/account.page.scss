@@ -9,8 +9,15 @@
 .sections {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 520px), 1fr));
-  align-items: start;
+  align-items: stretch;
   gap: 20px;
+}
+
+// Cards in a row share the row's height; the body fills the card and its last block (form
+// actions, password sign-in, token form) sits at the bottom so the footers line up.
+.section {
+  display: flex;
+  flex-direction: column;
 }
 
 .section-head {
@@ -125,9 +132,14 @@
 
 .section-body {
   display: flex;
+  flex: 1;
   flex-direction: column;
   gap: 16px;
   padding: 20px;
+
+  > :last-child {
+    margin-top: auto;
+  }
 }
 
 .grid-2 {
@@ -267,4 +279,9 @@
     flex: 1 1 180px;
     min-width: 0;
   }
+}
+
+// Directly in a card body the form must not grow vertically (the body is a flex column).
+.add-passkey {
+  flex: none;
 }
