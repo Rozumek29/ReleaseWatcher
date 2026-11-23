@@ -172,7 +172,8 @@ always used in pairs: text in `--x`, background in `--x-soft`.
   3. an “add” card / toolbar (`.toolbar` with `.tabs` filters + search + layout switch);
   4. content: list or grid of `.card` rows, or `.sections` of cards (Settings);
   5. states: loading skeleton → empty state → “nothing matches” → data.
-- Other breakpoints used inside pages: 600px (repositories), 560px (settings), 480px (dialogs). Prefer these
+- Other breakpoints used inside pages: 600px (repositories), 560px (settings), 480px (dialogs; also a viewport
+  *height* of 480px, below which dialogs scroll as a whole). Prefer these
   values over new ones; content must work at 360px wide without horizontal scroll.
 - Viewport heights use `dvh`, never `vh`: on phones `100vh` is the height without the browser bars, so
   sticky/fixed elements and dialog footers sized with it end up hidden behind the address bar.
@@ -231,7 +232,9 @@ Shared components in `web/src/app/shared/`:
   grouped fields in `fieldset.group` with a `legend`. The dialog shell (`.dialog`, `.dialog-*`, `.group`, `.optional`,
   `.save-error`) lives in `styles.scss`; a component only overrides what differs (e.g. the width). Dialogs and their
   `::backdrop` set `overscroll-behavior: contain` (the backdrop also `overflow: hidden`) so scrolling never moves the
-  page underneath. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
+  page underneath. Header and footer always stay in view and only `.dialog-body` scrolls; below a viewport height of
+  480px (phones in landscape) the whole dialog scrolls instead, so the content keeps enough room. Keep `.dialog-head`,
+  `.dialog-body` and `.dialog-foot` direct children of `.dialog-card` for this to work. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”

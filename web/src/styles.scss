@@ -724,6 +724,41 @@ code {
   border-top: 1px solid var(--border);
 }
 
+/*
+ * Header and footer stay in view, only the body scrolls. On short viewports (phones in landscape) they would leave
+ * too little room for the content, so there the whole dialog scrolls as one (the rules above).
+ */
+@media (height > 480px) {
+  /* display only while open – an unconditional display would override the closed state. */
+  .dialog[open] {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .dialog-card {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .dialog-head,
+  .dialog-foot {
+    flex-shrink: 0;
+  }
+
+  .dialog-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+
+    /* Children keep their height (an element with its own overflow could otherwise shrink to nothing). */
+    > * {
+      flex-shrink: 0;
+    }
+  }
+}
+
 /* Grouped fields: fieldset.group with a legend. */
 .group {
   display: flex;
