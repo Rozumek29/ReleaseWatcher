@@ -33,6 +33,12 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./pages/containers/containers.page').then((m) => m.ContainersPage),
   },
+  {
+    path: 'docker',
+    title: 'Docker · ReleaseWatcher',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/docker/docker.page').then((m) => m.DockerPage),
+  },
   // The page was called Containers before servers and several Proxmox nodes (old links and notifications).
   { path: 'containers', redirectTo: 'machines' },
   {

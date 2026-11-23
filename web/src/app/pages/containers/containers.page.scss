@@ -639,3 +639,24 @@
     flex-basis: 100%;
   }
 }
+
+.docker-block {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.block-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 620;
+
+  a {
+    margin-left: auto;
+    font-weight: 400;
+  }
+}

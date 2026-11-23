@@ -88,6 +88,11 @@ nav {
       background: var(--danger-soft);
       color: var(--danger);
     }
+
+    &.warning {
+      background: var(--warning-soft);
+      color: var(--warning);
+    }
   }
 }
 

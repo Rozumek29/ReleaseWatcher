@@ -104,6 +104,7 @@ export class SettingsPage implements OnInit {
   protected releaseCron = '';
   protected advisoryCron = '';
   protected checkCron = '';
+  protected dockerCron = '';
   protected checkConcurrency: number | null = 3;
   protected backupDefault = false;
   protected runHistoryChecks: number | null = null;
@@ -251,6 +252,7 @@ export class SettingsPage implements OnInit {
       // Empty values reset to the environment default.
       releaseCheckCron: this.releaseCron.trim() || null,
       advisoryCheckCron: this.advisoryCron.trim() || null,
+      dockerCheckCron: this.dockerCron.trim() || null,
     };
     if (await this.save('polling', patch, 'Check schedules saved.')) {
       void this.statusService.refresh();
@@ -332,7 +334,7 @@ export class SettingsPage implements OnInit {
       case 'github':
         return this.token.trim();
       case 'polling':
-        return [this.releaseCron.trim(), this.advisoryCron.trim()];
+        return [this.releaseCron.trim(), this.advisoryCron.trim(), this.dockerCron.trim()];
       case 'advisories':
         return [this.advisoriesGithub, this.advisoriesOsv];
       case 'proxmox':
@@ -407,6 +409,7 @@ export class SettingsPage implements OnInit {
       case 'polling':
         this.releaseCron = settings.polling.releaseCron;
         this.advisoryCron = settings.polling.advisoryCron;
+        this.dockerCron = settings.docker.checkCron;
         break;
       case 'proxmox':
         this.checkCron = settings.proxmox.checkCron;

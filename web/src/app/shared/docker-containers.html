@@ -1,0 +1,106 @@
+@for (group of groups(); track group.project) {
+  <div class="compose">
+    @if (groups().length > 1 || group.project) {
+      <h4 class="group-title">
+        @if (group.project) {
+          <app-icon name="grid" [size]="12" /> {{ group.project }}
+        } @else {
+          Standalone containers
+        }
+      </h4>
+    }
+    @for (c of group.containers; track c.id) {
+      <div class="row" [class.ignored]="c.ignored" [class.gone]="!c.present">
+        <div class="main">
+          <span class="name">
+            @if (c.repository && c.repository.iconUrls.length > 0) {
+              <app-avatar [icons]="c.repository.iconUrls" [name]="c.name" [size]="18" />
+            } @else {
+              <app-icon name="container" [size]="14" />
+            }
+            {{ c.name }}
+          </span>
+          <span class="image mono muted" [title]="c.image">{{ c.imageDisplay }}</span>
+          <span class="versions mono" [title]="versionTitle(c)">
+            @if (c.installedVersion) {
+              {{ c.installedVersion }}
+            } @else {
+              <span class="muted">version unknown</span>
+            }
+            @if (c.updateAvailable && c.repository?.latestVersion) {
+              <span class="arrow">→</span> {{ c.repository!.latestVersion }}
+            } @else if (c.registry.state === 'update-available' && c.registry.latestVersion) {
+              <span class="arrow">→</span> {{ c.registry.latestVersion }}
+            }
+          </span>
+          @if (!c.present) {
+            <span class="badge">Not running</span>
+          } @else if (c.state && c.state !== 'running') {
+            <span class="badge">{{ c.state }}</span>
+          }
+          @if (c.updateAvailable === true) {
+            <span class="badge badge-warning" title="The linked repository has a newer release">Update available</span>
+          }
+          @if (c.registry.state === 'update-available') {
+            <span class="badge badge-warning" [title]="'The registry has a newer image for ' + (c.tag ?? 'this tag')">
+              New image
+            </span>
+          } @else if (c.registry.state === 'up-to-date' && c.updateAvailable !== true) {
+            <span class="badge badge-success" title="The running image is the newest one for its tag">Up to date</span>
+          } @else if (c.registry.state === 'unknown' && c.present) {
+            <span class="muted small" [title]="registryTitle(c)">image not checked</span>
+          }
+        </div>
+        <div class="actions">
+          @if (linking() === c.id) {
+            @if (repositories(); as repos) {
+              <label class="visually-hidden" [for]="'docker-link-' + c.id">Repository of {{ c.name }}</label>
+              <select class="input link-select" [id]="'docker-link-' + c.id" [value]="linkValue(c)" (change)="link(c, $any($event.target).value)">
+                <option value="auto">From labels{{ c.linkAuto && c.repository ? ' (' + c.repository.fullName + ')' : '' }}</option>
+                <option value="none">No repository</option>
+                @for (r of repos; track r.id) {
+                  <option [value]="r.id">{{ r.fullName }}</option>
+                }
+              </select>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="linking.set(null)">Cancel</button>
+            } @else {
+              <span class="muted small">Loading…</span>
+            }
+          } @else {
+            @if (c.repository) {
+              <a class="repo muted small" [href]="'https://github.com/' + c.repository.fullName" target="_blank" rel="noopener" [title]="c.linkAuto ? 'Linked through the image labels' : 'Linked by hand'">
+                <app-icon name="github" [size]="12" /> {{ c.repository.fullName }}
+              </a>
+            } @else if (c.suggestedRepository) {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="watch(c)" [disabled]="isBusy(c)" [title]="'The image labels point to ' + c.suggestedRepository">
+                <app-icon name="plus" [size]="14" /> Watch {{ c.suggestedRepository }}
+              </button>
+            }
+            <button type="button" class="icon-btn" (click)="startLinking(c)" [disabled]="isBusy(c)" [attr.aria-label]="'Link ' + c.name + ' to a repository'" title="Link to a watched repository">
+              <app-icon name="link" [size]="16" />
+            </button>
+            <button type="button" class="icon-btn" (click)="toggleIgnored(c)" [disabled]="isBusy(c)" [attr.aria-label]="(c.ignored ? 'Show ' : 'Ignore ') + c.name" [title]="c.ignored ? 'Show again' : 'Ignore this container'">
+              <app-icon [name]="c.ignored ? 'eye' : 'eyeOff'" [size]="16" />
+            </button>
+          }
+        </div>
+        @if (c.registry.error && c.present && !c.ignored) {
+          <div class="error-line"><app-icon name="alert" [size]="14" /> <span>{{ c.registry.error }}</span></div>
+        }
+      </div>
+    }
+  </div>
+} @empty {
+  <p class="muted small empty">
+    @if (ignoredCount() > 0) {
+      All containers are ignored.
+    } @else {
+      No running containers.
+    }
+  </p>
+}
+@if (ignoredCount() > 0) {
+  <button type="button" class="link-btn small toggle-ignored" (click)="showIgnored.set(!showIgnored())">
+    {{ showIgnored() ? 'Hide' : 'Show' }} {{ ignoredCount() }} ignored
+  </button>
+}

@@ -94,6 +94,7 @@ export class ContainerSettingsDialog {
   protected isEnabled = true;
   protected aptEnabled = true;
   protected startWhenStopped = false;
+  protected dockerEnabled = true;
   /** 'default' = follow the global setting. */
   protected backupChoice: 'default' | 'yes' | 'no' = 'default';
   protected checkCron = '';
@@ -144,6 +145,7 @@ export class ContainerSettingsDialog {
           this.isEnabled = container.isEnabled;
           this.aptEnabled = container.aptEnabled;
           this.startWhenStopped = container.startWhenStopped;
+          this.dockerEnabled = container.docker.enabled;
           this.backupChoice =
             container.backupBeforeUpdate === null ? 'default' : container.backupBeforeUpdate ? 'yes' : 'no';
           this.checkCron = container.checkCron ?? '';
@@ -187,6 +189,7 @@ export class ContainerSettingsDialog {
           isEnabled: this.isEnabled,
           aptEnabled: this.aptEnabled,
           startWhenStopped: this.startWhenStopped,
+          dockerEnabled: this.dockerEnabled,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
           checkCron: this.checkCron.trim() || null,
           ...(container.capabilities.updateResources
@@ -221,6 +224,7 @@ export class ContainerSettingsDialog {
       this.isEnabled,
       this.aptEnabled,
       this.startWhenStopped,
+      this.dockerEnabled,
       this.backupChoice,
       this.checkCron,
       this.updateCores,

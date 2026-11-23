@@ -167,7 +167,91 @@
       <p class="hint">Private keys are encrypted at rest and never shown again. Keys protected with a passphrase are not supported.</p>
     </div>
   </section>
+
+  <!-- Docker endpoints -->
+  <section class="card section wide enter" style="--i: 2" aria-labelledby="docker-title">
+    <div class="section-head">
+      <span class="section-icon docker"><app-icon name="container" /></span>
+      <div class="section-title">
+        <h2 id="docker-title">Docker endpoints</h2>
+        <p>Docker or Podman engines read without SSH – a socket proxy, the mounted socket or a remote engine.</p>
+      </div>
+      <div class="head-actions">
+        <button type="button" class="btn btn-sm" (click)="editingEndpoint.set({ endpoint: null })" [disabled]="endpoints() === null">
+          <app-icon name="plus" [size]="14" /> Add endpoint
+        </button>
+      </div>
+    </div>
+
+    <div class="section-body">
+      @if (endpoints(); as list) {
+        @for (e of list; track e.id) {
+          <div class="row enter" [style.--i]="$index">
+            <div class="row-main">
+              <div class="row-title">
+                <span class="name">{{ e.name }}</span>
+                @if (e.engine) {
+                  <span class="badge">{{ e.engine }}</span>
+                }
+                @if (!e.isEnabled) {
+                  <span class="badge">Paused</span>
+                }
+                @if (e.lastError) {
+                  <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Error</span>
+                }
+              </div>
+              <div class="row-meta">
+                <span class="mono">{{ e.url }}</span>
+                @if (e.isChecking) {
+                  <span><app-icon name="refresh" [size]="12" class="spin" /> Checking…</span>
+                } @else if (e.lastCheckedAt) {
+                  <span>Checked {{ e.lastCheckedAt | relativeTime: now() }}</span>
+                } @else {
+                  <span>Not checked yet</span>
+                }
+              </div>
+            </div>
+            <div class="row-actions">
+              @if (confirming() === 'delete-endpoint-' + e.id) {
+                <span class="confirm-text">Remove {{ e.name }}? Its containers are no longer watched.</span>
+                <button type="button" class="btn btn-sm" (click)="deleteEndpoint(e)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              } @else {
+                <button type="button" class="btn btn-sm btn-secondary" (click)="checkEndpoint(e)" [disabled]="isBusy('endpoint-' + e.id) || e.isChecking">
+                  <app-icon name="refresh" [size]="14" [class.spin]="isBusy('endpoint-' + e.id) || e.isChecking" />
+                  {{ isBusy('endpoint-' + e.id) || e.isChecking ? 'Checking…' : 'Check now' }}
+                </button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="editingEndpoint.set({ endpoint: e })" [disabled]="isBusy('endpoint-' + e.id)">Edit</button>
+                <button type="button" class="btn btn-sm btn-danger-ghost" (click)="confirming.set('delete-endpoint-' + e.id)" [disabled]="isBusy('endpoint-' + e.id)" title="Remove endpoint">
+                  Remove
+                </button>
+              }
+            </div>
+            @if (e.lastError) {
+              <pre class="node-test failed" aria-label="Last error">{{ e.lastError }}</pre>
+            }
+          </div>
+        } @empty {
+          <div class="empty-row">
+            <app-icon name="container" [size]="20" />
+            <p>
+              No Docker endpoints yet. Add a socket proxy (<code>tcp://socket-proxy:2375</code>) or the mounted socket
+              (<code>unix:///var/run/docker.sock</code>). Docker and Podman on hosts watched over SSH are found
+              without one.
+            </p>
+          </div>
+        }
+      } @else {
+        <div class="skeleton row-skeleton"></div>
+      }
+      <p class="hint">
+        Only reading is needed: give a socket proxy <code>CONTAINERS=1</code> and <code>IMAGES=1</code>, and mount the
+        socket read-only. The containers are shown on the <strong>Docker</strong> page.
+      </p>
+    </div>
+  </section>
 </div>
 
 <app-host-dialog [data]="editingHost()" (saved)="hostSaved()" (closed)="editingHost.set(null)" />
+<app-docker-endpoint-dialog [data]="editingEndpoint()" (saved)="endpointSaved($event)" (closed)="editingEndpoint.set(null)" />
 <app-ssh-key-dialog [mode]="keyDialog()" (saved)="keySaved()" (closed)="keyDialog.set(null)" />

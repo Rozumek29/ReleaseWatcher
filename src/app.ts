@@ -35,6 +35,11 @@ import { MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import { type KeyTool, SshKeygen } from './hosts/keys.ts';
 import { hostRoutes } from './hosts/routes.ts';
+import type { DockerEngine } from './docker/engine.ts';
+import { OciRegistryClient, type RegistryClient } from './docker/registry.ts';
+import { dockerRoutes } from './docker/routes.ts';
+import { DockerService } from './docker/service.ts';
+import { DockerStore } from './docker/store.ts';
 import { seedNodeBackupStorage, seedProxmoxHost } from './hosts/seed.ts';
 import { type ShellFactory, ShellPool } from './hosts/shells.ts';
 import { HostStore } from './hosts/store.ts';
@@ -134,6 +139,10 @@ export interface AppDeps {
   /** Wait after scheduling a machine reboot before polling it again, and the polling interval (tests use 0). */
   machineRestartWaitMs?: number;
   machinePollMs?: number;
+  /** Container registries (digests and tags of Docker images); tests pass a fake. Defaults to the OCI registry API. */
+  registry?: RegistryClient;
+  /** Engine client of a Docker endpoint URL; tests pass a fake. Defaults to the Docker Engine API over HTTP/socket. */
+  dockerEngine?: (url: string) => DockerEngine;
   /** Login. Defaults: sessions required, origin/RP ID from the request, X-Forwarded-For not trusted. */
   auth?: {
     /** false turns the session check off – only for tests of other features. */
@@ -155,6 +164,9 @@ export interface App {
   releaseJob: CronJob;
   /** Vulnerability checks on `advisoryCheckCron`. Created but not started – call `advisoryJob.start()`. */
   advisoryJob: CronJob;
+  /** Docker endpoint and registry checks on `dockerCheckCron`. Created but not started – call `dockerJob.start()`. */
+  dockerJob: CronJob;
+  docker: DockerService;
   /** Created but not started – call `scheduler.start()`. */
   scheduler: ContainerScheduler;
   /** "Update all" of the containers page. */
@@ -381,6 +393,7 @@ const settingsSchema: ObjectSchema = {
     releaseCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     advisoryCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
+    dockerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckConcurrency: { type: 'integer', nullable: true },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
     runHistoryChecks: { type: 'integer', nullable: true },
@@ -435,10 +448,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     checks: deps.settings.current.runHistoryChecks,
     others: deps.settings.current.runHistoryUpdates,
   }));
-  /** Installed versions of container apps per linked repository (compared with the repository's advisories). */
+  const dockerStore = new DockerStore(deps.store.database);
+  /** Installed versions of the container apps and Docker containers linked to a repository. */
+  const linkedVersions = (repositoryId: number): (string | null)[] => [
+    ...containerStore.linkedAppVersions(repositoryId),
+    ...dockerStore.linkedVersions(repositoryId),
+  ];
+  /** Installed versions of container apps and Docker containers per linked repository (compared with its advisories). */
   const linkedAppVersions = (): Map<number, (string | null)[]> => {
     const byRepository = new Map<number, (string | null)[]>();
-    for (const { repositoryId, installedVersion } of containerStore.listAppVersions()) {
+    for (const { repositoryId, installedVersion } of [...containerStore.listAppVersions(), ...dockerStore.listLinkedVersions()]) {
       if (repositoryId !== null) {
         const versions = byRepository.get(repositoryId);
         if (versions) {
@@ -460,7 +479,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     ...(deps.fetchInstalledVersion ? { fetchInstalledVersion: deps.fetchInstalledVersion } : {}),
     osv: deps.osv ?? null,
     advisorySources: () => ({ github: deps.settings.current.advisoriesGithub, osv: deps.settings.current.advisoriesOsv }),
-    linkedVersions: (repositoryId) => containerStore.linkedAppVersions(repositoryId),
+    linkedVersions,
     advisoryCron: () => deps.settings.current.advisoryCheckCron,
   });
   const { store, source, settings } = deps;
@@ -483,6 +502,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   settings.onChange(() => {
     releaseJob.reschedule();
     advisoryJob.reschedule();
+    dockerJob.reschedule();
     // Lowered run history limits apply to every container right away.
     containerStore.pruneRuns();
   });
@@ -522,7 +542,22 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   if (packed > 0) {
     log.info({ count: packed }, 'Compressed the output of earlier runs');
   }
+  const docker = new DockerService({
+    store: dockerStore,
+    registry: deps.registry ?? new OciRegistryClient(),
+    log,
+    ...(deps.dockerEngine ? { engine: deps.dockerEngine } : {}),
+    targetName: (targetId) => containerStore.get(targetId)?.name ?? null,
+  });
+  const dockerJob = new CronJob({
+    name: 'docker',
+    task: (signal) => docker.checkAll(signal),
+    cron: () => settings.current.dockerCheckCron,
+    log,
+    sequence: sequencer.slot(4),
+  });
   const containers = new ContainerService({
+    docker,
     containers: containerStore,
     repositories: store,
     shells,
@@ -594,6 +629,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         minRunHistory: MIN_RUN_HISTORY,
         maxRunHistory: MAX_RUN_HISTORY,
       },
+      docker: {
+        checkCron: current.dockerCheckCron,
+        checkCronSource: settings.sourceOf('dockerCheckCron'),
+      },
       email: {
         configured: deps.notifiers.some((n) => n.name === 'email' && n.isEnabled),
         smtpHost: current.smtpHost,
@@ -639,6 +678,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
       containers: containerStatus(containerStore),
+      docker: (() => {
+        const shown = docker.describe(dockerStore.listContainers()).filter((c) => c.present && !c.ignored);
+        return {
+          total: shown.length,
+          /** A newer image for the tag or a newer release of the linked repository. */
+          updatesAvailable: shown.filter((c) => c.registry.state === 'update-available' || c.updateAvailable === true).length,
+        };
+      })(),
       advisories: (() => {
         impacts.refresh();
         return store.advisoryTotals();
@@ -649,7 +696,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const findRepository = (rawId: string) => store.get(parseId(rawId));
   const repositoryDto = (repo: WatchedRepository) => {
     impacts.refresh();
-    return toDto(repo, store.advisorySummaries(repo.id).get(repo.id), containerStore.linkedAppVersions(repo.id));
+    return toDto(repo, store.advisorySummaries(repo.id).get(repo.id), linkedVersions(repo.id));
   };
   /**
    * Body of the repository list, serialized again only after a database write (`store.revision()`): building it
@@ -1023,6 +1070,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           }),
           isProxmoxHost: (hostId) => hostStore.getHost(hostId)?.type === 'proxmox',
           hostName: (hostId) => hostStore.getHost(hostId)?.name ?? null,
+          onDockerDisabled: (container) => docker.clearTarget(container),
           // A server's host exists only for its one target: removing the server removes the connection too.
           onTargetDeleted: (container) => {
             if (container.kind === 'server' && container.hostId !== null) {
@@ -1031,6 +1079,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
           },
         }),
+        ...dockerRoutes({ store: dockerStore, repositories: store, service: docker, job: dockerJob }),
         ...hostRoutes({
           hosts: hostStore,
           shells,
@@ -1123,7 +1172,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             if (!repo) {
               return problem(404, 'Repository not found.');
             }
-            const versions = installedVersions(repo.installedVersion, containerStore.linkedAppVersions(repo.id));
+            const versions = installedVersions(repo.installedVersion, linkedVersions(repo.id));
             return Response.json(sortAdvisories(store.listAdvisories(repo.id)).map((a) => advisoryDto(a, versions)));
           },
         },
@@ -1201,16 +1250,17 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const close = async () => {
-    await Promise.all([releaseJob.stop(), advisoryJob.stop()]);
+    await Promise.all([releaseJob.stop(), advisoryJob.stop(), dockerJob.stop()]);
     await scheduler.stop();
     await updater.stop();
     await server?.stop();
     server = null;
     await containers.idle();
+    await docker.idle();
     shells.dispose();
   };
 
-  return { checker, releaseJob, advisoryJob, scheduler, updater, containers, auth, log, listen, close };
+  return { checker, releaseJob, advisoryJob, dockerJob, docker, scheduler, updater, containers, auth, log, listen, close };
 }
 
 function parseJson(text: string): unknown {

@@ -26,6 +26,12 @@
             @if (c.capabilities.aptOptional) {
               <app-switch label="apt packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
             }
+            <app-switch
+              label="Docker containers"
+              [checked]="dockerEnabled"
+              (toggled)="dockerEnabled = !dockerEnabled"
+              title="Checks list the running Docker / Podman containers (when installed) and compare their images with the registries"
+            />
           </div>
 
           @if (c.kind === 'node') {

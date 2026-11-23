@@ -37,6 +37,13 @@
               <span class="count">{{ a.total }}</span>
             }
           }
+          @if (item.path === '/docker' && statusService.status()?.docker; as d) {
+            @if (d.updatesAvailable > 0) {
+              <span class="count warning" [title]="d.updatesAvailable + ' with a newer image or release'">{{ d.updatesAvailable }}</span>
+            } @else if (d.total > 0) {
+              <span class="count">{{ d.total }}</span>
+            }
+          }
           @if (item.path === '/machines' && statusService.status()?.containers; as c) {
             @if (c.total > 0) {
               <span class="count">{{ c.total }}</span>

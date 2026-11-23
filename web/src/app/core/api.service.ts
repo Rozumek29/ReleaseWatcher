@@ -14,6 +14,11 @@ import {
   ContainerAppRequest,
   DetectedApp,
   DiscoveredContainer,
+  DockerContainer,
+  DockerContainerRequest,
+  DockerEndpoint,
+  DockerEndpointRequest,
+  DockerOverview,
   HeaderInput,
   Host,
   HostInput,
@@ -199,6 +204,47 @@ export class ApiService {
 
   forgetHostKey(id: number): Observable<void> {
     return this.http.post<void>(`${this.baseUrl}/hosts/${id}/forget-host-key`, {});
+  }
+
+  /* ---------- Docker ---------- */
+
+  /** Docker endpoints and the containers of every source (endpoints and machines). */
+  getDocker(): Observable<DockerOverview> {
+    return this.http.get<DockerOverview>(`${this.baseUrl}/docker`);
+  }
+
+  /** Lists the endpoints again and asks the registries for every image (runs in the background). */
+  checkDocker(): Observable<DockerOverview> {
+    return this.http.post<DockerOverview>(`${this.baseUrl}/docker/check`, {});
+  }
+
+  getDockerEndpoints(): Observable<DockerEndpoint[]> {
+    return this.http.get<DockerEndpoint[]>(`${this.baseUrl}/docker/endpoints`);
+  }
+
+  addDockerEndpoint(request: DockerEndpointRequest): Observable<DockerEndpoint> {
+    return this.http.post<DockerEndpoint>(`${this.baseUrl}/docker/endpoints`, request);
+  }
+
+  updateDockerEndpoint(id: number, request: DockerEndpointRequest): Observable<DockerEndpoint> {
+    return this.http.put<DockerEndpoint>(`${this.baseUrl}/docker/endpoints/${id}`, request);
+  }
+
+  deleteDockerEndpoint(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/docker/endpoints/${id}`);
+  }
+
+  /** Reads the endpoint once without saving it. */
+  testDockerEndpoint(url: string): Observable<{ engine: string; containers: number }> {
+    return this.http.post<{ engine: string; containers: number }>(`${this.baseUrl}/docker/endpoints/test`, { url });
+  }
+
+  checkDockerEndpoint(id: number): Observable<DockerEndpoint> {
+    return this.http.post<DockerEndpoint>(`${this.baseUrl}/docker/endpoints/${id}/check`, {});
+  }
+
+  updateDockerContainer(id: number, request: DockerContainerRequest): Observable<DockerContainer> {
+    return this.http.put<DockerContainer>(`${this.baseUrl}/docker/containers/${id}`, request);
   }
 
   /* ---------- Proxmox containers ---------- */

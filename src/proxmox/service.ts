@@ -1,5 +1,6 @@
 import type { RepositoryStore } from '../db.ts';
 import type { Logger } from '../log.ts';
+import { DOCKER_LIST_SCRIPT } from '../docker/domain.ts';
 import type { NotificationDispatcher } from '../notifiers/dispatcher.ts';
 import {
   APT_CHECK_SCRIPT,
@@ -309,7 +310,17 @@ export interface ContainerServiceDeps {
    */
   machineRestartWaitMs?: number;
   machinePollMs?: number;
+  /** Stores the Docker / Podman containers listed by a check (`dockerEnabled` targets); without it none are listed. */
+  docker?: DockerTargetHook;
 }
+
+/** Receives the result of the `docker` step of a target check (see `DockerService.applyTargetCheck`). */
+export interface DockerTargetHook {
+  applyTargetCheck(container: Container, step: StepResult | undefined, note: (line: string) => void): Promise<void>;
+}
+
+/** Listing containers and their images can take a while on a busy machine. */
+const DOCKER_CHECK_TIMEOUT_SECONDS = 60;
 
 /** How long a rebooting machine may take to answer over SSH again. */
 const MACHINE_BACK_TIMEOUT_MS = 15 * 60_000;
@@ -1295,6 +1306,10 @@ export class ContainerService {
     if (capabilities(container.kind).homeAssistant) {
       steps.push({ id: 'ha', script: HA_CHECK_SCRIPT, timeoutSeconds: HA_CHECK_TIMEOUT_SECONDS });
     }
+    const listDocker = container.dockerEnabled && this.deps.docker !== undefined;
+    if (listDocker) {
+      steps.push({ id: 'docker', script: DOCKER_LIST_SCRIPT, timeoutSeconds: DOCKER_CHECK_TIMEOUT_SECONDS });
+    }
     for (const app of apps) {
       if (app.versionCommand) {
         steps.push({ id: `v${app.id}`, script: app.versionCommand, timeoutSeconds: CHECK_TIMEOUT_SECONDS });
@@ -1378,6 +1393,11 @@ export class ContainerService {
         if (app.error) {
           errors.push(`${app.name}: ${app.error}`);
         }
+      }
+
+      // Not counted as an error of the target: a failed listing is shown in its Docker section (`dockerError`).
+      if (listDocker) {
+        await this.deps.docker!.applyTargetCheck(container, batch.steps.get('docker'), (line) => log.note(line));
       }
     }
 

@@ -697,6 +697,22 @@
               }
             }
           </div>
+
+          @if (c.docker.enabled && (c.docker.engine || c.docker.error)) {
+            <div class="docker-block">
+              <h3 class="block-title">
+                <app-icon name="container" [size]="14" /> Docker
+                @if (c.docker.engine) {
+                  <span class="badge">{{ c.docker.engine }}</span>
+                }
+                <a class="muted small" routerLink="/docker">All Docker containers</a>
+              </h3>
+              @if (c.docker.error) {
+                <div class="error-line warn"><app-icon name="alert" [size]="14" /> <span>{{ c.docker.error }}</span></div>
+              }
+              <app-docker-containers [containers]="dockerByTarget().get(c.id) ?? noDockerContainers" (changed)="onDockerChanged($event)" />
+            </div>
+          }
         </section>
       }
     </div>

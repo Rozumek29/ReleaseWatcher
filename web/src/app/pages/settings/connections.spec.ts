@@ -1,8 +1,9 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
-import { Host, SshKey } from '../../core/models';
+import { DockerEndpoint, Host, SshKey } from '../../core/models';
 import { settle } from '../../testing';
+import { dockerEndpoint } from '../docker/fixtures';
 import { ConnectionsPanel } from './connections';
 
 const key = (id: number, extra: Partial<SshKey> = {}): SshKey => ({
@@ -32,7 +33,7 @@ const host = (id: number, extra: Partial<Host> = {}): Host => ({
 });
 
 describe('ConnectionsPanel', () => {
-  const setup = async (hosts: Host[], keys: SshKey[]) => {
+  const setup = async (hosts: Host[], keys: SshKey[], endpoints: DockerEndpoint[] = []) => {
     HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
       this.setAttribute('open', '');
     };
@@ -50,6 +51,7 @@ describe('ConnectionsPanel', () => {
     fixture.detectChanges();
     http.expectOne('/api/hosts').flush(hosts);
     http.expectOne('/api/ssh-keys').flush(keys);
+    http.expectOne('/api/docker/endpoints').flush(endpoints);
     await settle(fixture);
     const el = fixture.nativeElement as HTMLElement;
     const button = (text: string, root: ParentNode = el) =>
@@ -212,5 +214,59 @@ describe('ConnectionsPanel', () => {
     http.expectOne('/api/ssh-keys').flush([]);
     await settle(fixture);
     expect(el.textContent).toContain('No keys yet');
+  });
+
+  it('lists Docker endpoints with their state', async () => {
+    const { el } = await setup([], [], [
+      dockerEndpoint(),
+      dockerEndpoint({ id: 2, name: 'Pi', url: 'tcp://pi.lan:2375', isEnabled: false, engine: null, lastCheckedAt: null, lastError: 'Could not reach http://pi.lan:2375' }),
+    ]);
+    expect(el.textContent).toContain('Docker endpoints');
+    expect(el.textContent).toContain('tcp://pi.lan:2375');
+    expect(el.textContent).toContain('Paused');
+    expect(el.querySelector('pre.node-test.failed')?.textContent).toContain('Could not reach');
+  });
+
+  it('adds a Docker endpoint after testing it', async () => {
+    const { http, fixture, el, button } = await setup([], []);
+    expect(el.textContent).toContain('No Docker endpoints yet');
+    button('Add endpoint').click();
+    await settle(fixture);
+    const url = el.querySelector<HTMLInputElement>('#docker-url')!;
+    url.value = 'tcp://socket-proxy:2375';
+    url.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    [...el.querySelectorAll<HTMLButtonElement>('.url-row button')][0]!.click();
+    http.expectOne('/api/docker/endpoints/test').flush({ engine: 'docker 27.3.1', containers: 12 });
+    await settle(fixture);
+    expect(el.querySelector('.test-result')?.textContent).toContain('12 running container(s)');
+    el.querySelector<HTMLButtonElement>('app-docker-endpoint-dialog button[type=submit]')!.click();
+    const add = http.expectOne((r) => r.method === 'POST' && r.url === '/api/docker/endpoints');
+    expect(add.request.body).toEqual({ name: 'socket-proxy', url: 'tcp://socket-proxy:2375', isEnabled: true });
+    add.flush(dockerEndpoint({ isChecking: true }));
+    await settle(fixture);
+    http.expectOne('/api/docker/endpoints').flush([dockerEndpoint()]);
+    await settle(fixture);
+    expect(el.textContent).toContain('tcp://socket-proxy:2375');
+  });
+
+  it('checks and removes a Docker endpoint', async () => {
+    const { http, fixture, el, button } = await setup([], [], [dockerEndpoint()]);
+    button('Check now').click();
+    const check = http.expectOne('/api/docker/endpoints/1/check');
+    expect(check.request.method).toBe('POST');
+    check.flush(dockerEndpoint());
+    await settle(fixture);
+    [...el.querySelectorAll<HTMLButtonElement>('button.btn-danger-ghost')].at(-1)!.click();
+    await settle(fixture);
+    expect(el.textContent).toContain('Its containers are no longer watched');
+    button('Yes').click();
+    const remove = http.expectOne('/api/docker/endpoints/1');
+    expect(remove.request.method).toBe('DELETE');
+    remove.flush(null);
+    await settle(fixture);
+    http.expectOne('/api/docker/endpoints').flush([]);
+    await settle(fixture);
+    expect(el.textContent).toContain('No Docker endpoints yet');
   });
 });

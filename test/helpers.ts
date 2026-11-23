@@ -1,3 +1,6 @@
+import type { EngineContainer, EngineListing, ImageRef } from '../src/docker/domain.ts';
+import type { DockerEngine } from '../src/docker/engine.ts';
+import type { RegistryClient } from '../src/docker/registry.ts';
 import type { SecurityAdvisory } from '../src/advisories.ts';
 import type { ReleaseInfo } from '../src/domain.ts';
 import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
@@ -363,4 +366,52 @@ export function addProxmoxHost(store: RepositoryStore, name = 'pve'): Host {
   const hosts = new HostStore(store.database, store.secretBox);
   const sshKeyId = hosts.addKey({ name: `${name} key`, privateKey: TEST_PRIVATE_KEY, publicKey: null, fingerprint: null });
   return hosts.addHost({ type: 'proxmox', name, address: `${name}.lan`, port: 22, user: 'root', sshKeyId, backupStorage: null });
+}
+
+/** Registry with fixed tag → digest maps per repository (`registry/repository`); records the requests. */
+export class FakeRegistry implements RegistryClient {
+  /** `docker.io/library/nginx` → { latest: 'sha256:…', '1.27.3': 'sha256:…' }. */
+  readonly images = new Map<string, Record<string, string>>();
+  readonly digestRequests: string[] = [];
+  readonly tagRequests: string[] = [];
+
+  set(repository: string, tags: Record<string, string>): this {
+    this.images.set(repository, tags);
+    return this;
+  }
+
+  async digest(ref: ImageRef): Promise<string> {
+    const key = `${ref.registry}/${ref.repository}`;
+    this.digestRequests.push(`${key}:${ref.tag}`);
+    const digest = this.images.get(key)?.[ref.tag ?? 'latest'];
+    if (!digest) throw new Error(`${key}:${ref.tag} was not found in the registry.`);
+    return digest;
+  }
+
+  async tags(ref: Pick<ImageRef, 'registry' | 'repository'>): Promise<string[]> {
+    const key = `${ref.registry}/${ref.repository}`;
+    this.tagRequests.push(key);
+    return Object.keys(this.images.get(key) ?? {});
+  }
+}
+
+/** Docker engine answering with a fixed listing (or failing with `error`). */
+export class FakeEngine implements DockerEngine {
+  listing: EngineListing = { runtime: 'docker', version: '27.3.1', containers: [] };
+  error: Error | null = null;
+  calls = 0;
+
+  async list(): Promise<EngineListing> {
+    this.calls++;
+    if (this.error) throw this.error;
+    return structuredClone(this.listing);
+  }
+}
+
+/** 64 hex digits from a short seed: `digest('a')` → `sha256:aaaa…`. */
+export const digest = (seed: string): string => `sha256:${seed.repeat(64).slice(0, 64)}`;
+
+/** A running container as an engine lists it. */
+export function engineContainer(name: string, image: string, extra: Partial<EngineContainer> = {}): EngineContainer {
+  return { id: name.padEnd(64, '0').slice(0, 64), name, image, imageId: digest('f'), state: 'running', labels: {}, repoDigests: [], ...extra };
 }

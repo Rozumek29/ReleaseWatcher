@@ -223,6 +223,42 @@
           </span>
         </div>
 
+        <div class="field">
+          <label for="docker-cron">Docker images (cron)</label>
+          <div class="presets" role="radiogroup" aria-label="Docker check schedule">
+            @for (p of advisoryPresets; track p) {
+              <button
+                type="button"
+                role="radio"
+                class="preset"
+                [class.active]="dockerCron.trim() === p"
+                [attr.aria-checked]="dockerCron.trim() === p"
+                (click)="dockerCron = p"
+              >
+                {{ describeCron(p) }}
+              </button>
+            }
+          </div>
+          <input
+            id="docker-cron"
+            class="input mono cron-input"
+            name="dockerCheckCron"
+            [(ngModel)]="dockerCron"
+            placeholder="0 */6 * * *"
+            autocomplete="off"
+            spellcheck="false"
+            [class.invalid]="errors()['dockerCheckCron']"
+          />
+          @if (errors()['dockerCheckCron']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.docker.checkCronSource) }} · {{ describeCron(s.docker.checkCron) }}. Lists the Docker
+            endpoints and asks the registries for newer images (one request per image tag; containers on machines are
+            listed by the machine checks).
+          </span>
+        </div>
+
         <p class="cron-note">
           <code>minute hour day month weekday</code> in the server's time zone, e.g. <code>0 */6 * * *</code> (every 6
           hours). Empty a field to use the environment default. Container checks have their own schedule in the

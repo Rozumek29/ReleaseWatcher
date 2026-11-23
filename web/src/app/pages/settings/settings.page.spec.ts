@@ -10,6 +10,7 @@ const settings: AppSettings = {
   discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: 'ReleaseWatcher' },
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
+  docker: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
   proxmox: {
     configured: true,
     nodes: [
@@ -100,7 +101,7 @@ describe('SettingsPage', () => {
     expect(el.querySelector('.error')?.textContent).toContain('valid URL');
   });
 
-  it('saves the release and vulnerability check schedules', async () => {
+  it('saves the release, vulnerability and Docker check schedules', async () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPage],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
@@ -130,12 +131,16 @@ describe('SettingsPage', () => {
     const advisory = section.querySelector<HTMLInputElement>('#advisory-cron')!;
     advisory.value = '30 4 * * *';
     advisory.dispatchEvent(new Event('input'));
+    const docker = section.querySelector<HTMLInputElement>('#docker-cron')!;
+    expect(docker.value).toBe('0 */6 * * *');
+    docker.value = '15 */12 * * *';
+    docker.dispatchEvent(new Event('input'));
     await settle(fixture);
     submit.click();
 
     const save = http.expectOne('/api/settings');
     expect(save.request.method).toBe('PUT');
-    expect(save.request.body).toEqual({ releaseCheckCron: '0 * * * *', advisoryCheckCron: '30 4 * * *' });
+    expect(save.request.body).toEqual({ releaseCheckCron: '0 * * * *', advisoryCheckCron: '30 4 * * *', dockerCheckCron: '15 */12 * * *' });
     save.flush(
       { status: 400, errors: { advisoryCheckCron: ['minute must be between 0 and 59, got 61.'] } },
       { status: 400, statusText: 'Bad Request' },

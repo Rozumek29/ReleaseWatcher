@@ -1,0 +1,121 @@
+:host {
+  display: block;
+}
+
+.compose + .compose {
+  margin-top: 10px;
+}
+
+.group-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 10px 0 2px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+
+  &:last-child {
+    border-bottom: none;
+  }
+
+  &.ignored,
+  &.gone {
+    opacity: 0.6;
+  }
+}
+
+.main,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  min-width: 0;
+}
+
+.actions {
+  gap: 6px;
+}
+
+.name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.image {
+  font-size: 0.8rem;
+  overflow-wrap: anywhere;
+}
+
+.versions .arrow {
+  color: var(--warning);
+  font-weight: 600;
+}
+
+.repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+}
+
+.link-select {
+  width: auto;
+  max-width: 240px;
+  padding-block: 4px;
+  font-size: 0.85rem;
+}
+
+.error-line {
+  display: flex;
+  flex-basis: 100%;
+  gap: 6px;
+  align-items: flex-start;
+  color: var(--warning);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+
+  app-icon {
+    margin-top: 3px;
+  }
+}
+
+.small {
+  font-size: 0.8rem;
+}
+
+.empty {
+  margin: 10px 0 0;
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.toggle-ignored {
+  margin-top: 8px;
+  font-size: 0.8rem;
+}

@@ -5,6 +5,7 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   discord: { webhookConfigured: false, webhookUrlMasked: null, webhookSource: null, mention: null, username: null },
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
+  docker: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
   proxmox: {
     configured,
     nodes: configured ? [{ id: 1, name: 'pve', configured: true, backupStorage: null }] : [],
@@ -119,6 +120,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   restartReasons: [],
   os: null,
   homeAssistant: null,
+  docker: { enabled: true, engine: null, error: null },
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',

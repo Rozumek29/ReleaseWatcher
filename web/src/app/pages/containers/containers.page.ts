@@ -15,11 +15,12 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, Container, ContainerApp, DiscoveredContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
+import { AppSettings, Container, ContainerApp, DiscoveredContainer, DockerContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
 import { HostDialog, HostDialogData } from '../../shared/host.dialog';
+import { DockerContainers } from '../../shared/docker-containers';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
@@ -48,6 +49,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
     RunLogDialog,
     AptPackages,
     HostDialog,
+    DockerContainers,
   ],
   templateUrl: './containers.page.html',
   styleUrl: './containers.page.scss',
@@ -58,6 +60,9 @@ export class ContainersPage {
   private readonly statusService = inject(StatusService);
 
   protected readonly containers = signal<Container[]>([]);
+  /** Docker / Podman containers found on the machines, by target id. */
+  protected readonly dockerByTarget = signal<ReadonlyMap<number, DockerContainer[]>>(new Map());
+  protected readonly noDockerContainers: DockerContainer[] = [];
   protected readonly settings = signal<AppSettings | null>(null);
   protected readonly loading = signal(true);
   /** False when the node is not configured (from settings or a 409 answer). */
@@ -223,12 +228,39 @@ export class ContainersPage {
       this.containers.set(containers);
       this.settings.set(settings);
       this.configured.set(settings.proxmox.configured);
+      // Only machines where a check found Docker or Podman have containers to show.
+      if (containers.some((c) => c.docker.enabled && (c.docker.engine || c.docker.error))) {
+        void this.loadDocker();
+      } else {
+        this.dockerByTarget.set(new Map());
+      }
     } catch (error) {
       this.toast.error(error);
     } finally {
       this.loading.set(false);
       this.scheduleRefresh();
     }
+  }
+
+  /** Docker containers of the machines (shown in the detail pane); a failure only leaves the section out. */
+  private async loadDocker(): Promise<void> {
+    try {
+      const { containers } = await firstValueFrom(this.api.getDocker());
+      const byTarget = new Map<number, DockerContainer[]>();
+      for (const c of containers) {
+        if (c.source.kind === 'target') byTarget.set(c.source.id, [...(byTarget.get(c.source.id) ?? []), c]);
+      }
+      this.dockerByTarget.set(byTarget);
+    } catch {
+      this.dockerByTarget.set(new Map());
+    }
+  }
+
+  protected onDockerChanged(container: DockerContainer): void {
+    const next = new Map(this.dockerByTarget());
+    const list = next.get(container.source.id);
+    if (list) next.set(container.source.id, list.map((c) => (c.id === container.id ? container : c)));
+    this.dockerByTarget.set(next);
   }
 
   /**

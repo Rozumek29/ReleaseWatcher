@@ -1,0 +1,47 @@
+.dialog {
+  width: min(540px, calc(100vw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.url-row {
+  display: flex;
+  gap: 8px;
+
+  .input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.test-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+
+  app-icon {
+    margin-top: 3px;
+  }
+
+  &.ok {
+    color: var(--success);
+  }
+}
+
+.link-btn {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--accent-strong);
+  font: inherit;
+  font-size: 0.95em;
+  cursor: pointer;
+  text-decoration: underline;
+}

@@ -33,7 +33,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
   user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
-- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool). A feature folder owns its
+- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client). A feature folder owns its
   `domain.ts` (pure logic), `store.ts` (SQL), `service.ts` (orchestration), `routes.ts` (HTTP) – follow
   `src/proxmox/` as the template for any new large feature instead of growing `app.ts`.
 
@@ -62,7 +62,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
   checks (`advisoryCheckCron`) run as `CronJob`s (`src/cron-job.ts`, no overlapping runs), container checks per
   container in `ContainerScheduler`. New periodic work gets a cron setting too – no fixed intervals.
 - Scheduled runs due in the **same minute** go through `RunSequencer` (`src/run-sequencer.ts`): collected for ~1 s, then
-  run one after another by slot (releases 1 → vulnerabilities 2 → containers 3) inside one `dispatcher.batch()`.
+  run one after another by slot (releases 1 → vulnerabilities 2 → containers 3 → Docker 4) inside one `dispatcher.batch()`.
   Manual and startup runs skip it. A new scheduled job takes a `sequencer.slot(n)`.
 - Release notifications advance the baseline after **each** dispatched release (no duplicates after a crash).
 - Notifications go through `NotificationDispatcher` only: it applies the notification types from the settings and,

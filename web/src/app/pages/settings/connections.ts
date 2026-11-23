@@ -1,17 +1,25 @@
-import { ChangeDetectionStrategy, Component, OnInit, inject, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, effect, inject, output, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
-import { Host, HostType, SshKey } from '../../core/models';
+import { DockerEndpoint, Host, HostType, SshKey } from '../../core/models';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { HostDialog, HostDialogData } from '../../shared/host.dialog';
+import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { DockerEndpointDialog, DockerEndpointDialogData } from './docker-endpoint.dialog';
 import { SshKeyDialog, SshKeyDialogMode } from './ssh-key.dialog';
 
-/** Settings → Connections: the hosts ReleaseWatcher reaches over SSH and the named keys they log in with. */
+/** While a Docker endpoint is being checked, the list reloads this often. */
+const POLL_MS = 2000;
+
+/**
+ * Settings → Connections: the hosts ReleaseWatcher reaches over SSH, the named keys they log in with and the Docker
+ * endpoints it reads without SSH (socket, socket proxy, TCP).
+ */
 @Component({
   selector: 'app-connections',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [HostDialog, Icon, SshKeyDialog],
+  imports: [DockerEndpointDialog, HostDialog, Icon, RelativeTimePipe, SshKeyDialog],
   templateUrl: './connections.html',
   styleUrl: './connections.scss',
 })
@@ -24,17 +32,33 @@ export class ConnectionsPanel implements OnInit {
 
   protected readonly hosts = signal<Host[] | null>(null);
   protected readonly keys = signal<SshKey[] | null>(null);
-  /** Host or key IDs with an action in progress (`host-1`, `key-2`). */
+  /** Host, key or endpoint IDs with an action in progress (`host-1`, `key-2`, `endpoint-3`). */
   protected readonly busy = signal<ReadonlySet<string>>(new Set());
-  /** Inline confirmation shown in place of the actions (`delete-host-1`, `forget-host-1`, `delete-key-2`). */
+  /** Inline confirmation shown in place of the actions (`delete-host-1`, `forget-host-1`, `delete-key-2`, `delete-endpoint-3`). */
   protected readonly confirming = signal<string | null>(null);
   /** Result of "Test connection" per host. */
   protected readonly testResults = signal<ReadonlyMap<number, { ok: boolean; text: string }>>(new Map());
   protected readonly editingHost = signal<HostDialogData | null>(null);
   protected readonly keyDialog = signal<SshKeyDialogMode | null>(null);
+  protected readonly endpoints = signal<DockerEndpoint[] | null>(null);
+  protected readonly editingEndpoint = signal<DockerEndpointDialogData | null>(null);
+  protected readonly now = signal(Date.now());
+
+  /** Some endpoint is being checked: reload until it finished. */
+  private readonly checking = computed(() => !!this.endpoints()?.some((e) => e.isChecking));
+
+  constructor() {
+    effect((onCleanup) => {
+      if (!this.checking()) return;
+      const timer = setTimeout(() => void this.reloadEndpoints(), POLL_MS);
+      onCleanup(() => clearTimeout(timer));
+    });
+    const tick = setInterval(() => this.now.set(Date.now()), 30_000);
+    inject(DestroyRef).onDestroy(() => clearInterval(tick));
+  }
 
   async ngOnInit(): Promise<void> {
-    await this.reload();
+    await Promise.all([this.reload(), this.reloadEndpoints()]);
   }
 
   protected async reload(): Promise<void> {
@@ -133,6 +157,38 @@ export class ConnectionsPanel implements OnInit {
       this.toast.success(`Key ${key.name} removed.`);
       await this.reload();
       this.changed.emit();
+    });
+  }
+
+  protected async reloadEndpoints(): Promise<void> {
+    try {
+      this.endpoints.set(await firstValueFrom(this.api.getDockerEndpoints()));
+    } catch (error) {
+      this.toast.error(error);
+      this.endpoints.update((e) => e ?? []);
+    }
+  }
+
+  protected endpointSaved(endpoint: DockerEndpoint): void {
+    const isNew = this.editingEndpoint()?.endpoint === null;
+    this.editingEndpoint.set(null);
+    this.toast.success(isNew ? `${endpoint.name} added – checking it now.` : 'Endpoint saved.');
+    void this.reloadEndpoints();
+  }
+
+  protected async checkEndpoint(endpoint: DockerEndpoint): Promise<void> {
+    await this.run(`endpoint-${endpoint.id}`, async () => {
+      const checking = await firstValueFrom(this.api.checkDockerEndpoint(endpoint.id));
+      this.endpoints.update((list) => list?.map((e) => (e.id === checking.id ? checking : e)) ?? null);
+    });
+  }
+
+  protected async deleteEndpoint(endpoint: DockerEndpoint): Promise<void> {
+    this.confirming.set(null);
+    await this.run(`endpoint-${endpoint.id}`, async () => {
+      await firstValueFrom(this.api.deleteDockerEndpoint(endpoint.id));
+      this.toast.success(`${endpoint.name} removed.`);
+      await this.reloadEndpoints();
     });
   }
 

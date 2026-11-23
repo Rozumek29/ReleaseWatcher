@@ -58,6 +58,7 @@ describe('ContainerSettingsDialog', () => {
       isEnabled: true,
       aptEnabled: true,
       startWhenStopped: true,
+      dockerEnabled: true,
       backupBeforeUpdate: false,
       checkCron: '30 4 * * *',
       updateCores: null,

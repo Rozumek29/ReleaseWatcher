@@ -189,6 +189,11 @@ export interface AppSettings {
     minRunHistory: number;
     maxRunHistory: number;
   };
+  /** Schedule of Docker endpoint listings and registry checks of Docker images. */
+  docker: {
+    checkCron: string;
+    checkCronSource: SettingSource;
+  };
   email: {
     /** True when host, sender and recipients are set. */
     configured: boolean;
@@ -257,6 +262,7 @@ export interface SettingsPatch {
   advisoriesGithub?: boolean | null;
   advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;
+  dockerCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
   backupBeforeUpdate?: boolean | null;
   runHistoryChecks?: number | null;
@@ -347,6 +353,11 @@ export interface AppStatus {
     aptPending: number;
     appUpdatesAvailable: number;
     homeAssistantUpdatesAvailable?: number;
+  };
+  /** Docker / Podman containers shown (not ignored) and those with a newer image or release. */
+  docker?: {
+    total: number;
+    updatesAvailable: number;
   };
   /** Security advisories of all repositories; `affecting` = those affecting an installed version. */
   advisories?: {
@@ -522,6 +533,8 @@ export interface Container {
   os: OsRelease | null;
   /** Home Assistant OS of a virtual machine; null for containers and the host. */
   homeAssistant: HomeAssistantInfo | null;
+  /** Docker / Podman containers are listed by checks; `engine` = runtime found by the last check (null = none). */
+  docker: { enabled: boolean; engine: string | null; error: string | null };
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
@@ -549,6 +562,8 @@ export interface UpdateContainerRequest {
   homeAssistantToken?: string | null;
   /** Install Home Assistant updates from ReleaseWatcher (false = check only). */
   homeAssistantInstall?: boolean;
+  /** List Docker / Podman containers during checks. */
+  dockerEnabled?: boolean;
 }
 
 export interface ContainerAppRequest {
@@ -733,4 +748,81 @@ export interface ProxmoxNode {
   name: string;
   configured: boolean;
   backupStorage: string | null;
+}
+
+/* ---------- Docker ---------- */
+
+/** A Docker endpoint reached without SSH: a mounted socket, a socket proxy or a remote engine over TCP. */
+export interface DockerEndpoint {
+  id: number;
+  name: string;
+  /** `unix:///var/run/docker.sock`, `tcp://socket-proxy:2375`, `http(s)://…`. */
+  url: string;
+  isEnabled: boolean;
+  /** Runtime and version from the last check ("docker 27.3.1"); null = not reached yet. */
+  engine: string | null;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  isChecking: boolean;
+}
+
+export type DockerImageState = 'up-to-date' | 'update-available' | 'unknown';
+
+/** A Docker / Podman container on a machine (target) or at a Docker endpoint. */
+export interface DockerContainer {
+  id: number;
+  source: { kind: 'target' | 'endpoint'; id: number; name: string | null };
+  name: string;
+  image: string;
+  /** Short image name (`nginx:1.27`). */
+  imageDisplay: string;
+  tag: string | null;
+  state: string | null;
+  /** false = not running any more (kept because it was ignored or linked by hand). */
+  present: boolean;
+  ignored: boolean;
+  composeProject: string | null;
+  composeService: string | null;
+  /** null = unknown (floating tag without a version label that could not be resolved). */
+  installedVersion: string | null;
+  /** tag = image tag, label = image label, digest = registry tag with the same digest. */
+  installedVersionSource: 'tag' | 'label' | 'digest' | null;
+  /** Linked through its labels (true) or chosen by hand (false). */
+  linkAuto: boolean;
+  repository: { id: number; fullName: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository named by the labels that is not watched yet (`owner/name`). */
+  suggestedRepository: string | null;
+  /** The linked repository has a newer release than the installed version; null = unknown. */
+  updateAvailable: boolean | null;
+  registry: {
+    /** Registry digest of the same tag compared with the running image. */
+    state: DockerImageState;
+    /** Version tag of the newer image, when it could be resolved. */
+    latestVersion: string | null;
+    checkedAt: string | null;
+    error: string | null;
+    /** Why the state is unknown (pinned digest, local image, …). */
+    note: string | null;
+  };
+}
+
+export interface DockerOverview {
+  endpoints: DockerEndpoint[];
+  containers: DockerContainer[];
+  /** Scheduled Docker run (endpoints and registry checks). */
+  check: JobStatus;
+}
+
+export interface DockerEndpointRequest {
+  name: string;
+  url: string;
+  isEnabled?: boolean;
+}
+
+/** Omitted = keep; `repositoryId` without `linkAuto` links by hand (null = no repository). */
+export interface DockerContainerRequest {
+  ignored?: boolean;
+  linkAuto?: boolean;
+  repositoryId?: number | null;
 }

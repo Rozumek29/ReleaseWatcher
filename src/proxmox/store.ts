@@ -45,6 +45,9 @@ interface ContainerRow {
   last_checked_at: string | null;
   last_error: string | null;
   notified_signature: string | null;
+  docker_enabled: number;
+  docker_engine: string | null;
+  docker_error: string | null;
   created_at: string;
 }
 
@@ -133,6 +136,9 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   lastCheckedAt: r.last_checked_at,
   lastError: r.last_error,
   notifiedSignature: r.notified_signature,
+  dockerEnabled: r.docker_enabled === 1,
+  dockerEngine: r.docker_engine,
+  dockerError: r.docker_error,
   createdAt: r.created_at,
 });
 
@@ -295,7 +301,8 @@ export class ContainerStore {
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
            apt_upgradable = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
-           home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?
+           home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?,
+           docker_enabled = ?, docker_engine = ?, docker_error = ?
          WHERE id = ?`,
       )
       .run(
@@ -318,6 +325,9 @@ export class ContainerStore {
         c.lastCheckedAt,
         c.lastError,
         c.notifiedSignature,
+        c.dockerEnabled ? 1 : 0,
+        c.dockerEngine,
+        c.dockerError,
         c.id,
       );
   }

@@ -476,6 +476,61 @@ const MIGRATIONS: readonly string[] = [
    );`,
   // Custom icon of a repository: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); NULL = owner avatar.
   `ALTER TABLE watched_repositories ADD COLUMN icon TEXT;`,
+  // Docker / Podman: containers listed on targets (detected over SSH, per-target switch) and at Docker endpoints
+  // (socket, socket proxy, TCP), the registry digest of every tag they run and digests resolved to version tags.
+  // A container is identified by its source and name (IDs change when it is recreated); exactly one source is set.
+  `ALTER TABLE containers ADD COLUMN docker_enabled INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE containers ADD COLUMN docker_engine TEXT;
+   ALTER TABLE containers ADD COLUMN docker_error TEXT;
+   CREATE TABLE docker_endpoints (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     name            TEXT NOT NULL,
+     url             TEXT NOT NULL,
+     is_enabled      INTEGER NOT NULL DEFAULT 1,
+     engine          TEXT,
+     last_checked_at TEXT,
+     last_error      TEXT,
+     created_at      TEXT NOT NULL
+   );
+   CREATE TABLE docker_containers (
+     id                INTEGER PRIMARY KEY AUTOINCREMENT,
+     target_id         INTEGER REFERENCES containers (id) ON DELETE CASCADE,
+     endpoint_id       INTEGER REFERENCES docker_endpoints (id) ON DELETE CASCADE,
+     name              TEXT NOT NULL,
+     container_id      TEXT NOT NULL,
+     image             TEXT NOT NULL,
+     image_id          TEXT,
+     state             TEXT,
+     repo_digests      TEXT,
+     labels            TEXT,
+     present           INTEGER NOT NULL DEFAULT 1,
+     ignored           INTEGER NOT NULL DEFAULT 0,
+     link_auto         INTEGER NOT NULL DEFAULT 1,
+     repository_id     INTEGER REFERENCES watched_repositories (id) ON DELETE SET NULL,
+     label_repository  TEXT,
+     installed_version TEXT,
+     first_seen_at     TEXT NOT NULL,
+     last_seen_at      TEXT NOT NULL,
+     CHECK ((target_id IS NULL) <> (endpoint_id IS NULL))
+   );
+   CREATE UNIQUE INDEX idx_docker_containers_source ON docker_containers (IFNULL(target_id, 0), IFNULL(endpoint_id, 0), name);
+   CREATE INDEX idx_docker_containers_target ON docker_containers (target_id);
+   CREATE INDEX idx_docker_containers_endpoint ON docker_containers (endpoint_id);
+   CREATE INDEX idx_docker_containers_repository ON docker_containers (repository_id);
+   CREATE INDEX idx_docker_containers_label_repository ON docker_containers (label_repository);
+   CREATE TABLE docker_image_tags (
+     key           TEXT PRIMARY KEY,
+     remote_digest TEXT,
+     checked_at    TEXT,
+     error         TEXT
+   );
+   CREATE TABLE docker_digest_versions (
+     repository TEXT NOT NULL,
+     digest     TEXT NOT NULL,
+     version    TEXT,
+     checked_at TEXT NOT NULL,
+     PRIMARY KEY (repository, digest)
+   );`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

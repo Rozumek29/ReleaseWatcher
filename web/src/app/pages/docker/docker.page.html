@@ -1,0 +1,113 @@
+<header class="page-header">
+  <div>
+    <h1>Docker</h1>
+    <p>Docker and Podman containers on your machines and Docker endpoints – their versions and newer images.</p>
+    @if (overview()?.check; as job) {
+      <p class="schedule">
+        Images checked {{ describeCron(job.cron).toLowerCase() }}
+        @if (job.isRunning) {
+          · checking now…
+        } @else if (job.nextRunAt) {
+          · next {{ job.nextRunAt | relativeTime: now() }}
+        }
+      </p>
+    }
+  </div>
+  <div class="header-actions">
+    <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || overview()?.check?.isRunning">
+      <app-icon name="refresh" [size]="16" [class.spin]="checkingAll() || overview()?.check?.isRunning" />
+      {{ checkingAll() || overview()?.check?.isRunning ? 'Checking…' : 'Check now' }}
+    </button>
+    <a class="btn btn-secondary" routerLink="/settings" [queryParams]="{ tab: 'connections' }">
+      <app-icon name="settings" [size]="16" /> Manage endpoints
+    </a>
+  </div>
+</header>
+
+@if (overview() === null) {
+  @if (loadError(); as e) {
+    <div class="callout" role="alert"><app-icon name="alert" /> <span>{{ e }}</span></div>
+  } @else {
+    <div class="card source skeleton"></div>
+    <div class="card source skeleton"></div>
+  }
+} @else if (isEmpty()) {
+  <div class="card empty">
+    <span class="empty-icon"><app-icon name="container" [size]="22" /></span>
+    <h2>No Docker containers yet</h2>
+    <p>
+      Add a Docker endpoint – a socket proxy (<code>tcp://socket-proxy:2375</code>) or the mounted socket – under
+      <a routerLink="/settings" [queryParams]="{ tab: 'connections' }">Settings → Connections</a>, or check a machine on
+      the <a routerLink="/machines">Machines</a> page: Docker and Podman are found there automatically.
+    </p>
+  </div>
+} @else {
+  <div class="toolbar">
+    <div class="tabs" role="tablist" aria-label="Filter containers">
+      @for (f of filters; track f.value) {
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="filter() === f.value"
+          [attr.aria-selected]="filter() === f.value"
+          (click)="filter.set(f.value)"
+        >
+          {{ f.label }}
+          <span class="tab-count" [class.warning]="f.value === 'updates' && counts().updates > 0">{{ counts()[f.value] }}</span>
+        </button>
+      }
+    </div>
+  </div>
+
+  @for (card of cards(); track card.key; let i = $index) {
+    <section class="card source enter" [style.--i]="i < 12 ? i : 12" [attr.aria-label]="card.name">
+      <header class="source-head">
+        <div class="source-title">
+          <app-icon [name]="card.kind === 'endpoint' ? 'container' : 'server'" [size]="18" />
+          <h2>{{ card.name }}</h2>
+          @if (card.endpoint; as e) {
+            <span class="mono muted small">{{ e.url }}</span>
+            @if (e.engine) {
+              <span class="badge">{{ e.engine }}</span>
+            }
+            @if (!e.isEnabled) {
+              <span class="badge">Paused</span>
+            }
+          } @else {
+            <a class="muted small" routerLink="/machines">on the Machines page</a>
+          }
+        </div>
+        @if (card.endpoint; as e) {
+          <div class="source-actions">
+            @if (e.isChecking) {
+              <span class="muted small"><app-icon name="refresh" [size]="14" class="spin" /> Checking…</span>
+            } @else if (e.lastCheckedAt) {
+              <span class="muted small">checked {{ e.lastCheckedAt | relativeTime: now() }}</span>
+            }
+            <button type="button" class="icon-btn" (click)="checkEndpoint(e)" [disabled]="e.isChecking" [attr.aria-label]="'Check ' + e.name" title="Check now">
+              <app-icon name="refresh" [size]="16" />
+            </button>
+            <a class="icon-btn" routerLink="/settings" [queryParams]="{ tab: 'connections' }" [attr.aria-label]="'Edit ' + e.name" title="Edit under Settings → Connections">
+              <app-icon name="settings" [size]="16" />
+            </a>
+          </div>
+        }
+      </header>
+      @if (card.endpoint?.lastError; as error) {
+        <div class="error-line"><app-icon name="alert" [size]="14" /> <span>{{ error }}</span></div>
+      }
+      @if (card.endpoint && !card.endpoint.lastCheckedAt && !card.endpoint.lastError) {
+        <p class="muted small">Not checked yet.</p>
+      } @else {
+        <app-docker-containers [containers]="card.containers" (changed)="onContainerChanged($event)" />
+      }
+    </section>
+  } @empty {
+    <div class="card empty">
+      <h2>Nothing matches</h2>
+      <p>No container {{ filter() === 'updates' ? 'has an update' : 'has an unknown version' }}.</p>
+    </div>
+  }
+}
+

@@ -43,8 +43,9 @@ describe('App shell', () => {
     const links = [...el.querySelectorAll('nav a')].map((a) => a.textContent?.trim());
     expect(links[0]).toContain('Repositories');
     expect(links[1]).toContain('Machines');
-    expect(links[2]).toContain('Vulnerabilities');
-    expect(links[3]).toContain('Settings');
+    expect(links[2]).toContain('Docker');
+    expect(links[3]).toContain('Vulnerabilities');
+    expect(links[4]).toContain('Settings');
     const counts = [...el.querySelectorAll('nav .count')].map((c) => c.textContent?.trim());
     expect(counts).toEqual(['3', '4', '2']);
     expect(el.querySelector('nav .count.danger')?.textContent?.trim()).toBe('2');

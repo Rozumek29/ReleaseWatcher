@@ -142,6 +142,12 @@ export interface Container {
   lastError: string | null;
   /** Fingerprint of the pending updates already notified about (prevents repeated notifications). */
   notifiedSignature: string | null;
+  /** List Docker / Podman containers during checks (when either is installed). */
+  dockerEnabled: boolean;
+  /** Container runtime found by the last check ("docker 27.3.1"); null = none found (or not checked). */
+  dockerEngine: string | null;
+  /** Why the containers could not be listed by the last check; null = listed (or no runtime). */
+  dockerError: string | null;
   createdAt: string;
 }
 

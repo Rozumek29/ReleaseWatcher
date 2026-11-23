@@ -5,6 +5,7 @@ import { provideRouter } from '@angular/router';
 import { Container, Run } from '../../core/models';
 import { settle } from '../../testing';
 import { ContainersPage } from './containers.page';
+import { dockerContainer, dockerOverview } from '../docker/fixtures';
 import { container, homeAssistant, proxmoxSettings } from './fixtures';
 
 const run = (overrides: Partial<Run> = {}): Run => ({
@@ -62,6 +63,16 @@ describe('ContainersPage', () => {
     [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
     await settle(fixture);
     expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
+  });
+
+  it('shows the Docker containers found on a machine', async () => {
+    const { fixture, el } = await create([container({ docker: { enabled: true, engine: 'docker 27.3.1', error: null } })]);
+    http.expectOne('/api/docker').flush(dockerOverview({ containers: [dockerContainer({ source: { kind: 'target', id: 1, name: 'vaultwarden' } })] }));
+    await settle(fixture);
+    const block = el.querySelector('.docker-block')!;
+    expect(block.textContent).toContain('docker 27.3.1');
+    expect(block.querySelector('.row .name')?.textContent).toContain('searxng');
+    expect(block.textContent).toContain('New image');
   });
 
   it('shows the custom icon of the linked repository next to an application', async () => {

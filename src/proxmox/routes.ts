@@ -55,6 +55,8 @@ export interface ContainerRoutesDeps {
   hostName: (hostId: number) => string | null;
   /** Called after a target was removed (a server's host goes with it). */
   onTargetDeleted?: (container: Container) => void;
+  /** Called when Docker listing was switched off for a target (forgets its Docker containers). */
+  onDockerDisabled?: (container: Container) => void;
 }
 
 const COMMAND_MAX_LENGTH = 4000;
@@ -84,6 +86,7 @@ const updateContainerSchema: ObjectSchema = {
     homeAssistantUrl: { type: 'string', nullable: true, maxLength: 500 },
     homeAssistantToken: { type: 'string', nullable: true, maxLength: 1000 },
     homeAssistantInstall: { type: 'boolean' },
+    dockerEnabled: { type: 'boolean' },
   },
   required: ['name', 'isEnabled', 'aptEnabled'],
 };
@@ -301,6 +304,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       /** Operating system read by the last check (`label` for display); null = not read yet. */
       os: c.osRelease ? { ...c.osRelease, label: osLabel(c.osRelease) } : null,
       homeAssistant: homeAssistantDto(c),
+      /** Docker / Podman containers are listed during checks (`engine` = runtime found by the last check). */
+      docker: { enabled: c.dockerEnabled, engine: c.dockerEngine, error: c.dockerError },
       lastCheckedAt: c.lastCheckedAt,
       lastError: c.lastError,
       createdAt: c.createdAt,
@@ -605,6 +610,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           homeAssistantUrl?: string | null;
           homeAssistantToken?: string | null;
           homeAssistantInstall?: boolean;
+          dockerEnabled?: boolean;
         }>(req, updateContainerSchema);
         if (!container) {
           return problem(404, 'Container not found.');
@@ -661,6 +667,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         });
         if (!container.aptEnabled) {
           container.aptUpgradable = [];
+        }
+        if (body.dockerEnabled !== undefined && body.dockerEnabled !== container.dockerEnabled) {
+          container.dockerEnabled = body.dockerEnabled;
+          if (!container.dockerEnabled) deps.onDockerDisabled?.(container);
         }
         containers.save(container);
         return Response.json(containerDto(container));

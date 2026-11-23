@@ -59,6 +59,18 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 - **Detect applications** inside a container (community-scripts and well-known apps) and link them to their GitHub
   repository.
 
+**Docker and Podman containers**
+
+- Running containers of every machine with Docker or Podman (found automatically during its checks, over the same SSH
+  connection) and of **Docker endpoints without SSH** – a socket proxy, the mounted Docker socket or a remote engine
+  over TCP (e.g. a NAS).
+- **Installed version** from the image tag, the `org.opencontainers.image.version` label (also linuxserver.io's
+  `build_version`) or – for `latest` and other floating tags – the registry tag with the same digest.
+- **New image available** when the registry's digest of the running tag changed – also for projects without releases
+  (like Cup or WUD do), for Docker Hub, GHCR, lscr.io and any OCI registry (public images).
+- Linked to a watched repository through `org.opencontainers.image.source` or your own `releasewatcher.repo` label, or by
+  hand; grouped by compose project; containers can be ignored. Read-only – nothing is pulled or restarted.
+
 **App**
 
 - A single self-contained executable (Bun runtime + UI) or a Docker image; one SQLite file, no external services.
@@ -322,6 +334,113 @@ A server is any Debian/Ubuntu machine reachable over SSH – no Proxmox needed. 
 
 </details>
 
+### Docker containers
+
+ReleaseWatcher reads running Docker and Podman containers from two kinds of sources and shows them on the **Docker**
+page (and in the detail of each machine):
+
+- **Machines** reached over SSH (servers, Proxmox containers and VMs, the node itself): every check runs
+  `docker ps` / `docker inspect` (or `podman`) when the CLI is installed – nothing to configure. The switch *Docker
+  containers* in a machine's settings turns it off. The SSH user needs access to the runtime (`root`, `sudo`, or the
+  `docker` group); rootless Podman containers of other users are not listed.
+- **Docker endpoints** without SSH, added under Settings → Connections: a socket proxy (`tcp://socket-proxy:2375`), the socket
+  mounted into ReleaseWatcher's container (`unix:///var/run/docker.sock`) or a remote engine (`tcp://nas.lan:2375`,
+  `https://…`). Endpoints are listed on `DOCKER_CHECK_CRON`.
+
+For each container:
+
+- **Installed version:** a version tag (`nginx:1.27.3`) is used as it is (a label that refines it, e.g. tag `16` and
+  label `16.4`, wins). For `latest` and other floating tags, ReleaseWatcher looks for the version tag in the registry
+  that has the same digest as the running image (the newest 40 tags of the same flavour – `-alpine` stays `-alpine` –
+  are compared once per digest), and falls back to `org.opencontainers.image.version` (or linuxserver.io's
+  `build_version`). Otherwise the version shows as *unknown*.
+- **New image:** the registry's current digest of the running tag is compared with the image's digest (`RepoDigests`)
+  – *New image* appears even for projects that never publish releases (e.g. SearXNG). Checked on `DOCKER_CHECK_CRON`
+  and with every machine check; one `HEAD` request per tag, which does not count against Docker Hub's pull limit.
+  Supported: Docker Hub, GHCR, lscr.io, Quay and any OCI registry with anonymous tokens (public images only). Images
+  pinned to a digest or built locally show no image state.
+- **Repository:** linked automatically when the labels name a GitHub repository – your own
+  `releasewatcher.repo=owner/name` first, then `org.opencontainers.image.source` – and the repository is watched;
+  a repository that is not watched yet is offered with *Watch owner/name*. A link can also be chosen by hand. A linked
+  container shows *Update available* for newer releases, and its installed version counts for the repository's
+  vulnerabilities.
+- Containers are grouped by compose project (`com.docker.compose.project`); a container can be **ignored** in the UI or
+  with the label `releasewatcher.ignore=true`. Ignored and hand-linked containers keep their setting when they are
+  re-created.
+
+ReleaseWatcher never pulls images or changes containers. With a socket proxy it needs only `CONTAINERS` and `IMAGES`
+(read-only `GET` requests: `/version`, `/containers/json`, `/images/{id}/json`).
+
+<details>
+<summary><b>Compose example: socket proxy</b></summary>
+
+The socket proxy is the safest way to give ReleaseWatcher (or anything else) access to Docker: it allows only the
+listed read-only API sections, and ReleaseWatcher itself never sees the socket.
+
+```yaml
+services:
+  releasewatcher:
+    image: ghcr.io/rozumek29/releasewatcher:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - releasewatcher-data:/data
+    # Then add the endpoint tcp://socket-proxy:2375 under Settings → Connections → Docker endpoints.
+
+  socket-proxy:
+    image: lscr.io/linuxserver/socket-proxy:latest
+    restart: unless-stopped
+    environment:
+      - CONTAINERS=1   # GET /containers/json
+      - IMAGES=1       # GET /images/{id}/json (digests for "New image" and the version lookup)
+      - VERSION=1      # GET /version (on by default)
+      - POST=0         # read-only
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    read_only: true
+    tmpfs:
+      - /run
+
+volumes:
+  releasewatcher-data:
+```
+
+`tecnativa/docker-socket-proxy` works the same way (`CONTAINERS=1`, `IMAGES=1`). Don't publish the proxy's port to the
+network – ReleaseWatcher reaches it on the compose network. On a Synology NAS, use `/var/run/docker.sock` in the same
+way (Container Manager).
+
+</details>
+
+<details>
+<summary><b>Mounting the socket directly</b></summary>
+
+```yaml
+services:
+  releasewatcher:
+    image: ghcr.io/rozumek29/releasewatcher:latest
+    volumes:
+      - releasewatcher-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    group_add:
+      - "999"   # GID of the docker socket on the host: stat -c %g /var/run/docker.sock
+```
+
+The image runs as an unprivileged user, so it needs the socket's group. Note that `:ro` does not make the Docker API
+read-only – anyone with the socket controls Docker; prefer the socket proxy. Podman: mount
+`/run/podman/podman.sock` and use `unix:///run/podman/podman.sock`.
+
+</details>
+
+<details>
+<summary><b>Remote engine over TCP</b></summary>
+
+An engine listening on TCP (`dockerd -H tcp://0.0.0.0:2375`, or a socket proxy on another host) is added as
+`tcp://host:2375`. Plain TCP is unencrypted and unauthenticated – use it only in a trusted network, or put a socket
+proxy (read-only) in front of the engine. TLS client certificates are not supported yet.
+
+</details>
+
 ## Installation
 
 | Method | Best for | Needs |
@@ -564,6 +683,7 @@ in SQLite, apply immediately and override the environment; clearing a value fall
 | `GITHUB_TOKEN` | – | Optional PAT – raises the limit from 60 to 5000 requests/hour and allows private repositories (fine-grained: **Contents: Read-only**, plus **Repository security advisories: Read-only** for advisories of private repositories; classic: `repo`). A repository can have its own token, e.g. for a repository of another user. |
 | `RELEASE_CHECK_CRON` | `*/15 * * * *` | When repositories are checked for new releases (5-field cron, `@hourly`, …; server time zone – set `TZ`). |
 | `ADVISORY_CHECK_CRON` | `0 */6 * * *` | When the vulnerabilities (security advisories) of repositories are read. |
+| `DOCKER_CHECK_CRON` | `0 */6 * * *` | When Docker endpoints are listed and the registries are asked for newer images (containers on machines are listed by the machine checks). |
 | `POLL_INTERVAL_MINUTES` | – | Deprecated: used only when `RELEASE_CHECK_CRON` is not set, converted to the nearest cron schedule (e.g. `15` → `*/15 * * * *`, `90` → hourly). |
 | `POLL_INITIAL_DELAY_SECONDS` | `10` | Delay before the first release check (and the vulnerability catch-up) after start. |
 
@@ -667,7 +787,7 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers` | `{ "vmid": 101, "name"? }` – add a container or virtual machine and start a check |
 | `POST` | `/api/containers/node` | Add the Proxmox host itself (`409` when already added) |
 | `POST` | `/api/containers/add-all` | Add every container of the node not added yet (virtual machines are added one by one) |
-| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"? }` – `null` = global default / remove, omitted = keep (the token is returned only as `homeAssistant.hasToken` + `tokenMasked`) |
+| `PUT` | `/api/containers/:id` | `{ "name", "isEnabled", "aptEnabled", "backupBeforeUpdate"?, "startWhenStopped"?, "checkCron"?, "updateCores"?, "updateMemoryMb"?, "homeAssistantUrl"?, "homeAssistantToken"?, "homeAssistantInstall"?, "dockerEnabled"? }` (`dockerEnabled: false` forgets the machine's Docker containers) – `null` = global default / remove, omitted = keep (the token is returned only as `homeAssistant.hasToken` + `tokenMasked`) |
 | `DELETE` | `/api/containers/:id` | Remove a container (`409` while a task runs) |
 | `POST` | `/api/containers/check-all` | Queue a check of all enabled containers (`202`) |
 | `POST` | `/api/containers/update-all` | Update every enabled container with pending updates (or only those in `ids`), one after another; `{ "backup"?, "ids"? }` → `202` with `{ containers, updates }` |
@@ -683,6 +803,22 @@ return `202 Accepted` with a run you can poll at `GET /api/runs/:id`.
 | `POST` | `/api/containers/:id/detect-apps` | Applications found in a running container (nothing is saved) |
 | `GET` | `/api/containers/:id/runs` | Run history, newest first, without output: `{ items, nextCursor }`; `?limit=` (1–100, default 20), `?cursor=` = `nextCursor` of the previous page |
 | `GET` | `/api/runs/:id` | One run with its output; while running, pass the previous `outputCursor` as `?after=` to get only new output |
+
+</details>
+
+<details>
+<summary><b>Docker</b></summary>
+
+| Method | Route | Description |
+| --- | --- | --- |
+| `GET` | `/api/docker` | `{ endpoints, containers, check }` – Docker endpoints, the containers of every source (`source`: `{ kind: "target" \| "endpoint", id, name }`) with `installedVersion` + `installedVersionSource` (`tag`, `label`, `digest`), `repository`, `suggestedRepository`, `updateAvailable`, `registry` (`state`: `up-to-date`, `update-available`, `unknown`; `latestVersion`, `error`, `note`), `composeProject`, `ignored`, `present`; `check` = the scheduled run |
+| `POST` | `/api/docker/check` | List the endpoints and ask the registries again now → `202` with the overview |
+| `GET` | `/api/docker/endpoints` | Docker endpoints (also part of `GET /api/docker`) |
+| `POST` | `/api/docker/endpoints` | `{ "name", "url" }` – `unix:///var/run/docker.sock`, `tcp://host:2375`, `http(s)://…`; starts a check → `201` |
+| `POST` | `/api/docker/endpoints/test` | `{ "url" }` → `{ engine, containers }` (nothing is saved; `502` when it cannot be read) |
+| `PUT` / `DELETE` | `/api/docker/endpoints/:id` | `{ "name", "url", "isEnabled"? }` / remove with its containers |
+| `POST` | `/api/docker/endpoints/:id/check` | Check one endpoint → `202` (`409` while it is checked) |
+| `PUT` | `/api/docker/containers/:id` | `{ "ignored"?, "linkAuto"?, "repositoryId"? }` – `linkAuto: true` links through the labels, `repositoryId` (or `null`) links by hand; omitted = keep |
 
 </details>
 
