@@ -23,9 +23,11 @@ const GUEST_JSON = [
 async function runOnStubNode(script: string, status: 'running' | 'stopped', agent = true, lxc?: 'RUNNING' | 'STOPPED') {
   const bin = await mkdtemp(join(tmpdir(), 'rw-lxc-'));
   await Bun.write(join(bin, 'lxc-attach'), '#!/bin/sh\nwhile [ "$1" != "--" ]; do shift; done; shift\nexec "$@"\n');
-  await chmod(join(bin, 'lxc-attach'), 0o755);
+  // Executables, not shell functions: dash does not allow a dash in a function name.
+  const info = lxc ? `echo '${lxc}'` : `echo "$2 doesn't exist" >&2; exit 1`;
+  await Bun.write(join(bin, 'lxc-info'), `#!/bin/sh\n${info}\n`);
+  for (const tool of ['lxc-attach', 'lxc-info']) await chmod(join(bin, tool), 0o755);
   const stub = [
-    lxc ? `lxc-info() { echo '${lxc}'; }` : `lxc-info() { echo "$2 doesn't exist" >&2; return 1; }`,
     'pct() {',
     '  case "$1" in',
     `    status) echo "status: ${status}" ;;`,
