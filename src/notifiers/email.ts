@@ -4,6 +4,9 @@ import {
   affectedVersions,
   type ContainerUpdatesNotification,
   digestSummary,
+  dockerContainersLine,
+  dockerImageLine,
+  type DockerUpdatesNotification,
   type NotificationEvent,
   notificationFullName,
   notificationRepoUrl,
@@ -64,6 +67,10 @@ export class EmailNotifier implements Notifier {
     return this.send(buildEmail([{ type: 'update-result', result: notification }], this.getOptions()));
   }
 
+  notifyDockerUpdates(notification: DockerUpdatesNotification): Promise<void> {
+    return this.send(buildEmail([{ type: 'docker-updates', docker: notification }], this.getOptions()));
+  }
+
   notifyDigest(events: readonly NotificationEvent[]): Promise<void> {
     return this.send(buildEmail(events, this.getOptions()));
   }
@@ -105,11 +112,13 @@ export function buildEmail(
   const subject = single ? only.subject : `ReleaseWatcher: ${digestSummary(events)}`;
   const containersUrl = options.publicUrl ? `${options.publicUrl}/machines` : null;
   const showContainersLink = containersUrl !== null && events.some((e) => e.type === 'container-updates' || e.type === 'update-result');
+  const dockerUrl = options.publicUrl && events.some((e) => e.type === 'docker-updates') ? `${options.publicUrl}/docker` : null;
 
   const text = [
     ...(single ? [] : [`${digestSummary(events)}\n`]),
     sections.map((s) => s.text).join('\n\n----------\n\n'),
     ...(showContainersLink ? [`\nMachines: ${containersUrl}`] : []),
+    ...(dockerUrl ? [`${showContainersLink ? '' : '\n'}Docker: ${dockerUrl}`] : []),
     '\n-- \nSent by ReleaseWatcher',
   ].join('\n');
 
@@ -120,6 +129,7 @@ export function buildEmail(
 ${single ? '' : `<h1 style="margin:0 0 16px;font-size:20px;font-weight:650">${escapeHtml(digestSummary(events))}</h1>`}
 ${sections.map((s) => `<div style="margin:0 0 16px;padding:18px 20px;background:#ffffff;border:1px solid #e3e5e8;border-radius:12px">${s.html}</div>`).join('\n')}
 ${showContainersLink ? `<p style="margin:0 0 16px"><a href="${escapeHtml(containersUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open machines</a></p>` : ''}
+${dockerUrl ? `<p style="margin:0 0 16px"><a href="${escapeHtml(dockerUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open Docker</a></p>` : ''}
 <p style="margin:16px 0 0;color:#6a737d;font-size:12px">Sent by ReleaseWatcher</p>
 </div></body></html>`;
 
@@ -144,6 +154,8 @@ function section(event: NotificationEvent, options: Pick<EmailOptions, 'maxBodyL
       return containerSection(event.updates);
     case 'update-result':
       return resultSection(event.result);
+    case 'docker-updates':
+      return dockerSection(event.docker);
   }
 }
 
@@ -235,6 +247,22 @@ function resultSection(notification: UpdateResultNotification): Section {
     html: [
       `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650;color:${color}">${escapeHtml(headline)}</h2>`,
       notification.detail ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${escapeHtml(notification.detail)}</div>` : '',
+    ].join(''),
+  };
+}
+
+function dockerSection(notification: DockerUpdatesNotification): Section {
+  const [only] = notification.images;
+  const headline = notification.images.length === 1 && only ? `New Docker image: ${only.image}` : `${notification.images.length} new Docker images`;
+  const lines = notification.images.map((i) => ({ image: dockerImageLine(i), containers: dockerContainersLine(i) }));
+  return {
+    subject: headline,
+    text: [headline, '', ...lines.map((l) => `  • ${l.image} – ${l.containers}`)].join('\n'),
+    html: [
+      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${escapeHtml(headline)}</h2>`,
+      `<ul style="margin:6px 0 0;padding-left:20px;font-size:13px">${lines
+        .map((l) => `<li><span style="font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(l.image)}</span> – ${escapeHtml(l.containers)}</li>`)
+        .join('')}</ul>`,
     ].join(''),
   };
 }

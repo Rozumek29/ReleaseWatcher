@@ -4,6 +4,8 @@ import type { RepositoryStore } from './db.ts';
 import { DEFAULT_NOTIFICATION_PREFERENCES } from './notifiers/dispatcher.ts';
 import { parseAddress, parseRecipients } from './notifiers/email.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
+import { WEBHOOK_METHODS, type WebhookMethod } from './notifiers/webhook.ts';
+import { type HttpHeader, validateHeaders } from './version.ts';
 import { DEFAULT_RUN_HISTORY, MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
@@ -37,6 +39,29 @@ export interface Settings {
   emailFrom: string | null;
   /** Comma-separated recipients. */
   emailTo: string | null;
+  /** ntfy server; null = https://ntfy.sh. */
+  ntfyUrl: string | null;
+  ntfyTopic: string | null;
+  /** Secret: access token or `user:password`. */
+  ntfyToken: string | null;
+  gotifyUrl: string | null;
+  /** Secret: application token. */
+  gotifyToken: string | null;
+  /** Secret. */
+  telegramBotToken: string | null;
+  telegramChatId: string | null;
+  /** Secret: Slack incoming webhook URL. */
+  slackWebhookUrl: string | null;
+  /** Secret. */
+  pushoverUserKey: string | null;
+  /** Secret. */
+  pushoverAppToken: string | null;
+  /** Secret: URL of the generic JSON webhook. */
+  webhookUrl: string | null;
+  /** HTTP method of the generic webhook; null = POST. */
+  webhookMethod: WebhookMethod | null;
+  /** Secret: extra headers of the generic webhook, JSON `[{ name, value }]` (UI only). */
+  webhookHeaders: string | null;
   /** Send the notifications of one check run as one summary. */
   notificationDigest: boolean;
   notifyReleases: boolean;
@@ -46,6 +71,8 @@ export interface Settings {
   notifyAptUpdates: boolean;
   notifyUpdateSucceeded: boolean;
   notifyUpdateFailed: boolean;
+  /** Newer images of the tags Docker containers run. */
+  notifyDockerUpdates: boolean;
   /** Read GitHub repository security advisories. */
   advisoriesGithub: boolean;
   /** Query OSV.dev for repositories with an OSV package. */
@@ -62,6 +89,7 @@ const BOOLEAN_SETTINGS: ReadonlySet<SettingKey> = new Set([
   'notifyAptUpdates',
   'notifyUpdateSucceeded',
   'notifyUpdateFailed',
+  'notifyDockerUpdates',
   'advisoriesGithub',
   'advisoriesOsv',
 ]);
@@ -132,6 +160,19 @@ export class SettingsService {
       smtpPassword: config.email.smtpPassword,
       emailFrom: config.email.from,
       emailTo: config.email.to,
+      ntfyUrl: config.ntfy.url,
+      ntfyTopic: config.ntfy.topic,
+      ntfyToken: config.ntfy.token,
+      gotifyUrl: config.gotify.url,
+      gotifyToken: config.gotify.token,
+      telegramBotToken: config.telegram.botToken,
+      telegramChatId: config.telegram.chatId,
+      slackWebhookUrl: config.slack.webhookUrl,
+      pushoverUserKey: config.pushover.userKey,
+      pushoverAppToken: config.pushover.appToken,
+      webhookUrl: config.webhook.url,
+      webhookMethod: config.webhook.method,
+      webhookHeaders: null,
       notificationDigest: config.notificationDigest,
       notifyReleases: DEFAULT_NOTIFICATION_PREFERENCES.releases,
       notifyVulnerabilities: DEFAULT_NOTIFICATION_PREFERENCES.vulnerabilities,
@@ -139,6 +180,7 @@ export class SettingsService {
       notifyAptUpdates: DEFAULT_NOTIFICATION_PREFERENCES.aptUpdates,
       notifyUpdateSucceeded: DEFAULT_NOTIFICATION_PREFERENCES.updateSucceeded,
       notifyUpdateFailed: DEFAULT_NOTIFICATION_PREFERENCES.updateFailed,
+      notifyDockerUpdates: DEFAULT_NOTIFICATION_PREFERENCES.dockerUpdates,
       advisoriesGithub: true,
       advisoriesOsv: true,
     };
@@ -225,6 +267,19 @@ export class SettingsService {
       smtpPassword: o.smtpPassword ?? this.defaults.smtpPassword,
       emailFrom: o.emailFrom ?? this.defaults.emailFrom,
       emailTo: o.emailTo ?? this.defaults.emailTo,
+      ntfyUrl: o.ntfyUrl ?? this.defaults.ntfyUrl,
+      ntfyTopic: o.ntfyTopic ?? this.defaults.ntfyTopic,
+      ntfyToken: o.ntfyToken ?? this.defaults.ntfyToken,
+      gotifyUrl: o.gotifyUrl ?? this.defaults.gotifyUrl,
+      gotifyToken: o.gotifyToken ?? this.defaults.gotifyToken,
+      telegramBotToken: o.telegramBotToken ?? this.defaults.telegramBotToken,
+      telegramChatId: o.telegramChatId ?? this.defaults.telegramChatId,
+      slackWebhookUrl: o.slackWebhookUrl ?? this.defaults.slackWebhookUrl,
+      pushoverUserKey: o.pushoverUserKey ?? this.defaults.pushoverUserKey,
+      pushoverAppToken: o.pushoverAppToken ?? this.defaults.pushoverAppToken,
+      webhookUrl: o.webhookUrl ?? this.defaults.webhookUrl,
+      webhookMethod: (o.webhookMethod as WebhookMethod | undefined) ?? this.defaults.webhookMethod,
+      webhookHeaders: o.webhookHeaders ?? this.defaults.webhookHeaders,
       notificationDigest: flag('notificationDigest'),
       notifyReleases: flag('notifyReleases'),
       notifyVulnerabilities: flag('notifyVulnerabilities'),
@@ -232,6 +287,7 @@ export class SettingsService {
       notifyAptUpdates: flag('notifyAptUpdates'),
       notifyUpdateSucceeded: flag('notifyUpdateSucceeded'),
       notifyUpdateFailed: flag('notifyUpdateFailed'),
+      notifyDockerUpdates: flag('notifyDockerUpdates'),
       advisoriesGithub: flag('advisoriesGithub'),
       advisoriesOsv: flag('advisoriesOsv'),
     };
@@ -290,18 +346,65 @@ function validate(key: SettingKey, value: string): void {
     return;
   }
   switch (key) {
-    case 'discordWebhookUrl': {
-      let url: URL;
-      try {
-        url = new URL(value);
-      } catch {
-        throw new SettingsValidationError(key, 'Webhook URL must be a valid URL.');
+    case 'discordWebhookUrl':
+      requireHttpUrl(key, value, 'Webhook URL');
+      return;
+    case 'ntfyUrl':
+    case 'gotifyUrl':
+      requireHttpUrl(key, value, 'Server URL');
+      return;
+    case 'slackWebhookUrl':
+    case 'webhookUrl':
+      requireHttpUrl(key, value, 'Webhook URL');
+      return;
+    case 'webhookMethod':
+      if (!(WEBHOOK_METHODS as readonly string[]).includes(value)) {
+        throw new SettingsValidationError(key, `Method must be one of: ${WEBHOOK_METHODS.join(', ')}.`);
       }
-      if (url.protocol !== 'https:' && url.protocol !== 'http:') {
-        throw new SettingsValidationError(key, 'Webhook URL must use http(s).');
+      return;
+    case 'webhookHeaders': {
+      let headers: unknown;
+      try {
+        headers = JSON.parse(value);
+      } catch {
+        throw new SettingsValidationError(key, 'Headers must be a JSON list.');
+      }
+      const valid =
+        Array.isArray(headers) &&
+        headers.every((h) => typeof h?.name === 'string' && typeof h?.value === 'string');
+      const error = valid ? validateHeaders(headers as HttpHeader[]) : 'Headers must be a list of names and values.';
+      if (error) {
+        throw new SettingsValidationError(key, error);
       }
       return;
     }
+    case 'ntfyTopic':
+      if (!/^[A-Za-z0-9_-]{1,64}$/.test(value)) {
+        throw new SettingsValidationError(key, 'Topic may contain only letters, digits, "-" and "_" (at most 64).');
+      }
+      return;
+    case 'ntfyToken':
+    case 'gotifyToken':
+      if (value.length > 500 || /\s/.test(value)) {
+        throw new SettingsValidationError(key, 'Must be a single word of at most 500 characters.');
+      }
+      return;
+    case 'telegramBotToken':
+      if (!/^\d{3,}:[A-Za-z0-9_-]{20,}$/.test(value)) {
+        throw new SettingsValidationError(key, 'Enter the token @BotFather gave you, e.g. 123456789:AAE…');
+      }
+      return;
+    case 'telegramChatId':
+      if (!/^(-?\d{1,20}|@[A-Za-z][A-Za-z0-9_]{4,31})$/.test(value)) {
+        throw new SettingsValidationError(key, 'Enter a numeric chat id (e.g. -1001234567890) or @channelname.');
+      }
+      return;
+    case 'pushoverUserKey':
+    case 'pushoverAppToken':
+      if (!/^[A-Za-z0-9]{30}$/.test(value)) {
+        throw new SettingsValidationError(key, 'Pushover keys are 30 letters and digits.');
+      }
+      return;
     case 'discordMention':
       if (value.length > 200) {
         throw new SettingsValidationError(key, 'Mention is too long.');
@@ -382,6 +485,18 @@ function validate(key: SettingKey, value: string): void {
       }
       return;
     }
+  }
+}
+
+function requireHttpUrl(key: SettingKey, value: string, label: string): void {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    throw new SettingsValidationError(key, `${label} must be a valid URL.`);
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    throw new SettingsValidationError(key, `${label} must use http(s).`);
   }
 }
 

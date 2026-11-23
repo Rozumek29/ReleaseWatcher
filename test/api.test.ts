@@ -473,6 +473,7 @@ describe('HTTP API', () => {
       aptUpdates: true,
       updateSucceeded: false,
       updateFailed: false,
+      dockerUpdates: true,
     });
 
     const updated = await inject({
@@ -515,6 +516,82 @@ describe('HTTP API', () => {
     assert.ok((await put({ emailFrom: 'x' })).json().errors.emailFrom);
     assert.ok((await put({ smtpSecurity: 'ssl' })).json().errors.smtpSecurity);
     assert.ok((await put({ smtpPort: 70000 })).json().errors.smtpPort);
+  });
+
+  it('saves push channel settings with secrets masked and encrypted', async () => {
+    const put = (payload: object) => inject({ method: 'PUT', url: '/api/settings', payload });
+    const initial = (await inject('/api/settings')).json();
+    assert.deepEqual(Object.keys(initial.channels), ['ntfy', 'gotify', 'telegram', 'slack', 'pushover', 'webhook']);
+    assert.deepEqual(initial.channels.ntfy.settings.ntfyUrl, { value: null, secret: false, configured: false, source: null });
+
+    const saved = await put({
+      ntfyTopic: 'release-watcher_1',
+      ntfyToken: 'tk_secretntfytoken1234',
+      telegramBotToken: '123456789:AAEexampleexampleexampleexample',
+      telegramChatId: '-1001234567890',
+      slackWebhookUrl: 'https://hooks.slack.com/services/T000/B000/slacksecretpart',
+      pushoverUserKey: 'u'.repeat(30),
+      pushoverAppToken: 'a'.repeat(30),
+      webhookUrl: 'https://n8n.example.com/webhook/secret-path-1234',
+      notifyDockerUpdates: false,
+    });
+    assert.equal(saved.statusCode, 200);
+    const body = saved.json();
+    const text = JSON.stringify(body);
+    for (const secret of ['secretntfytoken', 'AAEexample', 'slacksecretpart', 'u'.repeat(30), 'a'.repeat(30), 'secret-path']) {
+      assert.equal(text.includes(secret), false, secret);
+    }
+    assert.deepEqual(body.channels.ntfy.settings.ntfyTopic, { value: 'release-watcher_1', secret: false, configured: true, source: 'ui' });
+    assert.deepEqual(body.channels.ntfy.settings.ntfyToken, { value: '…1234', secret: true, configured: true, source: 'ui' });
+    assert.equal(body.channels.webhook.settings.webhookUrl.value, 'https://n8n.exam…1234');
+    assert.equal(body.channels.telegram.settings.telegramChatId.value, '-1001234567890');
+    assert.equal(body.notifications.dockerUpdates, false);
+    const stored = store.database.query<{ value: string }, []>("SELECT value FROM settings WHERE key = 'webhookUrl'").get();
+    assert.ok(stored && !stored.value.includes('secret-path'));
+
+    const removed = (await put({ ntfyToken: null })).json();
+    assert.equal(removed.channels.ntfy.settings.ntfyToken.configured, false);
+  });
+
+  it('saves the webhook method and headers without returning header values', async () => {
+    const put = (payload: object) => inject({ method: 'PUT', url: '/api/settings', payload });
+    const saved = await put({
+      webhookMethod: 'PUT',
+      webhookHeaders: [
+        { name: 'Authorization', value: 'Bearer hook-secret' },
+        { name: 'X-Source', value: 'rw' },
+      ],
+    });
+    assert.equal(saved.statusCode, 200);
+    const body = saved.json();
+    assert.equal(JSON.stringify(body).includes('hook-secret'), false);
+    assert.equal(body.channels.webhook.settings.webhookMethod.value, 'PUT');
+    assert.deepEqual(body.channels.webhook.headers, [
+      { name: 'Authorization', hasValue: true },
+      { name: 'X-Source', hasValue: true },
+    ]);
+    const stored = store.database.query<{ value: string }, []>("SELECT value FROM settings WHERE key = 'webhookHeaders'").get();
+    assert.ok(stored && !stored.value.includes('hook-secret'));
+
+    // A header without a value keeps the saved one; left out = removed.
+    await put({ webhookHeaders: [{ name: 'authorization', value: null }] });
+    assert.deepEqual(JSON.parse(store.readSettings()['webhookHeaders']!), [{ name: 'authorization', value: 'Bearer hook-secret' }]);
+    assert.ok((await put({ webhookHeaders: [{ name: 'X-New', value: null }] })).json().errors.webhookHeaders);
+    assert.ok((await put({ webhookHeaders: [{ name: 'bad name', value: 'x' }] })).json().errors.webhookHeaders);
+    assert.ok((await put({ webhookMethod: 'GET' })).json().errors.webhookMethod);
+    assert.equal((await put({ webhookHeaders: [] })).json().channels.webhook.headers.length, 0);
+  });
+
+  it('validates push channel settings', async () => {
+    const put = async (payload: object) => (await inject({ method: 'PUT', url: '/api/settings', payload })).json().errors ?? {};
+    assert.ok((await put({ ntfyUrl: 'ftp://ntfy.example.com' })).ntfyUrl);
+    assert.ok((await put({ ntfyTopic: 'has space' })).ntfyTopic);
+    assert.ok((await put({ gotifyUrl: 'gotify' })).gotifyUrl);
+    assert.ok((await put({ telegramBotToken: 'abc' })).telegramBotToken);
+    assert.ok((await put({ telegramChatId: 'my chat' })).telegramChatId);
+    assert.ok((await put({ pushoverUserKey: 'short' })).pushoverUserKey);
+    assert.ok((await put({ webhookUrl: 'not a url' })).webhookUrl);
+    assert.deepEqual(await put({ telegramChatId: '@release_news' }), {});
   });
 
   it('tests a single notification channel', async () => {

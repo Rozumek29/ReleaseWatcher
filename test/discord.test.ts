@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { buildContainerPayload, buildDiscordPayload, DiscordNotifier, type DiscordOptions } from '../src/notifiers/discord.ts';
+import { buildContainerPayload, buildDiscordPayload, buildDockerPayload, DiscordNotifier, type DiscordOptions } from '../src/notifiers/discord.ts';
 import { release } from './helpers.ts';
 
 const options: DiscordOptions = {
@@ -109,5 +109,15 @@ describe('DiscordNotifier', () => {
     await new DiscordNotifier({ ...options, fetch, publicUrl: 'https://updater.example.com' }).notifyContainerUpdates(notification);
 
     assert.deepEqual(urls, [`${options.webhookUrl}?thread_id=9`, `${options.webhookUrl}?with_components=true`]);
+  });
+
+  it('lists new Docker images and links to the Docker page', () => {
+    const payload = buildDockerPayload(
+      { images: [{ image: 'nginx:1.27', installedVersion: '1.27.2', latestVersion: '1.27.3', containers: [{ name: 'web', source: 'NAS' }, { name: 'proxy', source: null }] }] },
+      { ...options, publicUrl: 'https://rw.example.com' },
+    );
+    assert.equal(payload.embeds[0]?.title, 'New Docker image: nginx:1.27');
+    assert.equal(payload.embeds[0]?.url, 'https://rw.example.com/docker');
+    assert.equal(payload.embeds[0]?.description, '• **nginx:1.27 1.27.2 → 1.27.3** – web on NAS, proxy');
   });
 });

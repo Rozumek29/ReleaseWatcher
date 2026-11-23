@@ -15,12 +15,14 @@ import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
 import { ReleaseChecker } from './checker.ts';
-import type { AdvisoryCursor, AdvisoryFilter, RepositoryStore } from './db.ts';
+import { type AdvisoryCursor, type AdvisoryFilter, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
 import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import { errorMessage, noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
+import { CHANNEL_NAMES, CHANNEL_SETTINGS, MASK_VISIBLE_START } from './notifiers/channels.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
+import { parseWebhookHeaders } from './notifiers/webhook.ts';
 import type { Notifier } from './notifiers/notifier.ts';
 import type { OsvClient } from './osv.ts';
 import { CronJob } from './cron-job.ts';
@@ -405,6 +407,19 @@ const settingsSchema: ObjectSchema = {
     smtpPassword: { type: 'string', nullable: true, maxLength: 500 },
     emailFrom: { type: 'string', nullable: true, maxLength: 500 },
     emailTo: { type: 'string', nullable: true, maxLength: 5000 },
+    ntfyUrl: { type: 'string', nullable: true, maxLength: 2000 },
+    ntfyTopic: { type: 'string', nullable: true, maxLength: 64 },
+    ntfyToken: { type: 'string', nullable: true, maxLength: 500 },
+    gotifyUrl: { type: 'string', nullable: true, maxLength: 2000 },
+    gotifyToken: { type: 'string', nullable: true, maxLength: 500 },
+    telegramBotToken: { type: 'string', nullable: true, maxLength: 200 },
+    telegramChatId: { type: 'string', nullable: true, maxLength: 64 },
+    slackWebhookUrl: { type: 'string', nullable: true, maxLength: 2000 },
+    pushoverUserKey: { type: 'string', nullable: true, maxLength: 64 },
+    pushoverAppToken: { type: 'string', nullable: true, maxLength: 64 },
+    webhookUrl: { type: 'string', nullable: true, maxLength: 2000 },
+    webhookMethod: { type: 'string', nullable: true, maxLength: 10 },
+    webhookHeaders: headersSchema,
     notificationDigest: { type: 'boolean', nullable: true },
     notifyReleases: { type: 'boolean', nullable: true },
     notifyVulnerabilities: { type: 'boolean', nullable: true },
@@ -412,6 +427,7 @@ const settingsSchema: ObjectSchema = {
     notifyAptUpdates: { type: 'boolean', nullable: true },
     notifyUpdateSucceeded: { type: 'boolean', nullable: true },
     notifyUpdateFailed: { type: 'boolean', nullable: true },
+    notifyDockerUpdates: { type: 'boolean', nullable: true },
     advisoriesGithub: { type: 'boolean', nullable: true },
     advisoriesOsv: { type: 'boolean', nullable: true },
   },
@@ -442,6 +458,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       aptUpdates: current.notifyAptUpdates,
       updateSucceeded: current.notifyUpdateSucceeded,
       updateFailed: current.notifyUpdateFailed,
+      dockerUpdates: current.notifyDockerUpdates,
     };
   });
   const containerStore = new ContainerStore(deps.store.database, deps.store.secretBox, () => ({
@@ -548,6 +565,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
     ...(deps.dockerEngine ? { engine: deps.dockerEngine } : {}),
     targetName: (targetId) => containerStore.get(targetId)?.name ?? null,
+    notify: (notification) => dispatcher.dispatchDockerUpdates(notification),
   });
   const dockerJob = new CronJob({
     name: 'docker',
@@ -647,6 +665,34 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         to: current.emailTo,
         toSource: settings.sourceOf('emailTo'),
       },
+      // ntfy, Gotify, Telegram, Slack, Pushover and the generic webhook; secrets only masked.
+      channels: Object.fromEntries(
+        CHANNEL_NAMES.map((name) => [
+          name,
+          {
+            configured: deps.notifiers.some((n) => n.name === name && n.isEnabled),
+            // Names only: the values may hold credentials.
+            ...(name === 'webhook'
+              ? { headers: parseWebhookHeaders(current.webhookHeaders).map((h) => ({ name: h.name, hasValue: h.value.length > 0 })) }
+              : {}),
+            settings: Object.fromEntries(
+              CHANNEL_SETTINGS[name].map((key) => {
+                const value = current[key];
+                const secret = SECRET_SETTING_KEYS.has(key);
+                return [
+                  key,
+                  {
+                    value: secret ? maskSecret(value, MASK_VISIBLE_START[key] ?? 0) : value,
+                    secret,
+                    configured: !!value,
+                    source: settings.sourceOf(key),
+                  },
+                ];
+              }),
+            ),
+          },
+        ]),
+      ),
       notifications: {
         digest: current.notificationDigest,
         digestSource: settings.sourceOf('notificationDigest'),
@@ -656,6 +702,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         aptUpdates: current.notifyAptUpdates,
         updateSucceeded: current.notifyUpdateSucceeded,
         updateFailed: current.notifyUpdateFailed,
+        dockerUpdates: current.notifyDockerUpdates,
       },
       advisories: {
         github: current.advisoriesGithub,
@@ -940,9 +987,21 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const updateSettings = async (req: Request) => {
-    const body = await readBody<SettingsPatch>(req, settingsSchema);
+    const { webhookHeaders, ...body } = await readBody<Omit<SettingsPatch, 'webhookHeaders'> & { webhookHeaders?: HeaderInput[] | null }>(
+      req,
+      settingsSchema,
+    );
+    const patch: SettingsPatch = body;
+    if (webhookHeaders !== undefined) {
+      // Headers sent without a value keep the saved one (values are never sent to the UI).
+      const resolved = resolveHeaders(webhookHeaders ?? [], parseWebhookHeaders(settings.current.webhookHeaders));
+      if ('error' in resolved) {
+        return validationProblem('webhookHeaders', resolved.error);
+      }
+      patch.webhookHeaders = resolved.length > 0 ? JSON.stringify(resolved) : null;
+    }
     try {
-      settings.update(body);
+      settings.update(patch);
     } catch (error) {
       if (error instanceof SettingsValidationError) {
         return validationProblem(error.field, error.message);

@@ -210,10 +210,45 @@ export interface AppSettings {
     to: string | null;
     toSource: SettingSource;
   };
+  /** ntfy, Gotify, Telegram, Slack, Pushover and the generic webhook. */
+  channels: Record<ChannelName, ChannelSettings>;
   notifications: NotificationPreferences & { digestSource: SettingSource };
   /** Enabled sources of security advisories. */
   advisories: { github: boolean; osv: boolean; osvEcosystems: string[] };
 }
+
+export type ChannelName = 'ntfy' | 'gotify' | 'telegram' | 'slack' | 'pushover' | 'webhook';
+
+/** Settings of one push channel, keyed by the setting name (e.g. `ntfyTopic`). */
+export interface ChannelSettings {
+  /** True when everything the channel needs is set. */
+  configured: boolean;
+  settings: Partial<Record<ChannelSettingKey, ChannelSettingValue>>;
+  /** Webhook only: extra request headers (names only; the values are never returned). */
+  headers?: { name: string; hasValue: boolean }[];
+}
+
+export interface ChannelSettingValue {
+  /** The value, or a masked hint for a secret (`…abcd`); null when not set. */
+  value: string | null;
+  secret: boolean;
+  configured: boolean;
+  source: SettingSource;
+}
+
+export type ChannelSettingKey =
+  | 'ntfyUrl'
+  | 'ntfyTopic'
+  | 'ntfyToken'
+  | 'gotifyUrl'
+  | 'gotifyToken'
+  | 'telegramBotToken'
+  | 'telegramChatId'
+  | 'slackWebhookUrl'
+  | 'pushoverUserKey'
+  | 'pushoverAppToken'
+  | 'webhookUrl'
+  | 'webhookMethod';
 
 /** `starttls`: port 587, upgraded with STARTTLS; `tls`: TLS from the start (465); `none`: unencrypted. */
 export type SmtpSecurity = 'starttls' | 'tls' | 'none';
@@ -227,6 +262,8 @@ export interface NotificationPreferences {
   aptUpdates: boolean;
   updateSucceeded: boolean;
   updateFailed: boolean;
+  /** Newer images of the tags Docker containers run. */
+  dockerUpdates: boolean;
 }
 
 /** A storage on the node that accepts backups. */
@@ -238,7 +275,7 @@ export interface BackupStorage {
 }
 
 /** `undefined` keeps a value, `null` resets it to the environment default. */
-export interface SettingsPatch {
+export interface SettingsPatch extends Partial<Record<ChannelSettingKey, string | null>> {
   discordWebhookUrl?: string | null;
   discordMention?: string | null;
   discordUsername?: string | null;
@@ -259,6 +296,9 @@ export interface SettingsPatch {
   notifyAptUpdates?: boolean | null;
   notifyUpdateSucceeded?: boolean | null;
   notifyUpdateFailed?: boolean | null;
+  notifyDockerUpdates?: boolean | null;
+  /** Replaces the webhook headers; a header with `value: null` keeps its saved value. */
+  webhookHeaders?: HeaderInput[] | null;
   advisoriesGithub?: boolean | null;
   advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;

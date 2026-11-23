@@ -275,6 +275,7 @@ describe('ReleaseChecker', () => {
           aptUpdates: true,
           updateSucceeded: false,
           updateFailed: false,
+          dockerUpdates: true,
         })),
         log: silentLog,
       });

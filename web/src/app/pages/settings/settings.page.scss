@@ -9,8 +9,8 @@
 
 /*
  * Full-width page, one tab at a time. General: GitHub and Polling side by side, the long Proxmox form below in two
- * columns. Notifications: Discord, E-mail and "What to send" – three columns on wide screens. Cards in a row share their
- * height.
+ * columns. Notifications: "What to send" across the whole width, then the channels (Discord, E-mail, ntfy …) in three
+ * columns on wide screens. Cards in a row share their height.
  */
 .sections {
   display: grid;
@@ -33,6 +33,13 @@
   .sections.notifications {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+.group-title {
+  grid-column: 1 / -1;
+  margin: 4px 0 -4px;
+  font-size: 1.05rem;
+  font-weight: 650;
 }
 
 .proxmox-grid {
@@ -148,8 +155,8 @@
   color: var(--text-muted);
 }
 
-/* Two columns of cards: "What to send" spans both, its switches in columns. */
-@container (min-width: 760px) and (max-width: 1179px) {
+/* "What to send" spans the whole row, its switches in columns. */
+@container (min-width: 760px) {
   .kinds-section {
     grid-column: 1 / -1;
   }

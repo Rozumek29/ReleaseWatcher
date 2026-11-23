@@ -45,7 +45,16 @@ interface TagRow {
   remote_digest: string | null;
   checked_at: string | null;
   error: string | null;
+  notified_digest: string | null;
 }
+
+const toTagState = (r: TagRow): ImageTagState => ({
+  key: r.key,
+  remoteDigest: r.remote_digest,
+  checkedAt: r.checked_at,
+  error: r.error,
+  notifiedDigest: r.notified_digest,
+});
 
 const toEndpoint = (r: EndpointRow): DockerEndpoint => ({
   id: r.id,
@@ -261,12 +270,12 @@ export class DockerStore {
 
   listTagStates(): Map<string, ImageTagState> {
     const rows = this.db.query<TagRow, []>('SELECT * FROM docker_image_tags').all();
-    return new Map(rows.map((r) => [r.key, { key: r.key, remoteDigest: r.remote_digest, checkedAt: r.checked_at, error: r.error }]));
+    return new Map(rows.map((r) => [r.key, toTagState(r)]));
   }
 
   getTagState(key: string): ImageTagState | null {
     const r = this.db.query<TagRow, [string]>('SELECT * FROM docker_image_tags WHERE key = ?').get(key);
-    return r ? { key: r.key, remoteDigest: r.remote_digest, checkedAt: r.checked_at, error: r.error } : null;
+    return r ? toTagState(r) : null;
   }
 
   /** Records a registry check of a tag; an error keeps the digest of the last successful check. */
@@ -286,6 +295,11 @@ export class DockerStore {
         )
         .run(key, now.toISOString(), result.error.slice(0, 500));
     }
+  }
+
+  /** Records that the image `digest` of a tag was reported (or found while notifications were off). */
+  markTagNotified(key: string, digest: string): void {
+    this.db.query('UPDATE docker_image_tags SET notified_digest = ? WHERE key = ?').run(digest, key);
   }
 
   /** Removes registry data no stored container uses any more (`keys` = tag keys still in use). */

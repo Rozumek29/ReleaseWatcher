@@ -51,12 +51,29 @@ export interface UpdateResultNotification {
   detail: string | null;
 }
 
+/** Newer images were pushed for the tags Docker/Podman containers run (each new image is reported once). */
+export interface DockerUpdatesNotification {
+  images: DockerImageUpdate[];
+}
+
+export interface DockerImageUpdate {
+  /** Short image name, e.g. `nginx:1.27`. */
+  image: string;
+  /** Version the containers run (from the tag, labels or the digest); null when not known. */
+  installedVersion: string | null;
+  /** Version of the newer image when it could be resolved. */
+  latestVersion: string | null;
+  /** Containers running the image, with the machine or endpoint they run on. */
+  containers: { name: string; source: string | null }[];
+}
+
 /** One notification of any kind, as collected for a digest. */
 export type NotificationEvent =
   | { type: 'release'; release: ReleaseNotification }
   | { type: 'vulnerability'; vulnerability: VulnerabilityNotification }
   | { type: 'container-updates'; updates: ContainerUpdatesNotification }
-  | { type: 'update-result'; result: UpdateResultNotification };
+  | { type: 'update-result'; result: UpdateResultNotification }
+  | { type: 'docker-updates'; docker: DockerUpdatesNotification };
 
 export const notificationFullName = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string => `${n.owner}/${n.repository}`;
 export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string =>
@@ -84,10 +101,12 @@ export function digestSummary(events: readonly NotificationEvent[]): string {
   const releases = count('release');
   const vulnerabilities = count('vulnerability');
   const containers = count('container-updates');
+  const images = events.reduce((sum, e) => sum + (e.type === 'docker-updates' ? e.docker.images.length : 0), 0);
   const results = events.filter((e): e is Extract<NotificationEvent, { type: 'update-result' }> => e.type === 'update-result');
   if (releases > 0) parts.push(plural(releases, 'new release', 'new releases'));
   if (vulnerabilities > 0) parts.push(plural(vulnerabilities, 'new vulnerability', 'new vulnerabilities'));
   if (containers > 0) parts.push(plural(containers, 'container with updates', 'containers with updates'));
+  if (images > 0) parts.push(plural(images, 'new Docker image', 'new Docker images'));
   const ok = results.filter((e) => e.result.succeeded).length;
   const failed = results.length - ok;
   if (ok > 0) parts.push(plural(ok, 'update finished', 'updates finished'));
@@ -111,8 +130,26 @@ export interface Notifier {
   notifyContainerUpdates(notification: ContainerUpdatesNotification): Promise<void>;
   /** Reports the result of an update started from the UI. */
   notifyUpdateResult(notification: UpdateResultNotification): Promise<void>;
+  /** Reports newer images of the tags Docker containers run. */
+  notifyDockerUpdates(notification: DockerUpdatesNotification): Promise<void>;
   /** Sends several notifications as one summary message (digest mode, always at least two events). */
   notifyDigest(events: readonly NotificationEvent[]): Promise<void>;
+}
+
+/** "nginx:1.27 1.27.2 → 1.27.3" or just "nginx:1.27" when the versions are not known. */
+export function dockerImageLine(image: DockerImageUpdate): string {
+  const versions =
+    image.latestVersion && image.installedVersion !== image.latestVersion
+      ? ` ${image.installedVersion ?? '?'} → ${image.latestVersion}`
+      : image.installedVersion
+        ? ` (running ${image.installedVersion})`
+        : '';
+  return `${image.image}${versions}`;
+}
+
+/** "nextcloud on CT 105, web on docker-host" – the containers running an image. */
+export function dockerContainersLine(image: DockerImageUpdate): string {
+  return image.containers.map((c) => (c.source ? `${c.name} on ${c.source}` : c.name)).join(', ');
 }
 
 /** "High", "Critical" … */

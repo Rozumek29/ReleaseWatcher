@@ -14,7 +14,20 @@ import type { WatchedRepository } from './domain.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
 /** Settings whose values are secrets and are stored encrypted. */
-export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set(['discordWebhookUrl', 'githubToken', 'proxmoxSshKey', 'smtpPassword']);
+export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set([
+  'discordWebhookUrl',
+  'githubToken',
+  'proxmoxSshKey',
+  'smtpPassword',
+  'ntfyToken',
+  'gotifyToken',
+  'telegramBotToken',
+  'slackWebhookUrl',
+  'pushoverUserKey',
+  'pushoverAppToken',
+  'webhookUrl',
+  'webhookHeaders',
+]);
 
 /** Known plain text stored encrypted in `app_meta` to detect a wrong encryption key at startup. */
 const KEY_CHECK_NAME = 'secretsKeyCheck';
@@ -531,6 +544,10 @@ const MIGRATIONS: readonly string[] = [
      checked_at TEXT NOT NULL,
      PRIMARY KEY (repository, digest)
    );`,
+  // Newest image of a tag a notification was sent for. Images already known count as notified, so only images pushed
+  // from now on are reported.
+  `ALTER TABLE docker_image_tags ADD COLUMN notified_digest TEXT;
+   UPDATE docker_image_tags SET notified_digest = remote_digest;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

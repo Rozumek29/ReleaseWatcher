@@ -1,6 +1,7 @@
 import { fullName, iconUrls } from '../domain.ts';
 import { errorMessage } from '../http.ts';
 import type { Logger } from '../log.ts';
+import type { DockerImageUpdate, DockerUpdatesNotification } from '../notifiers/notifier.ts';
 import { appUpdateAvailable, type Container, type StepResult } from '../proxmox/domain.ts';
 import {
   composeProject,
@@ -38,6 +39,8 @@ export interface DockerServiceDeps {
   engine?: (url: string) => DockerEngine;
   /** Target names for DTOs (the machine a container runs on). */
   targetName?: (targetId: number) => string | null;
+  /** Reports images pushed since the last check (`NotificationDispatcher.dispatchDockerUpdates`). */
+  notify?: (notification: DockerUpdatesNotification) => Promise<unknown>;
   now?: () => Date;
 }
 
@@ -318,6 +321,42 @@ export class DockerService {
     }
     this.updateInstalledVersions();
     this.prune();
+    await this.notifyNewImages(containers, options.note);
+  }
+
+  /**
+   * Reports the tags whose registry has an image the containers do not run yet and that was not reported before. Each
+   * image is reported once (`notified_digest`), even while the notification type is switched off.
+   */
+  private async notifyNewImages(containers: readonly DockerContainer[], note?: NoteFn): Promise<void> {
+    const { store, notify, log } = this.deps;
+    if (!notify) return;
+    const states = store.listTagStates();
+    const updates = new Map<string, { digest: string; image: DockerImageUpdate }>();
+    for (const view of this.describe(containers.filter((c) => c.present && !c.ignored))) {
+      if (view.registry.state !== 'update-available') continue;
+      const ref = parseImageRef(view.image);
+      const key = ref ? tagKey(ref) : null;
+      const state = key ? states.get(key) : undefined;
+      if (!key || !state?.remoteDigest || state.notifiedDigest === state.remoteDigest) continue;
+      const entry = updates.get(key) ?? {
+        digest: state.remoteDigest,
+        image: { image: view.imageDisplay, installedVersion: view.installedVersion, latestVersion: view.registry.latestVersion, containers: [] },
+      };
+      entry.image.containers.push({ name: view.name, source: view.source.name });
+      updates.set(key, entry);
+    }
+    if (updates.size === 0) return;
+    try {
+      await notify({ images: [...updates.values()].map((u) => u.image) });
+      note?.(`Docker: reported ${updates.size} new image(s)`);
+    } catch (error) {
+      log.error({ err: error }, 'Reporting new Docker images failed');
+    }
+    // After sending: a crash in between reports the images again rather than never.
+    for (const [key, { digest }] of updates) {
+      store.markTagNotified(key, digest);
+    }
   }
 
   /**

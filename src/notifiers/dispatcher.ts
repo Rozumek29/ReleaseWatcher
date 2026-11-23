@@ -1,6 +1,7 @@
 import type { Logger } from '../log.ts';
 import {
   type ContainerUpdatesNotification,
+  type DockerUpdatesNotification,
   type NotificationEvent,
   notificationFullName,
   type Notifier,
@@ -20,6 +21,8 @@ export interface NotificationPreferences {
   aptUpdates: boolean;
   updateSucceeded: boolean;
   updateFailed: boolean;
+  /** Newer images of the tags Docker containers run. */
+  dockerUpdates: boolean;
 }
 
 export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
@@ -30,6 +33,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   aptUpdates: true,
   updateSucceeded: false,
   updateFailed: false,
+  dockerUpdates: true,
 };
 
 export interface DispatchResult {
@@ -104,6 +108,14 @@ export class NotificationDispatcher {
     return this.send({ type: 'update-result', result: notification });
   }
 
+  /** Newer images for the tags Docker containers run. */
+  dispatchDockerUpdates(notification: DockerUpdatesNotification): Promise<DispatchResult> {
+    if (!this.preferences().dockerUpdates || notification.images.length === 0) {
+      return Promise.resolve(skipped());
+    }
+    return this.send({ type: 'docker-updates', docker: notification });
+  }
+
   /** Sends a sample release to the enabled notifiers (all, or only `name`) – ignores the preferences and digest mode. */
   test(notification: ReleaseNotification, name?: string): Promise<DispatchResult> {
     return this.deliver([{ type: 'release', release: notification }], name);
@@ -176,6 +188,8 @@ function sendTo(notifier: Notifier, events: readonly NotificationEvent[]): Promi
       return notifier.notifyContainerUpdates(event.updates);
     case 'update-result':
       return notifier.notifyUpdateResult(event.result);
+    case 'docker-updates':
+      return notifier.notifyDockerUpdates(event.docker);
   }
 }
 
@@ -194,5 +208,7 @@ function describe(events: readonly NotificationEvent[]): Record<string, unknown>
       return { vmid: event.updates.vmid };
     case 'update-result':
       return { vmid: event.result.vmid, kind: event.result.kind, succeeded: event.result.succeeded };
+    case 'docker-updates':
+      return { images: event.docker.images.map((i) => i.image) };
   }
 }

@@ -52,6 +52,15 @@ const settings: AppSettings = {
     aptUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
+    dockerUpdates: true,
+  },
+  channels: {
+    ntfy: { configured: false, settings: {} },
+    gotify: { configured: false, settings: {} },
+    telegram: { configured: false, settings: {} },
+    slack: { configured: false, settings: {} },
+    pushover: { configured: false, settings: {} },
+    webhook: { configured: false, settings: {} },
   },
   advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 };
@@ -87,7 +96,7 @@ describe('SettingsPage', () => {
     const input = el.querySelector<HTMLInputElement>('#webhook')!;
     input.value = 'not-a-url';
     input.dispatchEvent(new Event('input'));
-    el.querySelector<HTMLButtonElement>('section form button[type=submit]')!.click();
+    el.querySelector<HTMLButtonElement>('section[aria-labelledby=discord-title] button[type=submit]')!.click();
 
     const request = http.expectOne('/api/settings');
     expect(request.request.method).toBe('PUT');
@@ -285,6 +294,7 @@ describe('SettingsPage', () => {
       notifyAptUpdates: true,
       notifyUpdateSucceeded: false,
       notifyUpdateFailed: true,
+      notifyDockerUpdates: true,
     });
   });
 

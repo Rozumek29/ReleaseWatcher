@@ -6,7 +6,7 @@ import { RepositoryStore } from '../src/db.ts';
 import { DockerStore } from '../src/docker/store.ts';
 import { silentLogger } from '../src/log.ts';
 import { SettingsService } from '../src/settings.ts';
-import { addProxmoxHost, digest, engineContainer, FakeEngine, FakeRegistry, FakeShell, FakeSource, release } from './helpers.ts';
+import { addProxmoxHost, digest, engineContainer, FakeEngine, FakeRegistry, FakeShell, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
 interface ContainerView {
   id: number;
@@ -32,6 +32,7 @@ describe('docker API', () => {
   let registry: FakeRegistry;
   let shell: FakeShell;
   let source: FakeSource;
+  let notifier: RecordingNotifier;
   let baseUrl: URL;
   const engineUrls: string[] = [];
 
@@ -64,13 +65,14 @@ describe('docker API', () => {
       .on(/^pct list /, { output: 'VMID       Status     Lock         Name\n101        running                 docker\n---releasewatcher-qm---\n' })
       .on(/^pct status 101$/, { output: 'status: running\n' });
     source = new FakeSource();
+    notifier = new RecordingNotifier();
     store = new RepositoryStore(':memory:');
     addProxmoxHost(store);
     app = await buildApp({
       store,
       settings: new SettingsService(store, loadConfig({})),
       source,
-      notifiers: [],
+      notifiers: [notifier],
       log: silentLogger,
       shell,
       registry,
@@ -143,6 +145,40 @@ describe('docker API', () => {
     await request('POST', `/api/docker/endpoints/${(await overview()).endpoints[0]!.id}/check`);
     await app.docker.idle();
     assert.deepEqual(registry.tagRequests, []);
+  });
+
+  it('reports each newer image of a tag once', async () => {
+    registry.set('docker.io/searxng/searxng', { latest: digest('b'), '2024.11.20': digest('b'), '2024.11.1': digest('a') });
+    registry.set('docker.io/library/nginx', { '1.27': digest('1') });
+    engine.listing.containers = [
+      engineContainer('searxng', 'searxng/searxng:latest', { repoDigests: [`searxng/searxng@${digest('a')}`] }),
+      engineContainer('web', 'nginx:1.27', { repoDigests: [`nginx@${digest('1')}`] }),
+    ];
+    const endpoint = await addEndpoint();
+    assert.deepEqual(notifier.dockerSent, [
+      { images: [{ image: 'searxng/searxng:latest', installedVersion: '2024.11.1', latestVersion: '2024.11.20', containers: [{ name: 'searxng', source: 'NAS' }] }] },
+    ]);
+
+    const check = async () => {
+      // Registries are asked again only after a few minutes.
+      store.database.run('UPDATE docker_image_tags SET checked_at = NULL');
+      await request('POST', `/api/docker/endpoints/${endpoint.id}/check`);
+      await app.docker.idle();
+    };
+    await check();
+    assert.equal(notifier.dockerSent.length, 1, 'the same image is not reported again');
+
+    // Switched off: a new image is remembered, not reported – and not reported later either.
+    await request('PUT', '/api/settings', { notifyDockerUpdates: false });
+    registry.set('docker.io/library/nginx', { '1.27': digest('2') });
+    await check();
+    await request('PUT', '/api/settings', { notifyDockerUpdates: true });
+    await check();
+    assert.equal(notifier.dockerSent.length, 1);
+
+    registry.set('docker.io/library/nginx', { '1.27': digest('3') });
+    await check();
+    assert.deepEqual(notifier.dockerSent[1]?.images.map((i) => i.image), ['nginx:1.27']);
   });
 
   it('shows the exact versions of a moving version tag such as 17-alpine', async () => {

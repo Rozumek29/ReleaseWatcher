@@ -172,8 +172,9 @@ When changing an endpoint, also update the wiki page *REST API*.
 
 ## Common changes – checklist
 
-- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`: `notify`, `notifyContainerUpdates`,
-  `notifyUpdateResult` and `notifyDigest`), register it in
+- **New notifier:** implement `Notifier` (`src/notifiers/notifier.ts`: `notify`, `notifyVulnerability`,
+  `notifyContainerUpdates`, `notifyUpdateResult`, `notifyDockerUpdates` and `notifyDigest`) – or, for a service that
+  takes a title and a text, extend `SimpleNotifier` (`src/notifiers/simple.ts`, see `ntfy.ts`) – register it in
   `src/notifiers/index.ts`; if configurable from the UI, see “New setting”.
 - **New setting:** `Settings` + `current` + `validate()` in `src/settings.ts`, env default in `src/config.ts`
   (and `.env.example`), DTO + `PUT /api/settings` schema in `src/app.ts`, `models.ts` + Settings page in

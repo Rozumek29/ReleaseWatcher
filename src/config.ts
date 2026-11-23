@@ -3,6 +3,7 @@ import { dirname, join } from 'node:path';
 import { intervalToCron } from './cron.ts';
 import type { LogFileOptions } from './log.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
+import { WEBHOOK_METHODS, type WebhookMethod } from './notifiers/webhook.ts';
 
 /** Application configuration read from environment variables (see .env.example). */
 export interface Config {
@@ -43,6 +44,13 @@ export interface Config {
     to: string | null;
     maxBodyLength: number;
   };
+  ntfy: { url: string | null; topic: string | null; token: string | null };
+  gotify: { url: string | null; token: string | null };
+  telegram: { botToken: string | null; chatId: string | null };
+  slack: { webhookUrl: string | null };
+  pushover: { userKey: string | null; appToken: string | null };
+  /** Generic JSON webhook. */
+  webhook: { url: string | null; method: WebhookMethod | null };
   /** Collect the notifications of one check run into one summary message. */
   notificationDigest: boolean;
   proxmox: {
@@ -112,6 +120,12 @@ export function loadConfig(env: Env = process.env): Config {
       to: str(env, 'EMAIL_TO'),
       maxBodyLength: int(env, 'EMAIL_MAX_BODY_LENGTH', 5000),
     },
+    ntfy: { url: str(env, 'NTFY_URL'), topic: str(env, 'NTFY_TOPIC'), token: str(env, 'NTFY_TOKEN') },
+    gotify: { url: str(env, 'GOTIFY_URL'), token: str(env, 'GOTIFY_TOKEN') },
+    telegram: { botToken: str(env, 'TELEGRAM_BOT_TOKEN'), chatId: str(env, 'TELEGRAM_CHAT_ID') },
+    slack: { webhookUrl: str(env, 'SLACK_WEBHOOK_URL') },
+    pushover: { userKey: str(env, 'PUSHOVER_USER_KEY'), appToken: str(env, 'PUSHOVER_APP_TOKEN') },
+    webhook: { url: str(env, 'WEBHOOK_URL'), method: webhookMethod(str(env, 'WEBHOOK_METHOD')) },
     notificationDigest: (str(env, 'NOTIFICATION_DIGEST') ?? 'false').toLowerCase() === 'true',
     proxmox: {
       host: str(env, 'PROXMOX_HOST'),
@@ -157,6 +171,17 @@ function int(env: Env, key: string, fallback: number): number {
     throw new Error(`Environment variable ${key} must be a non-negative number, got "${raw}".`);
   }
   return value;
+}
+
+function webhookMethod(value: string | null): WebhookMethod | null {
+  if (value === null) {
+    return null;
+  }
+  const normalized = value.toUpperCase();
+  if (!(WEBHOOK_METHODS as readonly string[]).includes(normalized)) {
+    throw new Error(`WEBHOOK_METHOD must be one of ${WEBHOOK_METHODS.join(', ')}, got "${value}".`);
+  }
+  return normalized as WebhookMethod;
 }
 
 function smtpSecurity(value: string | null): SmtpSecurity {

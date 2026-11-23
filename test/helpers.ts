@@ -12,6 +12,7 @@ import { InvalidKeyError, type KeyInfo, type KeyTool } from '../src/hosts/keys.t
 import { HostStore } from '../src/hosts/store.ts';
 import type {
   ContainerUpdatesNotification,
+  DockerUpdatesNotification,
   NotificationEvent,
   Notifier,
   ReleaseNotification,
@@ -106,6 +107,7 @@ export class RecordingNotifier implements Notifier {
   readonly vulnerabilitiesSent: VulnerabilityNotification[] = [];
   readonly containerSent: ContainerUpdatesNotification[] = [];
   readonly resultsSent: UpdateResultNotification[] = [];
+  readonly dockerSent: DockerUpdatesNotification[] = [];
   readonly digests: NotificationEvent[][] = [];
 
   async notify(notification: ReleaseNotification): Promise<void> {
@@ -134,6 +136,13 @@ export class RecordingNotifier implements Notifier {
       throw new Error('boom');
     }
     this.resultsSent.push(notification);
+  }
+
+  async notifyDockerUpdates(notification: DockerUpdatesNotification): Promise<void> {
+    if (this.fail) {
+      throw new Error('boom');
+    }
+    this.dockerSent.push(notification);
   }
 
   async notifyDigest(events: readonly NotificationEvent[]): Promise<void> {

@@ -27,6 +27,7 @@ import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 import { AppearancePanel } from './appearance';
+import { CHANNELS, ChannelCard } from './channel-card';
 import { ConnectionsPanel } from './connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
@@ -49,6 +50,11 @@ const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'
   { key: 'aptUpdates', label: 'apt package updates', hint: 'Upgradable packages in a container or on the Proxmox host.' },
   { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or apt upgrade started here completed.' },
   { key: 'updateFailed', label: 'Update failed', hint: 'An update or apt upgrade started here failed.' },
+  {
+    key: 'dockerUpdates',
+    label: 'New Docker images',
+    hint: 'A newer image was pushed for the tag a Docker container runs (each image is reported once).',
+  },
 ];
 
 /** Quick picks for the check schedules (cron expressions). */
@@ -62,6 +68,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
     FormsModule,
     DecimalPipe,
     AppearancePanel,
+    ChannelCard,
     ConnectionsPanel,
     Icon,
     RelativeTimePipe,
@@ -124,12 +131,14 @@ export class SettingsPage implements OnInit {
     aptUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
+    dockerUpdates: true,
   };
 
   /** Form values of each section as last loaded or saved, to tell which sections have unsaved changes. */
   private savedValues: Partial<Record<Section, unknown>> = {};
 
   protected readonly kinds = NOTIFICATION_KINDS;
+  protected readonly channels = CHANNELS;
 
   protected readonly releasePresets = RELEASE_PRESETS;
   protected readonly advisoryPresets = ADVISORY_PRESETS;
@@ -219,6 +228,7 @@ export class SettingsPage implements OnInit {
         notifyAptUpdates: p.aptUpdates,
         notifyUpdateSucceeded: p.updateSucceeded,
         notifyUpdateFailed: p.updateFailed,
+        notifyDockerUpdates: p.dockerUpdates,
       },
       'Notification settings saved.',
     );
@@ -437,6 +447,7 @@ export class SettingsPage implements OnInit {
           aptUpdates: n.aptUpdates,
           updateSucceeded: n.updateSucceeded,
           updateFailed: n.updateFailed,
+          dockerUpdates: n.dockerUpdates,
         };
         break;
       }

@@ -44,6 +44,15 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     aptUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
+    dockerUpdates: true,
+  },
+  channels: {
+    ntfy: { configured: false, settings: {} },
+    gotify: { configured: false, settings: {} },
+    telegram: { configured: false, settings: {} },
+    slack: { configured: false, settings: {} },
+    pushover: { configured: false, settings: {} },
+    webhook: { configured: false, settings: {} },
   },
   advisories: { github: true, osv: true, osvEcosystems: ['npm', 'Go'] },
 });

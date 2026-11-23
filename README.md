@@ -32,8 +32,8 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 
 **GitHub releases**
 
-- Watch any public or private repository; notifications on **Discord** and by **e-mail** – one message per release or
-  one summary per check run.
+- Watch any public or private repository; notifications on **Discord**, by **e-mail**, to **ntfy**, **Gotify**,
+  **Telegram**, **Slack**, **Pushover** or any **webhook** – one message per release or one summary per check run.
 - **Installed version** of your instance (read from a URL like `/api/version`, or entered by hand): see
   *Update available 1.34.1 → 1.34.3* at a glance and skip releases you already run.
 - **Vulnerabilities** from GitHub security advisories and **OSV.dev**, matched against what you actually run.

@@ -386,6 +386,8 @@ export interface ImageTagState {
   remoteDigest: string | null;
   checkedAt: string | null;
   error: string | null;
+  /** Remote digest a "new image" notification was sent for (or that was already known). */
+  notifiedDigest: string | null;
 }
 
 /** Normalizes an endpoint URL; returns where to connect or why the URL is not usable. */

@@ -311,4 +311,15 @@ describe('EmailNotifier', () => {
     assert.deepEqual(calls[0]?.envelope, { from: 'rw@example.com', to: ['a@example.com'] });
     assert.match(calls[0]!.message, /^Subject: acme\/widget v1 released$/m);
   });
+
+  it('builds a mail about new Docker images', () => {
+    const mail = buildEmail(
+      [{ type: 'docker-updates', docker: { images: [{ image: 'postgres:16', installedVersion: '16.4', latestVersion: null, containers: [{ name: 'db', source: 'CT 101' }] }] } }],
+      { maxBodyLength: 1000, publicUrl: 'https://rw.example.com' },
+    );
+    assert.equal(mail.subject, 'New Docker image: postgres:16');
+    assert.match(mail.text, /postgres:16 \(running 16\.4\) – db on CT 101/);
+    assert.match(mail.text, /Docker: https:\/\/rw\.example\.com\/docker/);
+    assert.match(mail.html, /Open Docker/);
+  });
 });

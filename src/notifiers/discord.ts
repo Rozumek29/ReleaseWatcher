@@ -4,6 +4,9 @@ import {
   affectedVersions,
   type ContainerUpdatesNotification,
   digestSummary,
+  dockerContainersLine,
+  dockerImageLine,
+  type DockerUpdatesNotification,
   type NotificationEvent,
   notificationFullName,
   notificationRepoUrl,
@@ -69,6 +72,11 @@ export class DiscordNotifier implements Notifier {
   async notifyUpdateResult(notification: UpdateResultNotification): Promise<void> {
     const options = this.getOptions();
     await this.post(options, buildUpdateResultPayload(notification, options));
+  }
+
+  async notifyDockerUpdates(notification: DockerUpdatesNotification): Promise<void> {
+    const options = this.getOptions();
+    await this.post(options, buildDockerPayload(notification, options));
   }
 
   async notifyDigest(events: readonly NotificationEvent[]): Promise<void> {
@@ -252,6 +260,29 @@ export function buildUpdateResultPayload(
   };
 }
 
+const DOCKER_COLOR = 0x1d63ed; // Docker blue
+
+export function buildDockerPayload(
+  notification: DockerUpdatesNotification,
+  options: Pick<DiscordOptions, 'username' | 'avatarUrl' | 'mention' | 'publicUrl'>,
+) {
+  const dockerUrl = options.publicUrl ? `${options.publicUrl}/docker` : null;
+  const [only] = notification.images;
+  const lines = notification.images.map((i) => `• **${dockerImageLine(i)}** – ${dockerContainersLine(i)}`);
+  return {
+    ...messageHeader(options),
+    embeds: [
+      {
+        title: truncate(notification.images.length === 1 && only ? `New Docker image: ${only.image}` : `${notification.images.length} new Docker images`, 256),
+        ...(dockerUrl ? { url: dockerUrl } : {}),
+        description: truncate(lines.join('\n'), MAX_DESCRIPTION),
+        color: DOCKER_COLOR,
+        timestamp: new Date().toISOString(),
+      },
+    ],
+  };
+}
+
 /** Several notifications as one message: one embed with a section per kind. */
 export function buildDigestPayload(
   events: readonly NotificationEvent[],
@@ -262,6 +293,7 @@ export function buildDigestPayload(
   const vulnerabilities: string[] = [];
   const containers: string[] = [];
   const results: string[] = [];
+  const images: string[] = [];
   for (const event of events) {
     switch (event.type) {
       case 'release': {
@@ -294,12 +326,16 @@ export function buildDigestPayload(
           `• ${event.result.succeeded ? '✅' : '❌'} **${targetName(event.result)}**: ${updateLabel(event.result)} ${event.result.succeeded ? 'finished' : 'failed'}`,
         );
         break;
+      case 'docker-updates':
+        images.push(...event.docker.images.map((i) => `• **${dockerImageLine(i)}** – ${dockerContainersLine(i)}`));
+        break;
     }
   }
   const blocks = [
     ...(releases.length > 0 ? [`**New releases**\n${releases.join('\n')}`] : []),
     ...(vulnerabilities.length > 0 ? [`**New vulnerabilities**\n${vulnerabilities.join('\n')}`] : []),
     ...(containers.length > 0 ? [`**Container updates**\n${containers.join('\n')}`] : []),
+    ...(images.length > 0 ? [`**Docker images**\n${images.join('\n')}`] : []),
     ...(results.length > 0 ? [`**Finished updates**\n${results.join('\n')}`] : []),
   ];
   return {
