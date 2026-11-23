@@ -972,7 +972,8 @@ describe('containers API', () => {
     const proxmox = async () => (await request('GET', '/api/settings')).json().proxmox;
     assert.deepEqual(
       Object.fromEntries(Object.entries(await proxmox()).filter(([k]) => /RunHistory/i.test(k))),
-      { runHistoryChecks: 10, runHistoryUpdates: 30, defaultRunHistoryChecks: 10, defaultRunHistoryUpdates: 30, minRunHistory: 1, maxRunHistory: 500 },
+      // No limits by default (null = keep all runs).
+      { runHistoryChecks: null, runHistoryUpdates: null, minRunHistory: 1, maxRunHistory: 500 },
     );
     assert.equal((await request('PUT', '/api/settings', { runHistoryChecks: 0 })).status, 400);
     assert.equal((await request('PUT', '/api/settings', { runHistoryUpdates: 501 })).status, 400);
@@ -980,9 +981,12 @@ describe('containers API', () => {
     assert.equal((await request('PUT', '/api/settings', { runHistoryChecks: 2 })).status, 200);
     assert.equal((await proxmox()).runHistoryChecks, 2);
     assert.equal((await runs()).length, 2);
-    // null goes back to the default.
+    // null goes back to the default: no limit, new runs are kept again.
     assert.equal((await request('PUT', '/api/settings', { runHistoryChecks: null })).status, 200);
-    assert.equal((await proxmox()).runHistoryChecks, 10);
+    assert.equal((await proxmox()).runHistoryChecks, null);
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    assert.equal((await runs()).length, 3);
   });
 
   it('checks containers in parallel up to the configured limit, one batch command each', async () => {

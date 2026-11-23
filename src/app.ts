@@ -31,7 +31,7 @@ import { ContainerScheduler } from './proxmox/scheduler.ts';
 import { ContainerUpdater } from './proxmox/updater.ts';
 import { ContainerService } from './proxmox/service.ts';
 import type { NodeShell } from './proxmox/ssh.ts';
-import { DEFAULT_RUN_HISTORY, MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
+import { MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import { type KeyTool, SshKeygen } from './hosts/keys.ts';
 import { hostRoutes } from './hosts/routes.ts';
@@ -588,11 +588,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
         backupBeforeUpdate: current.backupBeforeUpdate,
         backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
-        // Set only in the UI (no env variable), so there is no source to show.
+        // Set only in the UI (no env variable), so there is no source to show. null = keep all runs.
         runHistoryChecks: current.runHistoryChecks,
         runHistoryUpdates: current.runHistoryUpdates,
-        defaultRunHistoryChecks: DEFAULT_RUN_HISTORY.checks,
-        defaultRunHistoryUpdates: DEFAULT_RUN_HISTORY.others,
         minRunHistory: MIN_RUN_HISTORY,
         maxRunHistory: MAX_RUN_HISTORY,
       },

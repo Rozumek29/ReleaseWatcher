@@ -479,13 +479,16 @@ export class ContainerStore {
    */
   pruneRuns(containerId: number | null = null): number {
     const { checks, others } = this.runHistory();
+    if (checks === null && others === null) {
+      return 0;
+    }
     const pruned = this.db
       .query(
         `DELETE FROM container_runs WHERE status <> 'running' AND id IN (
            SELECT id FROM (
              SELECT id, kind, ROW_NUMBER() OVER (PARTITION BY container_id, kind = 'check' ORDER BY id DESC) AS n
              FROM container_runs WHERE ?1 IS NULL OR container_id = ?1)
-           WHERE n > CASE WHEN kind = 'check' THEN ?2 ELSE ?3 END)`,
+           WHERE n > CASE WHEN kind = 'check' THEN coalesce(?2, n) ELSE coalesce(?3, n) END)`,
       )
       .run(containerId, checks, others).changes;
     if (pruned > 0) {

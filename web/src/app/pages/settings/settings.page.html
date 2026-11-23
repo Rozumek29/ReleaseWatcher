@@ -348,7 +348,7 @@
                     name="runHistoryChecks"
                     [min]="s.proxmox.minRunHistory"
                     [max]="s.proxmox.maxRunHistory"
-                    [placeholder]="s.proxmox.defaultRunHistoryChecks"
+                    placeholder="Unlimited"
                     [(ngModel)]="runHistoryChecks"
                     [class.invalid]="errors()['runHistoryChecks']"
                   />
@@ -365,7 +365,7 @@
                     name="runHistoryUpdates"
                     [min]="s.proxmox.minRunHistory"
                     [max]="s.proxmox.maxRunHistory"
-                    [placeholder]="s.proxmox.defaultRunHistoryUpdates"
+                    placeholder="Unlimited"
                     [(ngModel)]="runHistoryUpdates"
                     [class.invalid]="errors()['runHistoryUpdates']"
                   />
@@ -375,9 +375,9 @@
                 </div>
               </div>
               <span class="hint">
-                How many runs with their console output are kept, {{ s.proxmox.minRunHistory }}–{{ s.proxmox.maxRunHistory }}.
-                Checks are counted separately, so frequent checks never push update logs out. Older runs are deleted
-                when you save. Empty = default ({{ s.proxmox.defaultRunHistoryChecks }} / {{ s.proxmox.defaultRunHistoryUpdates }}).
+                How many runs with their console output are kept, {{ s.proxmox.minRunHistory }}–{{ s.proxmox.maxRunHistory }};
+                leave empty to keep all (default). Checks are counted separately, so frequent checks never push update
+                logs out. Older runs are deleted when you save.
               </span>
             </fieldset>
           </div>

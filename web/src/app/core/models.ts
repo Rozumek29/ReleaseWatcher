@@ -183,11 +183,9 @@ export interface AppSettings {
     /** Back up before updates by default (containers can override, every update can change it). */
     backupBeforeUpdate: boolean;
     backupBeforeUpdateSource: SettingSource;
-    /** Runs kept per container: checks and other runs (updates, upgrades, restarts) separately. UI only. */
-    runHistoryChecks: number;
-    runHistoryUpdates: number;
-    defaultRunHistoryChecks: number;
-    defaultRunHistoryUpdates: number;
+    /** Runs kept per container: checks and other runs (updates, upgrades, restarts) separately; null = all. UI only. */
+    runHistoryChecks: number | null;
+    runHistoryUpdates: number | null;
     minRunHistory: number;
     maxRunHistory: number;
   };

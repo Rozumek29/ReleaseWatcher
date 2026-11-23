@@ -95,8 +95,8 @@ export class SettingsPage implements OnInit {
   protected checkCron = '';
   protected checkConcurrency: number | null = 3;
   protected backupDefault = false;
-  protected runHistoryChecks: number | null = 10;
-  protected runHistoryUpdates: number | null = 30;
+  protected runHistoryChecks: number | null = null;
+  protected runHistoryUpdates: number | null = null;
   protected smtpHost = '';
   protected smtpPort: number | null = 587;
   protected smtpSecurity: SmtpSecurity = 'starttls';

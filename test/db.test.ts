@@ -7,7 +7,7 @@ import { RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
 import { SecretBox, parseKey } from '../src/secret-box.ts';
 import { AdvisoryImpacts } from '../src/advisory-impacts.ts';
 import { Database } from 'bun:sqlite';
-import { DEFAULT_RUN_HISTORY, type RunKind } from '../src/proxmox/domain.ts';
+import { DEFAULT_RUN_HISTORY, type RunHistoryLimits, type RunKind } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { addProxmoxHost, advisory } from './helpers.ts';
 
@@ -146,7 +146,7 @@ describe('RepositoryStore file size', () => {
 
   it('keeps the last checks and the last other runs of a container separately', () => {
     const store = new RepositoryStore(':memory:');
-    let limits = { ...DEFAULT_RUN_HISTORY };
+    let limits: RunHistoryLimits = { ...DEFAULT_RUN_HISTORY };
     const containers = new ContainerStore(store.database, store.secretBox, () => limits);
     const host = addProxmoxHost(store).id;
     const [web, db] = [containers.add(host, 101, 'web'), containers.add(host, 102, 'db')];
@@ -160,17 +160,26 @@ describe('RepositoryStore file size', () => {
         .listRuns(containerId, 1000)
         .filter((r) => (r.kind === 'check') === check)
         .map((r) => r.id);
-    const updates = Array.from({ length: DEFAULT_RUN_HISTORY.others + 2 }, () => finish(web.id, 'apt-upgrade'));
-    const checks = Array.from({ length: DEFAULT_RUN_HISTORY.checks + 40 }, () => finish(web.id, 'check'));
+    // No limits by default: every run is kept.
+    const kept = Array.from({ length: 60 }, () => finish(web.id, 'check'));
+    assert.deepEqual(ids(web.id, true), kept.reverse());
+    assert.equal(containers.pruneRuns(), 0);
+
+    limits = { checks: 10, others: 30 };
+    const updates = Array.from({ length: 32 }, () => finish(web.id, 'apt-upgrade'));
+    const checks = Array.from({ length: 50 }, () => finish(web.id, 'check'));
     const dbChecks = Array.from({ length: 5 }, () => finish(db.id, 'check'));
 
-    assert.deepEqual(ids(web.id, true), checks.slice(-DEFAULT_RUN_HISTORY.checks).reverse());
+    assert.deepEqual(ids(web.id, true), checks.slice(-10).reverse());
     // Many checks after the updates did not push the update logs out.
-    assert.deepEqual(ids(web.id, false), updates.slice(-DEFAULT_RUN_HISTORY.others).reverse());
+    assert.deepEqual(ids(web.id, false), updates.slice(-30).reverse());
 
-    // Lowered limits (Settings) are applied to every container at once.
+    // Lowered limits (Settings) are applied to every container at once; null keeps all runs of that kind.
+    limits = { checks: 2, others: null };
+    assert.equal(containers.pruneRuns(), 0 + 8 + 3);
+    assert.deepEqual(ids(web.id, false), updates.slice(-30).reverse());
     limits = { checks: 2, others: 3 };
-    assert.equal(containers.pruneRuns(), 8 + 27 + 3);
+    assert.equal(containers.pruneRuns(), 27);
     assert.deepEqual(ids(web.id, true), checks.slice(-2).reverse());
     assert.deepEqual(ids(web.id, false), updates.slice(-3).reverse());
     assert.deepEqual(ids(db.id, true), dbChecks.slice(-2).reverse());

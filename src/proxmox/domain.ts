@@ -212,11 +212,14 @@ export interface RunResume {
  * separately from updates, upgrades and restarts, so frequent checks never push the logs of the last updates out.
  */
 export interface RunHistoryLimits {
-  checks: number;
-  others: number;
+  /** null = keep all. */
+  checks: number | null;
+  /** null = keep all. */
+  others: number | null;
 }
 
-export const DEFAULT_RUN_HISTORY: RunHistoryLimits = { checks: 10, others: 30 };
+/** By default every run is kept; limits are opt-in (Settings → Containers). */
+export const DEFAULT_RUN_HISTORY: RunHistoryLimits = { checks: null, others: null };
 export const MIN_RUN_HISTORY = 1;
 export const MAX_RUN_HISTORY = 500;
 

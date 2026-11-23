@@ -22,10 +22,10 @@ export interface Settings {
   containerCheckConcurrency: number;
   /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
   backupBeforeUpdate: boolean;
-  /** Checks kept in the run history of each container (set only in the UI, no env variable). */
-  runHistoryChecks: number;
-  /** Other runs (updates, upgrades, restarts) kept in the run history of each container (UI only). */
-  runHistoryUpdates: number;
+  /** Checks kept in the run history of each container; null = all (set only in the UI, no env variable). */
+  runHistoryChecks: number | null;
+  /** Other runs (updates, upgrades, restarts) kept per container; null = all (UI only). */
+  runHistoryUpdates: number | null;
   smtpHost: string | null;
   smtpPort: number;
   smtpSecurity: SmtpSecurity;

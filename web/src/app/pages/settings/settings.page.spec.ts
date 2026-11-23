@@ -24,10 +24,8 @@ const settings: AppSettings = {
     maxCheckConcurrency: 10,
     backupBeforeUpdate: true,
     backupBeforeUpdateSource: 'ui',
-    runHistoryChecks: 10,
+    runHistoryChecks: null,
     runHistoryUpdates: 30,
-    defaultRunHistoryChecks: 10,
-    defaultRunHistoryUpdates: 30,
     minRunHistory: 1,
     maxRunHistory: 500,
   },
@@ -184,10 +182,12 @@ describe('SettingsPage', () => {
     concurrency.value = '5';
     concurrency.dispatchEvent(new Event('input'));
     const historyChecks = section.querySelector<HTMLInputElement>('#pve-history-checks')!;
-    expect(historyChecks.value).toBe('10');
+    // No limit by default: the field is empty and says so.
+    expect(historyChecks.value).toBe('');
+    expect(historyChecks.placeholder).toBe('Unlimited');
     historyChecks.value = '4';
     historyChecks.dispatchEvent(new Event('input'));
-    // An emptied field goes back to the default.
+    // An emptied field keeps all runs again.
     const historyUpdates = section.querySelector<HTMLInputElement>('#pve-history-updates')!;
     expect(historyUpdates.value).toBe('30');
     historyUpdates.value = '';
