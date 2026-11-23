@@ -95,6 +95,8 @@ export class SettingsPage implements OnInit {
   protected checkCron = '';
   protected checkConcurrency: number | null = 3;
   protected backupDefault = false;
+  protected runHistoryChecks: number | null = 10;
+  protected runHistoryUpdates: number | null = 30;
   protected smtpHost = '';
   protected smtpPort: number | null = 587;
   protected smtpSecurity: SmtpSecurity = 'starttls';
@@ -248,13 +250,14 @@ export class SettingsPage implements OnInit {
   }
 
   protected async saveProxmox(): Promise<void> {
-    const concurrency =
-      this.checkConcurrency === null || `${this.checkConcurrency}` === '' ? null : Number(this.checkConcurrency);
+    const count = (value: number | null) => (value === null || `${value}` === '' ? null : Number(value));
     const patch: SettingsPatch = {
-      // Empty values reset to the environment default.
+      // Empty values reset to the environment (or built-in) default.
       containerCheckCron: this.checkCron.trim() || null,
-      containerCheckConcurrency: concurrency,
+      containerCheckConcurrency: count(this.checkConcurrency),
       backupBeforeUpdate: this.backupDefault,
+      runHistoryChecks: count(this.runHistoryChecks),
+      runHistoryUpdates: count(this.runHistoryUpdates),
     };
     if (await this.save('proxmox', patch, 'Container settings saved.')) {
       void this.statusService.refresh();
@@ -348,6 +351,8 @@ export class SettingsPage implements OnInit {
     this.checkCron = settings.proxmox.checkCron;
     this.checkConcurrency = settings.proxmox.checkConcurrency;
     this.backupDefault = settings.proxmox.backupBeforeUpdate;
+    this.runHistoryChecks = settings.proxmox.runHistoryChecks;
+    this.runHistoryUpdates = settings.proxmox.runHistoryUpdates;
     this.smtpHost = settings.email.smtpHost ?? '';
     this.smtpPort = settings.email.smtpPort;
     this.smtpSecurity = settings.email.smtpSecurity;

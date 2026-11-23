@@ -48,6 +48,32 @@
   min-width: 0;
 }
 
+/* Two numbers under one label: a borderless fieldset styled like a .field. */
+.run-history {
+  border: 0;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+
+  legend {
+    padding: 0;
+    margin-bottom: 6px;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+
+  .field > label {
+    font-weight: 500;
+    color: var(--text-muted);
+  }
+}
+
+.run-history-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 .section-icon {
   &.discord {
     background: var(--accent-soft);

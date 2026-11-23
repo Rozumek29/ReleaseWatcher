@@ -31,6 +31,7 @@ import { ContainerScheduler } from './proxmox/scheduler.ts';
 import { ContainerUpdater } from './proxmox/updater.ts';
 import { ContainerService } from './proxmox/service.ts';
 import type { NodeShell } from './proxmox/ssh.ts';
+import { DEFAULT_RUN_HISTORY, MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import { type KeyTool, SshKeygen } from './hosts/keys.ts';
 import { hostRoutes } from './hosts/routes.ts';
@@ -382,6 +383,8 @@ const settingsSchema: ObjectSchema = {
     containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
     containerCheckConcurrency: { type: 'integer', nullable: true },
     backupBeforeUpdate: { type: 'boolean', nullable: true },
+    runHistoryChecks: { type: 'integer', nullable: true },
+    runHistoryUpdates: { type: 'integer', nullable: true },
     smtpHost: { type: 'string', nullable: true, maxLength: 253 },
     smtpPort: { type: 'integer', nullable: true },
     smtpSecurity: { type: 'string', nullable: true, maxLength: 20 },
@@ -428,7 +431,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       updateFailed: current.notifyUpdateFailed,
     };
   });
-  const containerStore = new ContainerStore(deps.store.database, deps.store.secretBox);
+  const containerStore = new ContainerStore(deps.store.database, deps.store.secretBox, () => ({
+    checks: deps.settings.current.runHistoryChecks,
+    others: deps.settings.current.runHistoryUpdates,
+  }));
   /** Installed versions of container apps per linked repository (compared with the repository's advisories). */
   const linkedAppVersions = (): Map<number, (string | null)[]> => {
     const byRepository = new Map<number, (string | null)[]>();
@@ -477,6 +483,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   settings.onChange(() => {
     releaseJob.reschedule();
     advisoryJob.reschedule();
+    // Lowered run history limits apply to every container right away.
+    containerStore.pruneRuns();
   });
 
   const hostStore = new HostStore(store.database, store.secretBox);
@@ -580,6 +588,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         maxCheckConcurrency: MAX_CHECK_CONCURRENCY,
         backupBeforeUpdate: current.backupBeforeUpdate,
         backupBeforeUpdateSource: settings.sourceOf('backupBeforeUpdate'),
+        // Set only in the UI (no env variable), so there is no source to show.
+        runHistoryChecks: current.runHistoryChecks,
+        runHistoryUpdates: current.runHistoryUpdates,
+        defaultRunHistoryChecks: DEFAULT_RUN_HISTORY.checks,
+        defaultRunHistoryUpdates: DEFAULT_RUN_HISTORY.others,
+        minRunHistory: MIN_RUN_HISTORY,
+        maxRunHistory: MAX_RUN_HISTORY,
       },
       email: {
         configured: deps.notifiers.some((n) => n.name === 'email' && n.isEnabled),

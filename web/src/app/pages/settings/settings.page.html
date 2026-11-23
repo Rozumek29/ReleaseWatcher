@@ -335,6 +335,51 @@
                 Each check uses one SSH connection.
               </span>
             </div>
+
+            <fieldset class="field run-history">
+              <legend>Run history per container</legend>
+              <div class="run-history-inputs">
+                <div class="field">
+                  <label for="pve-history-checks">Checks</label>
+                  <input
+                    id="pve-history-checks"
+                    class="input"
+                    type="number"
+                    name="runHistoryChecks"
+                    [min]="s.proxmox.minRunHistory"
+                    [max]="s.proxmox.maxRunHistory"
+                    [placeholder]="s.proxmox.defaultRunHistoryChecks"
+                    [(ngModel)]="runHistoryChecks"
+                    [class.invalid]="errors()['runHistoryChecks']"
+                  />
+                  @if (errors()['runHistoryChecks']; as e) {
+                    <span class="error">{{ e }}</span>
+                  }
+                </div>
+                <div class="field">
+                  <label for="pve-history-updates">Updates and other runs</label>
+                  <input
+                    id="pve-history-updates"
+                    class="input"
+                    type="number"
+                    name="runHistoryUpdates"
+                    [min]="s.proxmox.minRunHistory"
+                    [max]="s.proxmox.maxRunHistory"
+                    [placeholder]="s.proxmox.defaultRunHistoryUpdates"
+                    [(ngModel)]="runHistoryUpdates"
+                    [class.invalid]="errors()['runHistoryUpdates']"
+                  />
+                  @if (errors()['runHistoryUpdates']; as e) {
+                    <span class="error">{{ e }}</span>
+                  }
+                </div>
+              </div>
+              <span class="hint">
+                How many runs with their console output are kept, {{ s.proxmox.minRunHistory }}–{{ s.proxmox.maxRunHistory }}.
+                Checks are counted separately, so frequent checks never push update logs out. Older runs are deleted
+                when you save. Empty = default ({{ s.proxmox.defaultRunHistoryChecks }} / {{ s.proxmox.defaultRunHistoryUpdates }}).
+              </span>
+            </fieldset>
           </div>
           <div class="proxmox-col">
             <div class="field">

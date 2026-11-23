@@ -5,12 +5,14 @@ import {
   type AptPackage,
   type Container,
   type ContainerApp,
+  DEFAULT_RUN_HISTORY,
   type GuestKind,
   type LatestSource,
   NODE_VMID,
   type OsRelease,
   type ResourceChange,
   type Run,
+  type RunHistoryLimits,
   type RunKind,
   type RunResume,
   type RunStatus,
@@ -207,23 +209,22 @@ export type AppInput = Pick<
   'name' | 'versionCommand' | 'latestSource' | 'repositoryId' | 'latestCommand' | 'updateCommand' | 'useTty' | 'timeoutSeconds'
 >;
 
-/**
- * Runs kept per container; older ones are pruned. Checks (mostly scheduled, short output) are counted separately from
- * updates, upgrades and restarts, so frequent checks never push the logs of the last updates out of the history.
- */
-export const CHECK_RUNS_KEPT = 10;
-export const OTHER_RUNS_KEPT = 30;
-
 /** SQLite persistence of containers, their applications and runs (tables created by `RepositoryStore`). */
 export class ContainerStore {
   private readonly db: Database;
   private readonly secrets: SecretBox;
   private readonly toContainer = (r: ContainerRow): Container => toContainer(r, this.secrets);
 
-  /** @param secrets encrypts the Home Assistant token (the `RepositoryStore`'s box: `store.secretBox`) */
-  constructor(db: Database, secrets: SecretBox) {
+  private readonly runHistory: () => RunHistoryLimits;
+
+  /**
+   * @param secrets encrypts the Home Assistant token (the `RepositoryStore`'s box: `store.secretBox`)
+   * @param runHistory how many runs to keep per container (read for every prune, so setting changes apply at once)
+   */
+  constructor(db: Database, secrets: SecretBox, runHistory: () => RunHistoryLimits = () => DEFAULT_RUN_HISTORY) {
     this.db = db;
     this.secrets = secrets;
+    this.runHistory = runHistory;
   }
 
   list(): Container[] {
@@ -469,18 +470,29 @@ export class ContainerStore {
     this.db
       .query('UPDATE container_runs SET status = ?, finished_at = ?, exit_code = ?, output = ?, resume = NULL WHERE id = ?')
       .run(run.status, run.finishedAt, run.exitCode, packOutput(run.output), run.id);
-    // Keep only the newest runs of this container (checks and other runs separately).
-    const check = run.kind === 'check' ? 1 : 0;
+    this.pruneRuns(run.containerId);
+  }
+
+  /**
+   * Deletes the runs beyond the run history limits (checks and other runs counted separately) – of one container, or
+   * of all when `containerId` is omitted (after the limits were lowered). Returns the number of deleted runs.
+   */
+  pruneRuns(containerId: number | null = null): number {
+    const { checks, others } = this.runHistory();
     const pruned = this.db
       .query(
-        `DELETE FROM container_runs WHERE container_id = ?1 AND (kind = 'check') = ?2 AND status <> 'running' AND id NOT IN (
-           SELECT id FROM container_runs WHERE container_id = ?1 AND (kind = 'check') = ?2 ORDER BY id DESC LIMIT ?3)`,
+        `DELETE FROM container_runs WHERE status <> 'running' AND id IN (
+           SELECT id FROM (
+             SELECT id, kind, ROW_NUMBER() OVER (PARTITION BY container_id, kind = 'check' ORDER BY id DESC) AS n
+             FROM container_runs WHERE ?1 IS NULL OR container_id = ?1)
+           WHERE n > CASE WHEN kind = 'check' THEN ?2 ELSE ?3 END)`,
       )
-      .run(run.containerId, check, check ? CHECK_RUNS_KEPT : OTHER_RUNS_KEPT).changes;
+      .run(containerId, checks, others).changes;
     if (pruned > 0) {
       // Give the freed pages back to the file system (the database uses auto_vacuum = INCREMENTAL).
       this.db.run('PRAGMA incremental_vacuum');
     }
+    return pruned;
   }
 
   getRun(id: number): Run | null {

@@ -4,6 +4,7 @@ import type { RepositoryStore } from './db.ts';
 import { DEFAULT_NOTIFICATION_PREFERENCES } from './notifiers/dispatcher.ts';
 import { parseAddress, parseRecipients } from './notifiers/email.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
+import { DEFAULT_RUN_HISTORY, MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 
 /** Runtime settings editable from the UI. Values stored in the database override environment defaults. */
 export interface Settings {
@@ -21,6 +22,10 @@ export interface Settings {
   containerCheckConcurrency: number;
   /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
   backupBeforeUpdate: boolean;
+  /** Checks kept in the run history of each container (set only in the UI, no env variable). */
+  runHistoryChecks: number;
+  /** Other runs (updates, upgrades, restarts) kept in the run history of each container (UI only). */
+  runHistoryUpdates: number;
   smtpHost: string | null;
   smtpPort: number;
   smtpSecurity: SmtpSecurity;
@@ -115,6 +120,8 @@ export class SettingsService {
       containerCheckCron: config.proxmox.checkCron,
       containerCheckConcurrency: config.proxmox.checkConcurrency,
       backupBeforeUpdate: config.proxmox.backupBeforeUpdate,
+      runHistoryChecks: DEFAULT_RUN_HISTORY.checks,
+      runHistoryUpdates: DEFAULT_RUN_HISTORY.others,
       smtpHost: config.email.smtpHost,
       smtpPort: config.email.smtpPort,
       smtpSecurity: config.email.smtpSecurity,
@@ -205,6 +212,8 @@ export class SettingsService {
           ? Number(o.containerCheckConcurrency)
           : this.defaults.containerCheckConcurrency,
       backupBeforeUpdate: flag('backupBeforeUpdate'),
+      runHistoryChecks: o.runHistoryChecks !== undefined ? Number(o.runHistoryChecks) : this.defaults.runHistoryChecks,
+      runHistoryUpdates: o.runHistoryUpdates !== undefined ? Number(o.runHistoryUpdates) : this.defaults.runHistoryUpdates,
       smtpHost: o.smtpHost ?? this.defaults.smtpHost,
       smtpPort: o.smtpPort !== undefined ? Number(o.smtpPort) : this.defaults.smtpPort,
       smtpSecurity: (o.smtpSecurity as SmtpSecurity | undefined) ?? this.defaults.smtpSecurity,
@@ -348,6 +357,14 @@ function validate(key: SettingKey, value: string): void {
           key,
           `Parallel checks must be between ${MIN_CHECK_CONCURRENCY} and ${MAX_CHECK_CONCURRENCY}.`,
         );
+      }
+      return;
+    }
+    case 'runHistoryChecks':
+    case 'runHistoryUpdates': {
+      const count = Number(value);
+      if (!Number.isInteger(count) || count < MIN_RUN_HISTORY || count > MAX_RUN_HISTORY) {
+        throw new SettingsValidationError(key, `Keep between ${MIN_RUN_HISTORY} and ${MAX_RUN_HISTORY} runs.`);
       }
       return;
     }
