@@ -886,9 +886,14 @@ code {
   }
 }
 
-/* A dialog with unsaved changes refuses a backdrop click or Escape (BackdropClose `keepOpen`). */
-.dialog.shake {
-  animation: shake 0.26s var(--ease-out);
+/*
+ * A dialog with unsaved changes refuses a backdrop click or Escape (BackdropClose `keepOpen`). `pop` stays in the list:
+ * an animation whose name remains is not restarted, so the dialog does not "open" again when the class comes or goes.
+ */
+.dialog[open].shake {
+  animation:
+    pop 0.16s ease-out,
+    shake 0.26s var(--ease-out);
 }
 
 @keyframes shake {
