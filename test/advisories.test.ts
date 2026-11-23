@@ -112,6 +112,37 @@ describe('patched versions', () => {
     });
     assert.equal(advisoryAffects(unfixed, '9.0.0'), true);
   });
+
+  it('use a list of fixes per release line (grafana/grafana)', () => {
+    const affects = (vulnerableRange: string, patchedVersions: string, version: string) =>
+      advisoryAffects(
+        advisory('GHSA-grafana', 1, vulnerableRange, {
+          vulnerabilities: [{ packageName: 'grafana', vulnerableRange, patchedVersions }],
+        }),
+        version,
+      );
+    // GHSA-2j8f-6whh-frc8: open range, fixed in 9.3.4 and 9.2.10.
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '13.3.1'), false);
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '9.3.4'), false);
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '9.2.12'), false);
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '9.2.9'), true);
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '9.3.1'), true);
+    assert.equal(affects('>=8.3.0-beta1', '9.3.4, 9.2.10', '8.2.0'), false);
+    // Unreadable ranges.
+    assert.equal(affects('<9.x, <8.x', '9.2.4, 8.5.15', '13.3.1'), false);
+    assert.equal(affects('<= 9.+,  <= 8.+', '9.1.8, 8.5.14', '8.5.14'), false);
+    assert.equal(affects('6.3.0-beta1 - 9.3.1', '9.3.2, 9.2.8, 8.5.16', '8.5.20'), false);
+    assert.equal(affects('6.3.0-beta1 - 9.3.1', '9.3.2, 9.2.8, 8.5.16', '8.5.15'), true);
+  });
+
+  it('keep a range that opens again above the newest fix (OSV)', () => {
+    const a = advisory('OSV-reopened', 1, '< 1.0.0 || >= 2.0.0, < 2.1.0 || >= 3.0.0', {
+      vulnerabilities: [{ packageName: 'app', vulnerableRange: '< 1.0.0 || >= 2.0.0, < 2.1.0 || >= 3.0.0', patchedVersions: '1.0.0, 2.1.0' }],
+    });
+    assert.equal(advisoryAffects(a, '3.5.0'), true);
+    assert.equal(advisoryAffects(a, '2.5.0'), false);
+    assert.equal(advisoryAffects(a, '2.0.5'), true);
+  });
 });
 
 describe('installed versions', () => {

@@ -2,7 +2,7 @@
  * Security advisories of watched repositories (GitHub repository advisories and OSV.dev) – pure logic only.
  */
 import type { CronSchedule } from './cron.ts';
-import { compareVersions } from './version.ts';
+import { compareVersions, parseVersion } from './version.ts';
 
 /** Where advisories come from; each can be switched off in the settings. */
 export const ADVISORY_SOURCES = ['github', 'osv'] as const;
@@ -202,6 +202,44 @@ export function effectiveRange(vulnerableRange: string, patchedVersions: string 
     .join(' || ');
 }
 
+/** The versions of a patched list such as "9.3.4, 9.2.10" or ">= 8.5.16, 9.2.8"; empty when it names fewer than two. */
+function patchedList(patchedVersions: string | null): string[] {
+  const versions = (patchedVersions ?? '')
+    .split(/,|\|\|/)
+    .map((part) => part.trim().match(/^(>=|=|==)?\s*(\S+)$/)?.[2])
+    .filter((v): v is string => !!v && parseVersion(v) !== null);
+  return versions.length > 1 ? versions : [];
+}
+
+const sameLine = (a: string, b: string): boolean => {
+  const [left, right] = [parseVersion(a), parseVersion(b)];
+  return !!left && !!right && left.numbers[0] === right.numbers[0] && (left.numbers[1] ?? 0) === (right.numbers[1] ?? 0);
+};
+
+/**
+ * Fixed according to a list of patched versions (one per maintained release line, e.g. "9.3.4, 9.2.10"): the version
+ * is at least the newest fix, or at least the fix of its own major.minor line. Such advisories often come with a
+ * vulnerable range that has no upper bound (">= 8.3.0-beta1") or can't be read ("<9.x, <8.x"). Not applied when an
+ * open range starts at or above the newest fix (introduced again later, as OSV ranges can say).
+ */
+function fixedByPatchList(version: string, vulnerableRange: string, patchedVersions: string | null): boolean {
+  const patched = patchedList(patchedVersions);
+  if (patched.length === 0) {
+    return false;
+  }
+  const newest = patched.reduce((max, v) => ((compareVersions(v, max) ?? 0) > 0 ? v : max));
+  const reopened = normalizeRange(vulnerableRange)
+    .split('||')
+    .filter((alternative) => !alternative.includes('<'))
+    .some((alternative) =>
+      [...alternative.matchAll(/(>=|>)\s*(\S+?)(?:,|$)/g)].some((m) => (compareVersions(m[2], newest) ?? -1) >= 0),
+    );
+  if (reopened) {
+    return false;
+  }
+  return patched.some((p) => (compareVersions(version, p) ?? -1) >= 0 && (p === newest || sameLine(version, p)));
+}
+
 /**
  * Does the advisory affect `version`? True/false when at least one vulnerable range could be compared, null when the
  * version is unknown or no range is usable.
@@ -215,6 +253,10 @@ export function advisoryAffects(advisory: Pick<SecurityAdvisory, 'vulnerabilitie
   for (const vulnerability of advisory.vulnerabilities) {
     if (!vulnerability.vulnerableRange) {
       unknown = true;
+      continue;
+    }
+    if (fixedByPatchList(version, vulnerability.vulnerableRange, vulnerability.patchedVersions)) {
+      compared = true;
       continue;
     }
     const result = versionInRange(version, effectiveRange(vulnerability.vulnerableRange, vulnerability.patchedVersions));
