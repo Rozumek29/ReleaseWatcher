@@ -8,6 +8,7 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -34,12 +35,13 @@ import { Icon } from '../../shared/icon';
 import { OSV_ECOSYSTEMS } from '../../shared/severity';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
+import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
 @Component({
   selector: 'app-repository-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, Avatar, Icon, IconPickerDialog, Switch],
+  imports: [BackdropClose, FormsModule, Avatar, Icon, IconPickerDialog, Switch, UnsavedChanges],
   templateUrl: './repository-settings.dialog.html',
   styleUrl: './repository-settings.dialog.scss',
 })
@@ -75,12 +77,37 @@ export class RepositorySettingsDialog {
   /** Value the icon picker opens with; null = closed. */
   protected readonly picking = signal<string | null>(null);
   private nextHeaderId = 1;
+  /** The form as opened, to tell whether it has unsaved changes. */
+  private savedValues: unknown = null;
 
   protected readonly saving = signal(false);
   protected readonly testing = signal(false);
   protected readonly testResult = signal<InstalledVersionTestResult | null>(null);
   protected readonly testError = signal<string | null>(null);
   protected readonly saveError = signal<string | null>(null);
+
+  /** The form values compared by `changed()` (header ids are left out). */
+  private values(): unknown {
+    return [
+      this.source,
+      this.manualVersion,
+      this.url,
+      this.field,
+      this.includePrereleases,
+      this.isEnabled,
+      this.headers.map((h) => [h.name, h.value, h.saved]),
+      this.token,
+      this.removeToken,
+      this.osvEcosystem,
+      this.osvPackage,
+      this.icon(),
+    ];
+  }
+
+  /** Whether the form differs from the saved repository (read by the template on every check). */
+  protected changed(): boolean {
+    return !sameValues(this.values(), this.savedValues);
+  }
 
   constructor() {
     effect(() => {
@@ -101,6 +128,7 @@ export class RepositorySettingsDialog {
         this.picking.set(null);
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
+        this.savedValues = untracked(() => this.values());
         this.testResult.set(null);
         this.testError.set(null);
         this.saveError.set(null);

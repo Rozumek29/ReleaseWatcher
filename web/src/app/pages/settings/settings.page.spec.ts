@@ -283,6 +283,48 @@ describe('SettingsPage', () => {
     });
   });
 
+  it('marks sections with unsaved changes and keeps them when another section is saved', async () => {
+    await TestBed.configureTestingModule({
+      imports: [SettingsPage],
+      providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(SettingsPage);
+    fixture.detectChanges();
+    http.expectOne('/api/settings').flush(settings);
+    await settle(fixture);
+    http.match('/api/github/rate-limit').forEach((r) => r.flush(null));
+    const el = fixture.nativeElement as HTMLElement;
+    const polling = el.querySelector<HTMLElement>('section[aria-labelledby=polling-title]')!;
+    const advisories = el.querySelector<HTMLElement>('section[aria-labelledby=advisories-title]')!;
+    expect(el.querySelector('app-unsaved-changes')).toBeNull();
+
+    const cron = polling.querySelector<HTMLInputElement>('#release-cron')!;
+    cron.value = '0 * * * *';
+    cron.dispatchEvent(new Event('input'));
+    advisories.querySelector<HTMLButtonElement>('[role=switch][aria-label="OSV.dev"]')!.click();
+    await settle(fixture);
+    expect(polling.querySelector('app-unsaved-changes')?.textContent).toContain('Unsaved changes');
+    expect(advisories.querySelector('app-unsaved-changes')).not.toBeNull();
+
+    // Typing the saved value again is no change.
+    cron.value = '*/15 * * * *';
+    cron.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(polling.querySelector('app-unsaved-changes')).toBeNull();
+    cron.value = '0 * * * *';
+    cron.dispatchEvent(new Event('input'));
+    await settle(fixture);
+
+    advisories.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    http.expectOne('/api/settings').flush({ ...settings, advisories: { ...settings.advisories, osv: false } });
+    await settle(fixture);
+    expect(advisories.querySelector('app-unsaved-changes')).toBeNull();
+    // The unsaved schedule survives saving another section.
+    expect(cron.value).toBe('0 * * * *');
+    expect(polling.querySelector('app-unsaved-changes')).not.toBeNull();
+  });
+
   it('switches vulnerability sources on and off', async () => {
     await TestBed.configureTestingModule({
       imports: [SettingsPage],

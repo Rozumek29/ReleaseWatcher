@@ -25,10 +25,12 @@ import { describeCron } from '../../shared/cron';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
+import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 import { AppearancePanel } from './appearance';
 import { ConnectionsPanel } from './connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
+const SECTIONS: readonly Section[] = ['discord', 'email', 'notifications', 'github', 'polling', 'advisories', 'proxmox'];
 type Tab = 'general' | 'connections' | 'notifications' | 'appearance';
 const TABS: readonly Tab[] = ['general', 'connections', 'notifications', 'appearance'];
 
@@ -56,7 +58,16 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
 @Component({
   selector: 'app-settings-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DecimalPipe, AppearancePanel, ConnectionsPanel, Icon, RelativeTimePipe, Switch],
+  imports: [
+    FormsModule,
+    DecimalPipe,
+    AppearancePanel,
+    ConnectionsPanel,
+    Icon,
+    RelativeTimePipe,
+    Switch,
+    UnsavedChanges,
+  ],
   templateUrl: './settings.page.html',
   styleUrl: './settings.page.scss',
 })
@@ -113,6 +124,9 @@ export class SettingsPage implements OnInit {
     updateSucceeded: false,
     updateFailed: false,
   };
+
+  /** Form values of each section as last loaded or saved, to tell which sections have unsaved changes. */
+  private savedValues: Partial<Record<Section, unknown>> = {};
 
   protected readonly kinds = NOTIFICATION_KINDS;
 
@@ -206,12 +220,6 @@ export class SettingsPage implements OnInit {
         notifyUpdateFailed: p.updateFailed,
       },
       'Notification settings saved.',
-    );
-  }
-
-  protected notificationsChanged(s: AppSettings): boolean {
-    return (Object.keys(this.preferences) as (keyof NotificationPreferences)[]).some(
-      (key) => this.preferences[key] !== s.notifications[key],
     );
   }
 
@@ -313,16 +321,51 @@ export class SettingsPage implements OnInit {
     return source === 'ui' ? 'Saved here' : source === 'env' ? 'From environment' : 'Not set';
   }
 
-  /** Whether the schedule fields differ from the saved values. */
-  protected pollingChanged(s: AppSettings): boolean {
-    return this.releaseCron.trim() !== s.polling.releaseCron || this.advisoryCron.trim() !== s.polling.advisoryCron;
+  /** Whether the fields of a section differ from the saved values (read by the template on every check). */
+  protected changed(section: Section): boolean {
+    return !sameValues(this.sectionValues(section), this.savedValues[section]);
+  }
+
+  /** The form values of one section, as compared by `changed()`. */
+  private sectionValues(section: Section): unknown {
+    switch (section) {
+      case 'github':
+        return this.token.trim();
+      case 'polling':
+        return [this.releaseCron.trim(), this.advisoryCron.trim()];
+      case 'advisories':
+        return [this.advisoriesGithub, this.advisoriesOsv];
+      case 'proxmox':
+        return [
+          this.checkCron.trim(),
+          `${this.checkConcurrency ?? ''}`,
+          this.backupDefault,
+          `${this.runHistoryChecks ?? ''}`,
+          `${this.runHistoryUpdates ?? ''}`,
+        ];
+      case 'discord':
+        return [this.webhookUrl.trim(), this.mention, this.username];
+      case 'email':
+        return [
+          this.smtpHost.trim(),
+          `${this.smtpPort ?? ''}`,
+          this.smtpSecurity,
+          this.smtpUsername.trim(),
+          this.smtpPassword,
+          this.emailFrom.trim(),
+          this.emailTo.trim(),
+        ];
+      case 'notifications':
+        return this.preferences;
+    }
   }
 
   private async save(section: Section, patch: SettingsPatch, successText: string): Promise<boolean> {
     this.saving.set(section);
     this.errors.set({});
     try {
-      this.apply(await firstValueFrom(this.api.updateSettings(patch)));
+      // Only the saved section is reset: unsaved changes in other sections are kept.
+      this.apply(await firstValueFrom(this.api.updateSettings(patch)), section);
       this.toast.success(successText);
       return true;
     } catch (error) {
@@ -338,37 +381,62 @@ export class SettingsPage implements OnInit {
     }
   }
 
-  private apply(settings: AppSettings): void {
+  /** Fills the form from the settings: every section, or only the one just saved. */
+  private apply(settings: AppSettings, only?: Section): void {
     this.settings.set(settings);
-    this.webhookUrl = '';
-    this.token = '';
-    this.advisoriesGithub = settings.advisories.github;
-    this.advisoriesOsv = settings.advisories.osv;
-    this.mention = settings.discord.mention ?? '';
-    this.username = settings.discord.username ?? '';
-    this.releaseCron = settings.polling.releaseCron;
-    this.advisoryCron = settings.polling.advisoryCron;
-    this.checkCron = settings.proxmox.checkCron;
-    this.checkConcurrency = settings.proxmox.checkConcurrency;
-    this.backupDefault = settings.proxmox.backupBeforeUpdate;
-    this.runHistoryChecks = settings.proxmox.runHistoryChecks;
-    this.runHistoryUpdates = settings.proxmox.runHistoryUpdates;
-    this.smtpHost = settings.email.smtpHost ?? '';
-    this.smtpPort = settings.email.smtpPort;
-    this.smtpSecurity = settings.email.smtpSecurity;
-    this.smtpUsername = settings.email.smtpUsername ?? '';
-    this.smtpPassword = '';
-    this.emailFrom = settings.email.from ?? '';
-    this.emailTo = settings.email.to ?? '';
-    const n = settings.notifications;
-    this.preferences = {
-      digest: n.digest,
-      releases: n.releases,
-      vulnerabilities: n.vulnerabilities,
-      appUpdates: n.appUpdates,
-      aptUpdates: n.aptUpdates,
-      updateSucceeded: n.updateSucceeded,
-      updateFailed: n.updateFailed,
-    };
+    for (const section of only ? [only] : SECTIONS) {
+      this.reset(section, settings);
+      this.savedValues[section] = this.sectionValues(section);
+    }
+  }
+
+  private reset(section: Section, settings: AppSettings): void {
+    switch (section) {
+      case 'github':
+        this.token = '';
+        break;
+      case 'advisories':
+        this.advisoriesGithub = settings.advisories.github;
+        this.advisoriesOsv = settings.advisories.osv;
+        break;
+      case 'discord':
+        this.webhookUrl = '';
+        this.mention = settings.discord.mention ?? '';
+        this.username = settings.discord.username ?? '';
+        break;
+      case 'polling':
+        this.releaseCron = settings.polling.releaseCron;
+        this.advisoryCron = settings.polling.advisoryCron;
+        break;
+      case 'proxmox':
+        this.checkCron = settings.proxmox.checkCron;
+        this.checkConcurrency = settings.proxmox.checkConcurrency;
+        this.backupDefault = settings.proxmox.backupBeforeUpdate;
+        this.runHistoryChecks = settings.proxmox.runHistoryChecks;
+        this.runHistoryUpdates = settings.proxmox.runHistoryUpdates;
+        break;
+      case 'email':
+        this.smtpHost = settings.email.smtpHost ?? '';
+        this.smtpPort = settings.email.smtpPort;
+        this.smtpSecurity = settings.email.smtpSecurity;
+        this.smtpUsername = settings.email.smtpUsername ?? '';
+        this.smtpPassword = '';
+        this.emailFrom = settings.email.from ?? '';
+        this.emailTo = settings.email.to ?? '';
+        break;
+      case 'notifications': {
+        const n = settings.notifications;
+        this.preferences = {
+          digest: n.digest,
+          releases: n.releases,
+          vulnerabilities: n.vulnerabilities,
+          appUpdates: n.appUpdates,
+          aptUpdates: n.aptUpdates,
+          updateSucceeded: n.updateSucceeded,
+          updateFailed: n.updateFailed,
+        };
+        break;
+      }
+    }
   }
 }

@@ -16,6 +16,7 @@ import { SshKey } from '../../core/models';
 import { ToastService } from '../../core/toast.service';
 import { BackdropClose } from '../../shared/backdrop-close';
 import { Icon } from '../../shared/icon';
+import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 
 /** `add` pastes a private key, `generate` creates a key pair on the server, `rename` changes the name. */
 export type SshKeyDialogMode = { kind: 'add' } | { kind: 'generate' } | { kind: 'rename'; key: SshKey };
@@ -24,7 +25,7 @@ export type SshKeyDialogMode = { kind: 'add' } | { kind: 'generate' } | { kind: 
 @Component({
   selector: 'app-ssh-key-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, Icon],
+  imports: [BackdropClose, FormsModule, Icon, UnsavedChanges],
   templateUrl: './ssh-key.dialog.html',
   styleUrl: './ssh-key.dialog.scss',
 })
@@ -46,6 +47,8 @@ export class SshKeyDialog {
   protected readonly saving = signal(false);
   protected readonly errors = signal<Record<string, string>>({});
   protected readonly saveError = signal<string | null>(null);
+  /** The form as opened, to tell whether it has unsaved changes. */
+  private savedValues: unknown = null;
 
   constructor() {
     effect(() => {
@@ -54,6 +57,7 @@ export class SshKeyDialog {
       if (mode) {
         this.name = mode.kind === 'rename' ? mode.key.name : '';
         this.privateKey = '';
+        this.savedValues = this.values();
         this.generated.set(null);
         this.errors.set({});
         this.saveError.set(null);
@@ -64,6 +68,15 @@ export class SshKeyDialog {
         dialog.close();
       }
     });
+  }
+
+  private values(): unknown {
+    return [this.name, this.privateKey];
+  }
+
+  /** Whether the form differs from what it was opened with (read by the template on every check). */
+  protected changed(): boolean {
+    return !sameValues(this.values(), this.savedValues);
   }
 
   protected title(mode: SshKeyDialogMode): string {

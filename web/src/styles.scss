@@ -724,6 +724,16 @@ code {
   border-top: 1px solid var(--border);
 }
 
+/* The "Unsaved changes" note sits on the left of the footer buttons (in sections: after the spacer, by the save button). */
+.dialog-foot {
+  flex-wrap: wrap;
+  align-items: center;
+
+  app-unsaved-changes {
+    margin-right: auto;
+  }
+}
+
 /*
  * Header and footer stay in view, only the body scrolls. On short viewports (phones in landscape) they would leave
  * too little room for the content, so there the whole dialog scrolls as one (the rules above).

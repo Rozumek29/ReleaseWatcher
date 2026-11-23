@@ -52,10 +52,12 @@ describe('RepositorySettingsDialog', () => {
     const el = fixture.nativeElement as HTMLElement;
     const preview = () => el.querySelector<HTMLImageElement>('.dialog-head app-avatar img')!.getAttribute('src');
     expect(preview()).toBe(repo.avatarUrl);
+    expect(el.querySelector('app-unsaved-changes')).toBeNull();
     const icon = el.querySelector<HTMLInputElement>('#repo-icon')!;
     icon.value = 'sh:vaultwarden-light';
     icon.dispatchEvent(new Event('input'));
     await settle(fixture);
+    expect(el.querySelector('.dialog-foot app-unsaved-changes')).not.toBeNull();
     expect(preview()).toBe('https://cdn.jsdelivr.net/gh/selfhst/icons/svg/vaultwarden-light.svg');
 
     // An image that fails to load falls back to the next format, then to the owner's avatar.

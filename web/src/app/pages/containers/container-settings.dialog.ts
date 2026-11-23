@@ -5,6 +5,7 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  computed,
   effect,
   inject,
   input,
@@ -28,6 +29,7 @@ import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
+import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 
 /** Editable state of the application form. */
 interface AppForm {
@@ -68,7 +70,7 @@ const byName = (list: ContainerApp[]): ContainerApp[] =>
 @Component({
   selector: 'app-container-settings-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, NgTemplateOutlet, Icon, Switch],
+  imports: [BackdropClose, FormsModule, NgTemplateOutlet, Icon, Switch, UnsavedChanges],
   templateUrl: './container-settings.dialog.html',
   styleUrls: ['./dialog.scss', './container-settings.dialog.scss'],
 })
@@ -104,11 +106,20 @@ export class ContainerSettingsDialog {
   protected removeToken = false;
   protected homeAssistantInstall = false;
   protected readonly showToken = signal(false);
+  /** The container fields as opened, to tell whether they have unsaved changes. */
+  private savedValues: unknown = null;
 
   protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
   protected readonly repositories = signal<WatchedRepository[]>([]);
   protected readonly appForm = signal<AppForm | null>(null);
+  /** The application form as it was opened, to tell whether it has unsaved changes. */
+  private readonly appFormInitial = signal<AppForm | null>(null);
+  /** The open application form differs from what it was opened with ("Save container" does not save it). */
+  protected readonly appFormDirty = computed(() => {
+    const form = this.appForm();
+    return form !== null && !sameValues(form, this.appFormInitial());
+  });
   protected readonly confirmDeleteAppId = signal<number | null>(null);
 
   /** Suggestions of the last detection; null = not detected (hidden). */
@@ -143,6 +154,7 @@ export class ContainerSettingsDialog {
           this.removeToken = false;
           this.homeAssistantInstall = container.homeAssistant?.installEnabled ?? false;
           this.showToken.set(false);
+          this.savedValues = this.values();
           this.apps.set(container.apps);
           this.appForm.set(null);
           this.confirmDeleteAppId.set(null);
@@ -202,6 +214,36 @@ export class ContainerSettingsDialog {
     }
   }
 
+  /** The container fields (not the applications, which are saved on their own). */
+  private values(): unknown {
+    return [
+      this.name,
+      this.isEnabled,
+      this.aptEnabled,
+      this.startWhenStopped,
+      this.backupChoice,
+      this.checkCron,
+      this.updateCores,
+      this.updateMemoryMb,
+      this.homeAssistantUrl,
+      this.homeAssistantToken,
+      this.removeToken,
+      this.homeAssistantInstall,
+    ];
+  }
+
+  /** Whether the container fields differ from the saved ones (read by the template on every check). */
+  protected containerChanged(): boolean {
+    return !sameValues(this.values(), this.savedValues);
+  }
+
+  /** Brings the open application form into view (from the footer note). */
+  protected showAppForm(): void {
+    const name = this.dialog().nativeElement.querySelector<HTMLInputElement>('#app-name');
+    name?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+    name?.focus({ preventScroll: true });
+  }
+
   protected newApp(): void {
     this.openAppForm(emptyForm());
   }
@@ -226,12 +268,9 @@ export class ContainerSettingsDialog {
     this.appError.set(null);
     this.confirmDeleteAppId.set(null);
     this.appForm.set(form);
+    this.appFormInitial.set(form);
     afterNextRender(
-      () => {
-        const name = this.dialog().nativeElement.querySelector<HTMLInputElement>('#app-name');
-        name?.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
-        name?.focus({ preventScroll: true });
-      },
+      () => this.showAppForm(),
       { injector: this.injector },
     );
   }

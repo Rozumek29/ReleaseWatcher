@@ -55,6 +55,9 @@
       </div>
       <div class="section-actions">
         <span class="spacer"></span>
+        @if (accountChanged()) {
+          <app-unsaved-changes />
+        }
         <button type="submit" class="btn" [disabled]="savingAccount()">{{ savingAccount() ? 'Saving…' : 'Save' }}</button>
       </div>
     </form>

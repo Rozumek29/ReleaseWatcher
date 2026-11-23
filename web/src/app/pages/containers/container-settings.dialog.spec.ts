@@ -159,6 +159,38 @@ describe('ContainerSettingsDialog', () => {
     expect(el.textContent).toContain('dist-upgrade');
   });
 
+  it('warns in the footer about unsaved container and application changes', async () => {
+    const { fixture, el } = await open(container());
+    const note = () => el.querySelector('.dialog-foot app-unsaved-changes');
+    expect(note()).toBeNull();
+
+    type(el, '#ct-cron', '30 4 * * *');
+    await settle(fixture);
+    expect(note()?.textContent).toContain('Unsaved changes');
+    type(el, '#ct-cron', '');
+    await settle(fixture);
+    expect(note()).toBeNull();
+
+    // An opened but untouched application form is no change.
+    el.querySelector<HTMLButtonElement>('.app-row [aria-label^="Edit"]')!.click();
+    await settle(fixture);
+    expect(note()).toBeNull();
+
+    type(el, '#app-update', './pull.sh');
+    await settle(fixture);
+    // "Save container" does not save the application, so the note points at its form.
+    expect(note()?.textContent).toContain('Unsaved application');
+    const link = note()!.querySelector<HTMLButtonElement>('.link-btn')!;
+    expect(link.textContent).toContain('save or cancel it');
+    const focus = vi.spyOn(el.querySelector<HTMLInputElement>('#app-name')!, 'focus');
+    link.click();
+    expect(focus).toHaveBeenCalled();
+
+    [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Cancel'))!.click();
+    await settle(fixture);
+    expect(note()).toBeNull();
+  });
+
   it('adds an application whose latest version comes from a watched repository', async () => {
     const { fixture, el } = await open(container({ apps: [] }));
 

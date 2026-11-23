@@ -103,8 +103,12 @@ describe('AccountPage', () => {
 
   it('changes the password with the current one', async () => {
     const { fixture, el } = await create();
+    const unsaved = () => el.querySelector('form.section-body app-unsaved-changes');
+    expect(unsaved()).toBeNull();
     type(el, '#account-new', 'another long password');
     type(el, '#account-confirm', 'another long password');
+    await settle(fixture);
+    expect(unsaved()).not.toBeNull();
     el.querySelector<HTMLButtonElement>('form.section-body button[type=submit]')!.click();
     await settle(fixture);
     http.expectNone('/api/auth/account');
@@ -123,6 +127,7 @@ describe('AccountPage', () => {
     http.expectOne('/api/auth/sessions').flush([session({ id: 'me', current: true })]);
     await settle(fixture);
     expect(el.querySelectorAll('.session').length).toBe(1);
+    expect(unsaved()).toBeNull();
   });
 
   it('turns password sign-in off with the current password', async () => {

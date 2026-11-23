@@ -350,6 +350,14 @@
       </div>
 
       <footer class="dialog-foot">
+        @if (appFormDirty()) {
+          <!-- "Save container" does not save the application form, so point at it. -->
+          <app-unsaved-changes text="Unsaved application – ">
+            <button type="button" class="link-btn" (click)="showAppForm()">{{ appForm()?.id === null ? 'add' : 'save' }} or cancel it</button>
+          </app-unsaved-changes>
+        } @else if (containerChanged()) {
+          <app-unsaved-changes />
+        }
         <button type="button" class="btn btn-ghost" (click)="close()">Close</button>
         <button type="submit" form="ct-settings-form" class="btn" [disabled]="saving() || !name.trim()">
           {{ saving() ? 'Saving…' : 'Save container' }}

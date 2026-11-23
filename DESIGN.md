@@ -236,6 +236,12 @@ Shared components in `web/src/app/shared/`:
   480px (phones in landscape) the whole dialog scrolls instead, so the content keeps enough room. Keep `.dialog-head`,
   `.dialog-body` and `.dialog-foot` direct children of `.dialog-card` for this to work. Footer: ghost *Cancel* left of the primary *Save* (`Save` / `Save container` – name the object when the dialog has several forms).
 - **Filters:** `.tabs` with `role="tab"` buttons and counters (`.tab-count`, `.danger` when errors > 0).
+- **Unsaved changes:** every add/edit form (dialogs, settings sections, the account form) shows `<app-unsaved-changes>` next to
+  its save button while its values differ from the saved ones (in a dialog footer it sits on the left). Compare a snapshot
+  of the form values taken when it opens or is saved with `sameValues()` (`shared/unsaved-changes.ts`); defaults filled in
+  later (e.g. a preselected key) update the snapshot. A nested form with its own save button (applications in the
+  container settings) gets its own note in the footer, since the outer save does not include it. Saving one settings
+  section resets only that section's fields.
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”
 - **Live data:** the shell refreshes `/api/status` every 30 s; pages reload when `StatusService.revision()`

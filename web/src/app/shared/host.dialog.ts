@@ -15,6 +15,7 @@ import { ApiService, describeError, fieldErrors } from '../core/api.service';
 import { BackupStorage, Host, HostInput, HostType, SshKey } from '../core/models';
 import { BackdropClose } from './backdrop-close';
 import { Icon, IconName } from './icon';
+import { UnsavedChanges, sameValues } from './unsaved-changes';
 
 /** What the dialog edits: a new host of `type` (host null) or an existing host. */
 export interface HostDialogData {
@@ -37,7 +38,7 @@ export const HOST_TYPE_CHOICES: readonly { type: HostType; label: string; icon: 
 @Component({
   selector: 'app-host-dialog',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [BackdropClose, FormsModule, Icon],
+  imports: [BackdropClose, FormsModule, Icon, UnsavedChanges],
   templateUrl: './host.dialog.html',
   styleUrl: './host.dialog.scss',
 })
@@ -70,6 +71,8 @@ export class HostDialog {
   protected readonly saving = signal(false);
   protected readonly errors = signal<Record<string, string>>({});
   protected readonly saveError = signal<string | null>(null);
+  /** The form as opened, to tell whether it has unsaved changes. */
+  private savedValues: unknown = null;
 
   constructor() {
     effect(() => {
@@ -84,6 +87,7 @@ export class HostDialog {
         this.user = host?.user ?? 'root';
         this.sshKeyId = host?.sshKeyId ?? null;
         this.backupStorage = host?.backupStorage ?? '';
+        this.savedValues = this.values();
         void this.loadKeys(host === null);
         this.storages.set(null);
         this.storagesError.set(null);
@@ -101,13 +105,28 @@ export class HostDialog {
     });
   }
 
+  /** The form values compared by `changed()`. */
+  private values(): unknown {
+    return [this.name, this.address, `${this.port ?? ''}`, this.user, this.sshKeyId, this.backupStorage];
+  }
+
+  /** Whether the form differs from what it was opened with (read by the template on every check). */
+  protected changed(): boolean {
+    return !sameValues(this.values(), this.savedValues);
+  }
+
   /** Loads the keys; a new host starts with the only key, if there is exactly one. */
   private async loadKeys(preselect: boolean): Promise<void> {
     this.keys.set(null);
     try {
       const keys = await firstValueFrom(this.api.getSshKeys());
       if (preselect && keys.length === 1 && this.sshKeyId === null) {
+        const untouched = !this.changed();
         this.sshKeyId = keys[0]!.id;
+        // The preselected key is a default, not a change of the user.
+        if (untouched) {
+          this.savedValues = this.values();
+        }
       }
       this.keys.set(keys);
     } catch (error) {

@@ -89,10 +89,13 @@ describe('ConnectionsPanel', () => {
     await settle(fixture);
     expect(choices[1]!.getAttribute('aria-checked')).toBe('true');
     expect(el.querySelector('app-host-dialog .head-text p')?.textContent).toContain('pct and qm');
+    // The preselected key is a default, not an unsaved change.
+    expect(el.querySelector('app-host-dialog app-unsaved-changes')).toBeNull();
     const address = el.querySelector<HTMLInputElement>('#host-address')!;
     address.value = 'pve.lan';
     address.dispatchEvent(new Event('input'));
     await settle(fixture);
+    expect(el.querySelector('app-host-dialog app-unsaved-changes')).not.toBeNull();
     el.querySelector<HTMLFormElement>('app-host-dialog form')!.dispatchEvent(new Event('submit'));
     const add = http.expectOne('/api/hosts');
     expect(add.request.method).toBe('POST');

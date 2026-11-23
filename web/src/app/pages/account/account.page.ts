@@ -23,13 +23,14 @@ import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
+import { UnsavedChanges } from '../../shared/unsaved-changes';
 import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 
 /** The single account: user name, password, passkeys, signed-in sessions and API tokens. */
 @Component({
   selector: 'app-account-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [DatePipe, FormsModule, Icon, RelativeTimePipe, Switch],
+  imports: [DatePipe, FormsModule, Icon, RelativeTimePipe, Switch, UnsavedChanges],
   templateUrl: './account.page.html',
   styleUrl: './account.page.scss',
 })
@@ -103,6 +104,11 @@ export class AccountPage implements OnInit {
     } catch (error) {
       this.toast.error(error);
     }
+  }
+
+  /** Whether the user name or a new password was entered but not saved (the current password alone is no change). */
+  protected accountChanged(): boolean {
+    return this.username.trim() !== (this.auth.username() ?? '') || !!this.newPassword || !!this.confirmPassword;
   }
 
   protected async saveAccount(): Promise<void> {
