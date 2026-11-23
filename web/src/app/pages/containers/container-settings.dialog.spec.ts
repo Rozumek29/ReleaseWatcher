@@ -167,9 +167,12 @@ describe('ContainerSettingsDialog', () => {
     type(el, '#ct-cron', '30 4 * * *');
     await settle(fixture);
     expect(note()?.textContent).toContain('Unsaved changes');
+    // Unsaved changes keep the dialog open on a backdrop click or Escape.
+    expect(el.querySelector('dialog')!.getAttribute('closedby')).toBe('none');
     type(el, '#ct-cron', '');
     await settle(fixture);
     expect(note()).toBeNull();
+    expect(el.querySelector('dialog')!.getAttribute('closedby')).toBe('any');
 
     // An opened but untouched application form is no change.
     el.querySelector<HTMLButtonElement>('.app-row [aria-label^="Edit"]')!.click();

@@ -1,4 +1,4 @@
-<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="host-dialog-title">
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose [keepOpen]="changed()" (backdropClose)="close()" aria-labelledby="host-dialog-title">
   @if (data(); as d) {
     <form class="dialog-card" (ngSubmit)="save()">
       <header class="dialog-head">

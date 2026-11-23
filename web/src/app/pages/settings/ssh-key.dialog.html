@@ -1,4 +1,4 @@
-<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="key-dialog-title">
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose [keepOpen]="!generated() && changed()" (backdropClose)="close()" aria-labelledby="key-dialog-title">
   @if (mode(); as m) {
     @if (generated(); as key) {
       <div class="dialog-card">

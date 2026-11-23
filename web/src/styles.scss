@@ -886,6 +886,22 @@ code {
   }
 }
 
+/* A dialog with unsaved changes refuses a backdrop click or Escape (BackdropClose `keepOpen`). */
+.dialog.shake {
+  animation: shake 0.26s var(--ease-out);
+}
+
+@keyframes shake {
+  20%,
+  60% {
+    transform: translateX(-6px);
+  }
+  40%,
+  80% {
+    transform: translateX(6px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

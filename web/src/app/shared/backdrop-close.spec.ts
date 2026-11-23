@@ -1,15 +1,16 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { BackdropClose } from './backdrop-close';
 
 @Component({
   imports: [BackdropClose],
-  template: `<dialog appBackdropClose (backdropClose)="closes = closes + 1">
+  template: `<dialog appBackdropClose [keepOpen]="keepOpen()" (backdropClose)="closes = closes + 1">
     <p>Content</p>
   </dialog>`,
 })
 class Host {
   closes = 0;
+  readonly keepOpen = signal(false);
 }
 
 /** The dialog box in the tests; points outside it are on the backdrop. */
@@ -23,10 +24,14 @@ describe('BackdropClose', () => {
   function setup() {
     const fixture = TestBed.createComponent(Host);
     fixture.detectChanges();
+    const keepOpen = () => {
+      fixture.componentInstance.keepOpen.set(true);
+      fixture.detectChanges();
+    };
     const element: HTMLElement = fixture.nativeElement;
     const dialog = element.querySelector('dialog')!;
     dialog.getBoundingClientRect = () => ({ ...BOX, toJSON: () => BOX }) as DOMRect;
-    return { host: fixture.componentInstance, dialog, content: element.querySelector('p')! };
+    return { host: fixture.componentInstance, dialog, content: element.querySelector('p')!, keepOpen };
   }
 
   /**
@@ -76,5 +81,32 @@ describe('BackdropClose', () => {
     const { host, content } = setup();
     gesture([content, INSIDE], [content, INSIDE]);
     expect(host.closes).toBe(0);
+  });
+
+  it('shakes instead of closing on a backdrop click while it has to stay open', () => {
+    const { host, dialog, keepOpen } = setup();
+    keepOpen();
+    // No native light dismiss either.
+    expect(dialog.getAttribute('closedby')).toBe('none');
+    gesture([dialog, OUTSIDE], [dialog, OUTSIDE]);
+    expect(host.closes).toBe(0);
+    expect(dialog.classList).toContain('shake');
+    dialog.dispatchEvent(new Event('animationend'));
+    expect(dialog.classList).not.toContain('shake');
+  });
+
+  it('ignores Escape while it has to stay open', () => {
+    const { dialog, keepOpen } = setup();
+    const cancel = () => {
+      const event = new Event('cancel', { cancelable: true });
+      dialog.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    expect(cancel()).toBe(false);
+
+    keepOpen();
+    expect(cancel()).toBe(true);
+    dialog.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+    expect(dialog.classList).toContain('shake');
   });
 });

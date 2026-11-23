@@ -1,4 +1,4 @@
-<dialog #dialog class="dialog" (close)="close()" appBackdropClose (backdropClose)="close()" aria-labelledby="ct-settings-title">
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose [keepOpen]="appFormDirty() || containerChanged()" (backdropClose)="close()" aria-labelledby="ct-settings-title">
   @if (container(); as c) {
     <div class="dialog-card">
       <header class="dialog-head">

@@ -242,6 +242,8 @@ Shared components in `web/src/app/shared/`:
   later (e.g. a preselected key) update the snapshot. A nested form with its own save button (applications in the
   container settings) gets its own note in the footer, since the outer save does not include it. Saving one settings
   section resets only that section's fields.
+  A dialog with unsaved changes passes `[keepOpen]` to `appBackdropClose`: a backdrop click or Escape then shakes it
+  (`.dialog.shake`) instead of closing it – only *Cancel* / the close button discard the changes.
 - **Secrets in forms:** password input + *Show/Hide* ghost button; placeholder shows the masked saved value;
   hint says “Leave empty to keep the current one.”
 - **Live data:** the shell refreshes `/api/status` every 30 s; pages reload when `StatusService.revision()`
