@@ -1,5 +1,6 @@
 import type { Database } from 'bun:sqlite';
 import type { WatchedRepository } from '../domain.ts';
+import { parseJson } from '../json.ts';
 import type {
   DockerContainer,
   DockerEndpoint,
@@ -67,15 +68,6 @@ const toEndpoint = (r: EndpointRow): DockerEndpoint => ({
   createdAt: r.created_at,
 });
 
-function parseJson<T>(json: string | null, fallback: T): T {
-  if (!json) return fallback;
-  try {
-    return JSON.parse(json) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 const toContainer = (r: ContainerRow): DockerContainer => ({
   id: r.id,
   source: r.target_id !== null ? { kind: 'target', id: r.target_id } : { kind: 'endpoint', id: r.endpoint_id! },
@@ -98,6 +90,9 @@ const toContainer = (r: ContainerRow): DockerContainer => ({
 
 const sourceColumns = (source: DockerSource): [number | null, number | null] =>
   source.kind === 'target' ? [source.id, null] : [null, source.id];
+
+/** The column holding the id of `source` (interpolated into SQL – a fixed name, never user input). */
+const sourceColumn = (source: DockerSource): 'target_id' | 'endpoint_id' => (source.kind === 'target' ? 'target_id' : 'endpoint_id');
 
 /** A watched repository as containers see it. */
 export type RepositoryLink = Pick<WatchedRepository, 'id' | 'owner' | 'name' | 'lastSeenTag' | 'icon'>;
@@ -129,10 +124,11 @@ export class DockerStore {
   }
 
   addEndpoint(name: string, url: string): DockerEndpoint {
-    const result = this.db
-      .query('INSERT INTO docker_endpoints (name, url, created_at) VALUES (?, ?, ?)')
-      .run(name, url, new Date().toISOString());
-    return this.getEndpoint(Number(result.lastInsertRowid))!;
+    return toEndpoint(
+      this.db
+        .query<EndpointRow, [string, string, string]>('INSERT INTO docker_endpoints (name, url, created_at) VALUES (?, ?, ?) RETURNING *')
+        .get(name, url, new Date().toISOString())!,
+    );
   }
 
   saveEndpoint(e: DockerEndpoint): void {
@@ -152,9 +148,8 @@ export class DockerStore {
     if (!source) {
       return this.db.query<ContainerRow, []>('SELECT * FROM docker_containers ORDER BY name COLLATE NOCASE').all().map(toContainer);
     }
-    const column = source.kind === 'target' ? 'target_id' : 'endpoint_id';
     return this.db
-      .query<ContainerRow, [number]>(`SELECT * FROM docker_containers WHERE ${column} = ? ORDER BY name COLLATE NOCASE`)
+      .query<ContainerRow, [number]>(`SELECT * FROM docker_containers WHERE ${sourceColumn(source)} = ? ORDER BY name COLLATE NOCASE`)
       .all(source.id)
       .map(toContainer);
   }
@@ -198,9 +193,8 @@ export class DockerStore {
           at,
         );
       }
-      const column = source.kind === 'target' ? 'target_id' : 'endpoint_id';
       const names = JSON.stringify(listed.map((c) => c.name));
-      const stale = `${column} = ? AND name NOT IN (SELECT value FROM json_each(?))`;
+      const stale = `${sourceColumn(source)} = ? AND name NOT IN (SELECT value FROM json_each(?))`;
       this.db.query(`DELETE FROM docker_containers WHERE ${stale} AND ignored = 0 AND link_auto = 1`).run(source.id, names);
       this.db.query(`UPDATE docker_containers SET present = 0 WHERE ${stale}`).run(source.id, names);
     });
@@ -209,8 +203,7 @@ export class DockerStore {
 
   /** Removes every container of a source (Docker switched off on the target, or nothing found any more). */
   clearSource(source: DockerSource): void {
-    const column = source.kind === 'target' ? 'target_id' : 'endpoint_id';
-    this.db.query(`DELETE FROM docker_containers WHERE ${column} = ?`).run(source.id);
+    this.db.query(`DELETE FROM docker_containers WHERE ${sourceColumn(source)} = ?`).run(source.id);
   }
 
   /** The user's choices: hide the container, link it through its labels (`linkAuto`) or to `repositoryId` (null = none). */
@@ -243,13 +236,17 @@ export class DockerStore {
       .map((r) => r.installed_version);
   }
 
-  /** Installed version of every shown container linked to a repository (by hand or through its labels). */
+  /**
+   * Installed version of every shown container linked to a repository (by hand or through its labels). The repository
+   * is looked up in `idx_watched_repositories_full_name`; the unary `+` drops the TEXT affinity of `label_repository`,
+   * which would otherwise keep SQLite from using the index of the expression.
+   */
   listLinkedVersions(): { repositoryId: number; installedVersion: string | null }[] {
     return this.db
       .query<{ repository_id: number; installed_version: string | null }, []>(
         `SELECT IIF(d.link_auto = 1, r.id, d.repository_id) AS repository_id, d.installed_version
            FROM docker_containers d
-           LEFT JOIN watched_repositories r ON d.link_auto = 1 AND lower(r.owner || '/' || r.name) = d.label_repository
+           LEFT JOIN watched_repositories r ON d.link_auto = 1 AND lower(r.owner || '/' || r.name) = +d.label_repository
           WHERE d.present = 1 AND d.ignored = 0 AND IIF(d.link_auto = 1, r.id, d.repository_id) IS NOT NULL`,
       )
       .all()

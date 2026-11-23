@@ -159,7 +159,7 @@ When changing an endpoint, also update the wiki page *REST API*.
 ## UI (`web/`)
 
 - Angular 22: standalone components, signals, zoneless; dependencies via `inject()`.
-- Shared state in `core/*.service.ts` (`StatusService`, `ToastService`, `PreferencesService`); HTTP only
+- Shared state in `core/*.service.ts` (`StatusService`, `ToastService`, `PreferencesService`, `ClockService`); HTTP only
   through `ApiService`.
 - Formatting: Prettier (`web/.prettierrc`: `printWidth: 100`, single quotes).
 - Component tests sit next to the component (`*.spec.ts`); `web/src/app/testing.ts` has helpers.

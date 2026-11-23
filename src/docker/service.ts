@@ -1,5 +1,5 @@
 import { fullName, iconUrls } from '../domain.ts';
-import { errorMessage } from '../http.ts';
+import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import type { DockerImageUpdate, DockerUpdatesNotification } from '../notifiers/notifier.ts';
 import { appUpdateAvailable, type Container, type StepResult } from '../proxmox/domain.ts';
@@ -14,6 +14,7 @@ import {
   imageState,
   type ImageRef,
   type ImageState,
+  type ImageTagState,
   installedVersion,
   isIgnoredByLabel,
   LABELS,
@@ -37,8 +38,8 @@ export interface DockerServiceDeps {
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** Engine client of an endpoint URL (tests pass a fake); defaults to {@link HttpDockerEngine}. */
   engine?: (url: string) => DockerEngine;
-  /** Target names for DTOs (the machine a container runs on). */
-  targetName?: (targetId: number) => string | null;
+  /** Target names by id for DTOs (the machine a container runs on); read once per {@link DockerService.describe}. */
+  targetNames?: () => ReadonlyMap<number, string>;
   /** Reports images pushed since the last check (`NotificationDispatcher.dispatchDockerUpdates`). */
   notify?: (notification: DockerUpdatesNotification) => Promise<unknown>;
   now?: () => Date;
@@ -228,7 +229,7 @@ export class DockerService {
       listing.containers.map((c) => ({ ...c, labelRepository: labelRepository(c.labels), ignoredByLabel: isIgnoredByLabel(c.labels) })),
       this.now(),
     );
-    this.updateInstalledVersions();
+    // The installed versions are derived again by the registry pass that always follows a stored listing.
   }
 
   // --- Registries ---
@@ -270,7 +271,7 @@ export class DockerService {
       return options.force || !checkedAt || now.getTime() - Date.parse(checkedAt) >= REGISTRY_RECHECK_MS;
     });
     let failed = 0;
-    await inBatches(due, REGISTRY_CONCURRENCY, async ([key, ref]) => {
+    await inPool(due, REGISTRY_CONCURRENCY, async ([key, ref]) => {
       if (options.signal?.aborted) return;
       try {
         store.saveTagState(key, { remoteDigest: await registry.digest(ref, options.signal) }, this.now());
@@ -286,12 +287,17 @@ export class DockerService {
     // Digests to resolve, per image repository and tag flavour.
     const fresh = store.listTagStates();
     const wanted = new Map<string, { ref: ImageRef; digests: Set<string> }>();
+    const knownByRepository = new Map<string, Map<string, { version: string | null; checkedAt: string }>>();
     for (const c of containers) {
       const ref = c.present && !c.ignored ? parseImageRef(c.image) : null;
       const key = ref ? tagKey(ref) : null;
       if (!ref || !key || !needsResolving(ref.tag)) continue;
       const repo = repositoryKey(ref);
-      const known = store.digestVersions(repo);
+      let known = knownByRepository.get(repo);
+      if (!known) {
+        known = store.digestVersions(repo);
+        knownByRepository.set(repo, known);
+      }
       const isDue = (digest: string) => {
         const entry = known.get(digest);
         return !entry || (entry.version === null && now.getTime() - Date.parse(entry.checkedAt) >= RESOLVE_RETRY_MS);
@@ -319,8 +325,9 @@ export class DockerService {
         log.warn({ image: displayImage(ref), error: errorMessage(error) }, 'Resolving image digests to versions failed');
       }
     }
-    this.updateInstalledVersions();
-    this.prune();
+    const all = store.listContainers();
+    this.updateInstalledVersions(all);
+    this.prune(all, fresh);
     await this.notifyNewImages(containers, options.note);
   }
 
@@ -366,26 +373,29 @@ export class DockerService {
   private async resolveDigests(ref: ImageRef, digests: readonly string[], signal?: AbortSignal): Promise<Map<string, string>> {
     const { registry } = this.deps;
     const candidates = resolveCandidates(await registry.tags(ref, signal), ref.tag);
-    const result = new Map<string, string>();
-    for (let i = 0; i < candidates.length && result.size < digests.length; i += REGISTRY_CONCURRENCY) {
-      if (signal?.aborted) break;
-      const batch = candidates.slice(i, i + REGISTRY_CONCURRENCY);
-      const found = await Promise.all(batch.map((tag) => registry.digest({ ...ref, tag, digest: null }, signal).catch(() => null)));
-      found.forEach((digest, index) => {
-        if (digest && digests.includes(digest) && !result.has(digest)) {
-          result.set(digest, batch[index]!);
+    // Digest → index of the first (newest) candidate found with it. Candidates are taken in order, so once every
+    // digest is found, the earlier candidates still running are the only ones that can replace a match.
+    const found = new Map<string, number>();
+    await inPool(
+      candidates.map((tag, index) => ({ tag, index })),
+      REGISTRY_CONCURRENCY,
+      async ({ tag, index }) => {
+        const digest = await registry.digest({ ...ref, tag, digest: null }, signal).catch(() => null);
+        if (digest && digests.includes(digest) && index < (found.get(digest) ?? Infinity)) {
+          found.set(digest, index);
         }
-      });
-    }
-    return result;
+      },
+      () => found.size >= digests.length || signal?.aborted === true,
+    );
+    return new Map([...found].map(([digest, index]) => [digest, candidates[index]!]));
   }
 
   /** Recomputes the stored installed version of every container (used by vulnerability impacts and repositories). */
-  private updateInstalledVersions(): void {
+  private updateInstalledVersions(all: readonly DockerContainer[]): void {
     const { store } = this.deps;
     const resolved = store.allDigestVersions();
     const versions = new Map<number, string | null>();
-    for (const c of store.listContainers()) {
+    for (const c of all) {
       versions.set(c.id, this.installed(c, resolved)?.version ?? null);
     }
     store.saveInstalledVersions(versions);
@@ -398,13 +408,12 @@ export class DockerService {
     return installedVersion({ tag: ref?.tag ?? null, labels: c.labels, resolvedVersion });
   }
 
-  /** Drops registry data of images no container runs any more. */
-  private prune(): void {
+  /** Drops registry data of images no container runs any more (`all` = every stored container). */
+  private prune(all: readonly DockerContainer[], states: ReadonlyMap<string, ImageTagState>): void {
     const { store } = this.deps;
     const keys = new Set<string>();
     const digests: string[] = [];
-    const states = store.listTagStates();
-    for (const c of store.listContainers()) {
+    for (const c of all) {
       const ref = parseImageRef(c.image);
       const key = ref ? tagKey(ref) : null;
       if (!ref || !key) continue;
@@ -429,6 +438,7 @@ export class DockerService {
     const byId = new Map(repos.map((r) => [r.id, r]));
     const byName = new Map(repos.map((r) => [fullName(r).toLowerCase(), r]));
     const endpointNames = new Map(store.listEndpoints().map((e) => [e.id, e.name]));
+    const targetNames = containers.some((c) => c.source.kind === 'target') ? this.deps.targetNames?.() : undefined;
     return containers.map((c) => {
       const ref = parseImageRef(c.image);
       const key = ref ? tagKey(ref) : null;
@@ -451,7 +461,7 @@ export class DockerService {
         id: c.id,
         source: {
           ...c.source,
-          name: c.source.kind === 'endpoint' ? (endpointNames.get(c.source.id) ?? null) : (this.deps.targetName?.(c.source.id) ?? null),
+          name: c.source.kind === 'endpoint' ? (endpointNames.get(c.source.id) ?? null) : (targetNames?.get(c.source.id) ?? null),
         },
         name: c.name,
         image: c.image,
@@ -488,8 +498,16 @@ export class DockerService {
   }
 }
 
-async function inBatches<T>(items: readonly T[], size: number, task: (item: T) => Promise<void>): Promise<void> {
-  for (let i = 0; i < items.length; i += size) {
-    await Promise.all(items.slice(i, i + size).map(task));
-  }
+/**
+ * Runs `task` for the items in order with at most `size` running at a time – a new one starts as soon as any finishes
+ * (not when a whole batch is done). `stop` is asked before each item is started.
+ */
+async function inPool<T>(items: readonly T[], size: number, task: (item: T) => Promise<void>, stop: () => boolean = () => false): Promise<void> {
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length && !stop()) {
+      await task(items[next++]!);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, items.length) }, worker));
 }

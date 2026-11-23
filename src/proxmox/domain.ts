@@ -437,14 +437,12 @@ export const NON_INTERACTIVE_ENV = 'export PHS_SILENT=1 DEBIAN_FRONTEND=noninter
 /** Script running an application update command non-interactively (see {@link NON_INTERACTIVE_ENV}). */
 export const appUpdateScript = (command: string): string => `${NON_INTERACTIVE_ENV}\n${command}`;
 
-/** Removes terminal escape sequences (colours, cursor movement, charset switches) from command output. */
+/**
+ * Removes terminal escape sequences (colours, cursor movement, charset switches – `Bun.stripANSI`) and the shift
+ * in/out characters of line-drawing charsets from command output.
+ */
 export function stripTerminalCodes(text: string): string {
-  return text
-    .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '')
-    .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '')
-    .replace(/\x1b[()*+][0-9A-Za-z]/g, '')
-    .replace(/\x1b[=>78DEHMc]/g, '')
-    .replace(/[\x0e\x0f]/g, '');
+  return Bun.stripANSI(text).replace(/[\x0e\x0f]/g, '');
 }
 
 /** Number of characters at the end of the output that {@link detectInteractivePrompt} looks at. */
@@ -951,9 +949,7 @@ export function firstLine(output: string): string | null {
 /** Removes ANSI escape sequences and carriage-return redraws produced by interactive scripts. */
 export function cleanOutput(text: string): string {
   return (
-    text
-      // eslint-disable-next-line no-control-regex
-      .replace(/\u001b\[[0-9;?]*[ -/]*[@-~]|\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b[()][A-Za-z0-9]|\u001b[=>]/g, '')
+    stripTerminalCodes(text)
       .replace(/\r\n/g, '\n')
       .split('\n')
       .map((line) => line.split('\r').filter(Boolean).at(-1) ?? '')

@@ -1,6 +1,7 @@
 import { connect as netConnect, type Socket } from 'node:net';
 import { hostname } from 'node:os';
 import { connect as tlsConnect, type ConnectionOptions } from 'node:tls';
+import { errorMessage } from '../errors.ts';
 
 /** `starttls`: plain connection upgraded with STARTTLS (port 587); `tls`: TLS from the start (465); `none`: no encryption. */
 export const SMTP_SECURITY = ['starttls', 'tls', 'none'] as const;
@@ -147,7 +148,7 @@ class SmtpSession {
       secure.once('secureConnect', () => resolve());
       secure.once('error', reject);
     }).catch((error: unknown) => {
-      throw new SmtpError(`TLS handshake with the mail server failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new SmtpError(`TLS handshake with the mail server failed: ${errorMessage(error)}`);
     });
   }
 

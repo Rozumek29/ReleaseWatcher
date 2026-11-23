@@ -114,6 +114,7 @@ describe('containers API', () => {
       'idx_repository_advisories_page',
       'idx_sessions_expires',
       'idx_watched_repositories_enabled',
+      'idx_watched_repositories_full_name',
     ]);
   });
 

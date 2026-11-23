@@ -53,8 +53,9 @@ export class ContainerUpdater {
    * gets its turn). Containers without pending updates are left out.
    */
   plan(containers: readonly Container[] = this.store.listEnabled()): { container: Container; updates: PendingUpdate[] }[] {
+    const appsOf = Map.groupBy(this.store.listApps(), (a) => a.containerId);
     return containers
-      .map((container) => ({ container, updates: pendingUpdates(container, this.store.listApps(container.id)) }))
+      .map((container) => ({ container, updates: pendingUpdates(container, appsOf.get(container.id) ?? []) }))
       .filter((entry) => entry.updates.length > 0);
   }
 

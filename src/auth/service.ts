@@ -11,6 +11,7 @@ import {
   verifyAuthenticationResponse,
   verifyRegistrationResponse,
 } from '@simplewebauthn/server';
+import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import type { ApiToken, ApiTokenScope, AuthStore, LoginMethod, Passkey, Session } from './store.ts';
 
@@ -386,7 +387,7 @@ export class AuthService {
         requireUserVerification: false,
       });
     } catch (error) {
-      throw new AuthError(400, `The passkey could not be verified: ${error instanceof Error ? error.message : String(error)}`);
+      throw new AuthError(400, `The passkey could not be verified: ${errorMessage(error)}`);
     }
     if (!verification.verified) {
       throw new AuthError(400, 'The passkey could not be verified.');
@@ -440,7 +441,7 @@ export class AuthService {
       });
     } catch (error) {
       this.throttle.fail(this.throttleKey(ctx));
-      throw new AuthError(401, `Passkey sign-in failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw new AuthError(401, `Passkey sign-in failed: ${errorMessage(error)}`);
     }
     if (!verification.verified) {
       this.throttle.fail(this.throttleKey(ctx));

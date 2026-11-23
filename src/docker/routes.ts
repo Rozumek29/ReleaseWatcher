@@ -1,6 +1,7 @@
 import type { CronJob } from '../cron-job.ts';
 import type { RepositoryStore } from '../db.ts';
-import { errorMessage, problem, validationProblem } from '../http.ts';
+import { errorMessage } from '../errors.ts';
+import { problem, validationProblem } from '../http.ts';
 import { type ObjectSchema, parseId, readBody } from '../validation.ts';
 import { type DockerEndpoint, engineLabel, parseEndpointUrl } from './domain.ts';
 import { type DockerService, EndpointBusyError } from './service.ts';

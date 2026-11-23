@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { errorMessage } from './errors.ts';
 
 /** Prefix of an encrypted value: `enc:v1:` + base64(iv | auth tag | ciphertext). */
 const PREFIX = 'enc:v1:';
@@ -107,7 +108,7 @@ export function loadSecretBox(options: { key: string | null; dataDir: string | n
     try {
       return { box: new SecretBox(parseKey(readFileSync(file, 'utf8'))), source: 'file' };
     } catch (error) {
-      throw new Error(`Cannot read the encryption key file "${file}": ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error(`Cannot read the encryption key file "${file}": ${errorMessage(error)}`);
     }
   }
   const key = randomBytes(KEY_BYTES);

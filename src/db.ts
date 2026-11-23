@@ -11,6 +11,7 @@ import {
   type SecurityAdvisory,
 } from './advisories.ts';
 import type { WatchedRepository } from './domain.ts';
+import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
 /** Settings whose values are secrets and are stored encrypted. */
@@ -90,25 +91,9 @@ const toAdvisory = (r: AdvisoryRow): SecurityAdvisory => ({
   vulnerabilities: parseVulnerabilities(r.vulnerabilities),
 });
 
-function parseStringArray(json: string | null): string[] {
-  if (!json) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((v): v is string => typeof v === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
 function parseVulnerabilities(json: string): AdvisoryVulnerability[] {
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
-  } catch {
-    return [];
-  }
+  const parsed = parseJson<unknown>(json, null);
+  return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
 }
 
 const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
@@ -140,17 +125,10 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
-  if (!json) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    return Array.isArray(parsed)
-      ? parsed.filter((h): h is { name: string; value: string } => typeof h?.name === 'string' && typeof h?.value === 'string')
-      : [];
-  } catch {
-    return [];
-  }
+  const parsed = parseJson<unknown>(json, null);
+  return Array.isArray(parsed)
+    ? parsed.filter((h): h is { name: string; value: string } => typeof h?.name === 'string' && typeof h?.value === 'string')
+    : [];
 }
 
 interface PageRow extends AdvisoryRow {
@@ -548,6 +526,8 @@ const MIGRATIONS: readonly string[] = [
   // from now on are reported.
   `ALTER TABLE docker_image_tags ADD COLUMN notified_digest TEXT;
    UPDATE docker_image_tags SET notified_digest = remote_digest;`,
+  // Docker containers are linked through their labels by the lower-case `owner/name` of a repository.
+  `CREATE INDEX idx_watched_repositories_full_name ON watched_repositories (lower(owner || '/' || name));`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -665,10 +645,12 @@ export class RepositoryStore {
   }
 
   add(owner: string, name: string, includePrereleases: boolean): WatchedRepository {
-    const result = this.db
-      .query('INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?)')
-      .run(owner, name, includePrereleases ? 1 : 0, new Date().toISOString());
-    return this.get(Number(result.lastInsertRowid))!;
+    const row = this.db
+      .query<Row, [string, string, number, string]>(
+        'INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?) RETURNING *',
+      )
+      .get(owner, name, includePrereleases ? 1 : 0, new Date().toISOString())!;
+    return toEntity(row, this.secrets);
   }
 
   /** Persists all mutable fields of the entity. */
@@ -724,6 +706,14 @@ export class RepositoryStore {
       .query<AdvisoryRow, [number]>('SELECT * FROM repository_advisories WHERE repository_id = ?')
       .all(repositoryId)
       .map(toAdvisory);
+  }
+
+  /** Ids of the stored advisories of a repository. */
+  advisoryIds(repositoryId: number): Set<string> {
+    const rows = this.db
+      .query<Pick<AdvisoryRow, 'advisory_id'>, [number]>('SELECT advisory_id FROM repository_advisories WHERE repository_id = ?')
+      .all(repositoryId);
+    return new Set(rows.map((r) => r.advisory_id));
   }
 
   /** Ids and aliases of the stored advisories of a repository (of one source, or all) – for duplicate checks. */

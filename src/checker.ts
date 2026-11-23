@@ -13,6 +13,7 @@ import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
+import { errorMessage } from './errors.ts';
 import type { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { OsvClient } from './osv.ts';
 import { compareVersions, fetchInstalledVersion, type HttpHeader, type InstalledVersionResult } from './version.ts';
@@ -37,8 +38,6 @@ export interface AdvisorySourceSettings {
   github: boolean;
   osv: boolean;
 }
-
-const errorText = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
 /** Waits for a promise without throwing, so requests started together can be awaited one after another. */
 const settle = <T>(promise: Promise<T>): Promise<{ ok: true; value: T } | { ok: false; error: unknown }> =>
@@ -123,7 +122,7 @@ export class ReleaseChecker {
       repo.installedVersion = version;
       repo.installedVersionError = null;
     } catch (error) {
-      repo.installedVersionError = (error instanceof Error ? error.message : String(error)).slice(0, 500);
+      repo.installedVersionError = errorMessage(error).slice(0, 500);
       this.log.warn({ repo: fullName(repo), err: error }, 'Reading installed version failed');
     }
     repo.installedVersionCheckedAt = this.now().toISOString();
@@ -188,7 +187,7 @@ export class ReleaseChecker {
         }
         baselines.add(githubKey);
       } catch (error) {
-        errors.push(`GitHub: ${errorText(error)}`);
+        errors.push(`GitHub: ${errorMessage(error)}`);
         if (repo.advisoryBaselines.includes(githubKey)) {
           baselines.add(githubKey);
         }
@@ -211,7 +210,7 @@ export class ReleaseChecker {
         notified += await this.storeAdvisories(repo, 'osv', osvKey, advisories, notified);
         baselines.add(osvKey);
       } catch (error) {
-        errors.push(`OSV.dev: ${errorText(error)}`);
+        errors.push(`OSV.dev: ${errorMessage(error)}`);
         if (repo.advisoryBaselines.includes(osvKey)) {
           baselines.add(osvKey);
         }
@@ -241,7 +240,7 @@ export class ReleaseChecker {
     alreadyNotified: number,
   ): Promise<number> {
     const isBaseline = !repo.advisoryBaselines.includes(key);
-    const known = new Set(this.store.listAdvisoryKeys(repo.id).map((a) => a.id));
+    const known = this.store.advisoryIds(repo.id);
     const versions = installedVersions(repo.installedVersion, this.linkedVersions(repo.id));
     const news: { advisory: SecurityAdvisory; impact: AdvisoryImpact }[] = [];
     const quiet: SecurityAdvisory[] = [];
@@ -334,7 +333,7 @@ export class ReleaseChecker {
         this.log.info({ repo: fullName(repo), count: notifiedCount }, 'New releases found');
       }
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
       this.log.warn({ err: error, repo: fullName(repo) }, 'Checking repository failed');
       repo.lastError = message.slice(0, 1000);
     }

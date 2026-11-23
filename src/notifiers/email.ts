@@ -123,13 +123,13 @@ export function buildEmail(
   ].join('\n');
 
   const html = `<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(subject)}</title></head>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${Bun.escapeHTML(subject)}</title></head>
 <body style="margin:0;padding:24px 12px;background:#f4f5f7;font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:15px;line-height:1.5;color:#1f2328">
 <div style="max-width:640px;margin:0 auto">
-${single ? '' : `<h1 style="margin:0 0 16px;font-size:20px;font-weight:650">${escapeHtml(digestSummary(events))}</h1>`}
+${single ? '' : `<h1 style="margin:0 0 16px;font-size:20px;font-weight:650">${Bun.escapeHTML(digestSummary(events))}</h1>`}
 ${sections.map((s) => `<div style="margin:0 0 16px;padding:18px 20px;background:#ffffff;border:1px solid #e3e5e8;border-radius:12px">${s.html}</div>`).join('\n')}
-${showContainersLink ? `<p style="margin:0 0 16px"><a href="${escapeHtml(containersUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open machines</a></p>` : ''}
-${dockerUrl ? `<p style="margin:0 0 16px"><a href="${escapeHtml(dockerUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open Docker</a></p>` : ''}
+${showContainersLink ? `<p style="margin:0 0 16px"><a href="${Bun.escapeHTML(containersUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open machines</a></p>` : ''}
+${dockerUrl ? `<p style="margin:0 0 16px"><a href="${Bun.escapeHTML(dockerUrl)}" style="display:inline-block;padding:8px 16px;border-radius:8px;background:#5865f2;color:#ffffff;text-decoration:none;font-weight:550">Open Docker</a></p>` : ''}
 <p style="margin:16px 0 0;color:#6a737d;font-size:12px">Sent by ReleaseWatcher</p>
 </div></body></html>`;
 
@@ -172,12 +172,12 @@ function releaseSection(notification: ReleaseNotification, maxBodyLength: number
     subject: `${repo} ${release.tag} ${release.isPrerelease ? 'pre-release' : 'released'}`,
     text: [title, meta, ...(installed ? [installed] : []), release.htmlUrl, ...(body ? ['', body] : [])].join('\n'),
     html: [
-      `<div style="font-size:13px;color:#6a737d"><a href="${escapeHtml(notificationRepoUrl(notification))}" style="color:#6a737d">${escapeHtml(repo)}</a></div>`,
-      `<h2 style="margin:2px 0 6px;font-size:18px;font-weight:650"><a href="${escapeHtml(release.htmlUrl)}" style="color:#4752c4;text-decoration:none">${escapeHtml(title)}</a></h2>`,
-      `<div style="font-size:13px;color:#6a737d">${escapeHtml(meta)}</div>`,
-      installed ? `<div style="margin-top:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${escapeHtml(installed)}</div>` : '',
+      `<div style="font-size:13px;color:#6a737d"><a href="${Bun.escapeHTML(notificationRepoUrl(notification))}" style="color:#6a737d">${Bun.escapeHTML(repo)}</a></div>`,
+      `<h2 style="margin:2px 0 6px;font-size:18px;font-weight:650"><a href="${Bun.escapeHTML(release.htmlUrl)}" style="color:#4752c4;text-decoration:none">${Bun.escapeHTML(title)}</a></h2>`,
+      `<div style="font-size:13px;color:#6a737d">${Bun.escapeHTML(meta)}</div>`,
+      installed ? `<div style="margin-top:8px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${Bun.escapeHTML(installed)}</div>` : '',
       body
-        ? `<pre style="margin:12px 0 0;padding:12px;background:#f6f8fa;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${escapeHtml(body)}</pre>`
+        ? `<pre style="margin:12px 0 0;padding:12px;background:#f6f8fa;border-radius:8px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12.5px">${Bun.escapeHTML(body)}</pre>`
         : '',
     ].join(''),
   };
@@ -203,10 +203,10 @@ function vulnerabilitySection(notification: VulnerabilityNotification): Section 
     subject: `${repo}: ${severityLabel(notification).toLowerCase()} vulnerability – ${advisory.summary}`,
     text: [`${repo}: ${advisory.summary}`, meta, ...(impact ? [impact] : []), ...(versions ? [versions] : []), advisory.htmlUrl].join('\n'),
     html: [
-      `<div style="color:${color};font-size:13px;font-weight:600">${escapeHtml(meta)}</div>`,
-      `<h2 style="margin:2px 0 6px;font-size:18px;font-weight:650"><a href="${escapeHtml(advisory.htmlUrl)}" style="color:#4752c4;text-decoration:none">${escapeHtml(`${repo}: ${advisory.summary}`)}</a></h2>`,
-      impact ? `<div style="font-weight:600${notification.affectsInstalled ? `;color:${SEVERITY_COLORS['high']}` : ''}">${escapeHtml(impact)}</div>` : '',
-      versions ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;margin-top:4px">${escapeHtml(versions)}</div>` : '',
+      `<div style="color:${color};font-size:13px;font-weight:600">${Bun.escapeHTML(meta)}</div>`,
+      `<h2 style="margin:2px 0 6px;font-size:18px;font-weight:650"><a href="${Bun.escapeHTML(advisory.htmlUrl)}" style="color:#4752c4;text-decoration:none">${Bun.escapeHTML(`${repo}: ${advisory.summary}`)}</a></h2>`,
+      impact ? `<div style="font-weight:600${notification.affectsInstalled ? `;color:${SEVERITY_COLORS['high']}` : ''}">${Bun.escapeHTML(impact)}</div>` : '',
+      versions ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;margin-top:4px">${Bun.escapeHTML(versions)}</div>` : '',
     ].join(''),
   };
 }
@@ -223,14 +223,14 @@ function containerSection(notification: ContainerUpdatesNotification): Section {
   if (packages.length > 0) text.push('', `${aptTitle}:`, ...packages.map((p) => `  • ${p}`), ...(more > 0 ? [`  … and ${more} more`] : []));
 
   const list = (items: string[]) =>
-    `<ul style="margin:6px 0 0;padding-left:20px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${items.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+    `<ul style="margin:6px 0 0;padding-left:20px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${items.map((i) => `<li>${Bun.escapeHTML(i)}</li>`).join('')}</ul>`;
   return {
     subject: `${target}: updates available`,
     text: text.join('\n'),
     html: [
-      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${escapeHtml(target)}: updates available</h2>`,
+      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${Bun.escapeHTML(target)}: updates available</h2>`,
       appLines.length > 0 ? `<div style="margin-top:10px;font-weight:600">Applications</div>${list(appLines)}` : '',
-      packages.length > 0 ? `<div style="margin-top:10px;font-weight:600">${escapeHtml(aptTitle)}</div>${list(more > 0 ? [...packages, `… and ${more} more`] : packages)}` : '',
+      packages.length > 0 ? `<div style="margin-top:10px;font-weight:600">${Bun.escapeHTML(aptTitle)}</div>${list(more > 0 ? [...packages, `… and ${more} more`] : packages)}` : '',
     ].join(''),
   };
 }
@@ -245,8 +245,8 @@ function resultSection(notification: UpdateResultNotification): Section {
     subject: headline,
     text: [headline, ...(notification.detail ? [notification.detail] : [])].join('\n'),
     html: [
-      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650;color:${color}">${escapeHtml(headline)}</h2>`,
-      notification.detail ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${escapeHtml(notification.detail)}</div>` : '',
+      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650;color:${color}">${Bun.escapeHTML(headline)}</h2>`,
+      notification.detail ? `<div style="font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${Bun.escapeHTML(notification.detail)}</div>` : '',
     ].join(''),
   };
 }
@@ -259,9 +259,9 @@ function dockerSection(notification: DockerUpdatesNotification): Section {
     subject: headline,
     text: [headline, '', ...lines.map((l) => `  • ${l.image} – ${l.containers}`)].join('\n'),
     html: [
-      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${escapeHtml(headline)}</h2>`,
+      `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${Bun.escapeHTML(headline)}</h2>`,
       `<ul style="margin:6px 0 0;padding-left:20px;font-size:13px">${lines
-        .map((l) => `<li><span style="font-family:ui-monospace,Menlo,Consolas,monospace">${escapeHtml(l.image)}</span> – ${escapeHtml(l.containers)}</li>`)
+        .map((l) => `<li><span style="font-family:ui-monospace,Menlo,Consolas,monospace">${Bun.escapeHTML(l.image)}</span> – ${Bun.escapeHTML(l.containers)}</li>`)
         .join('')}</ul>`,
     ].join(''),
   };
@@ -340,8 +340,6 @@ function encodeHeader(value: string): string {
 
 const wrapBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
 
-const escapeHtml = (value: string): string =>
-  value.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 const formatDate = (iso: string): string => `${iso.slice(0, 16).replace('T', ' ')} UTC`;
 

@@ -14,6 +14,7 @@ import {
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { ClockService } from '../../core/clock.service';
 import { ApiService, describeError } from '../../core/api.service';
 import { AppSettings, Container, ContainerApp, DiscoveredContainer, DockerContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
@@ -87,7 +88,7 @@ export class ContainersPage {
   protected readonly checkingAll = signal(false);
   protected readonly updatingAll = signal(false);
   /** Ticks so relative times stay current. */
-  protected readonly now = signal(Date.now());
+  protected readonly now = inject(ClockService).now;
 
   protected readonly available = computed(() => this.discovered().filter((c) => !c.added));
   /** "Add all" adds containers only: virtual machines need the guest agent and may have no apt. */
@@ -203,11 +204,7 @@ export class ContainersPage {
       this.statusService.revision();
       untracked(() => void this.load());
     });
-    const ticker = setInterval(() => this.now.set(Date.now()), 30_000);
-    inject(DestroyRef).onDestroy(() => {
-      clearInterval(ticker);
-      this.clearRefresh();
-    });
+    inject(DestroyRef).onDestroy(() => this.clearRefresh());
   }
 
   protected async serverAdded(host: Host): Promise<void> {

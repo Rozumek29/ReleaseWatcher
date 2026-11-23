@@ -90,6 +90,7 @@ import {
   supervisorUpdateCommand,
   type UpdateEntity,
 } from './home-assistant.ts';
+import { errorMessage } from '../errors.ts';
 import { type FetchLike, HomeAssistantApi } from './home-assistant-api.ts';
 import { type CommandResult, describeSshFailure, type NodeShell } from './ssh.ts';
 import type { ContainerStore } from './store.ts';
@@ -499,7 +500,7 @@ export class ContainerService {
         return { ok: errors === 0, exitCode: null };
       } catch (error) {
         // The machine could not be reached at all (SSH, `pct status`): show why on the target, not "not checked yet".
-        container.lastError = (error instanceof Error ? error.message : String(error)).slice(0, 2000);
+        container.lastError = errorMessage(error).slice(0, 2000);
         container.lastCheckedAt = this.now().toISOString();
         this.deps.containers.save(container);
         throw error;
@@ -671,7 +672,7 @@ export class ContainerService {
         await Bun.sleep(this.homeAssistantPollMs);
       }
     } catch (error) {
-      return `Updating ${update.name} failed: ${error instanceof Error ? error.message : String(error)}`;
+      return `Updating ${update.name} failed: ${errorMessage(error)}`;
     }
   }
 
@@ -860,7 +861,7 @@ export class ContainerService {
         const result = await task(log);
         finished = log.finish(result.ok, result.exitCode);
       } catch (error) {
-        log.note(`Failed: ${error instanceof Error ? error.message : String(error)}`);
+        log.note(`Failed: ${errorMessage(error)}`);
         this.deps.log.warn({ err: error, vmid: container.vmid, kind: run.kind }, 'Container task failed');
         finished = log.finish(false, null);
       } finally {
@@ -1454,7 +1455,7 @@ export class ContainerService {
         // The saved states are not needed when the live ones were read.
         problems = problems.filter((p) => !p.startsWith('saved entity states'));
       } catch (error) {
-        problems.push(`API: ${error instanceof Error ? error.message : String(error)} Showing the states saved by Home Assistant.`);
+        problems.push(`API: ${errorMessage(error)} Showing the states saved by Home Assistant.`);
       }
     }
     // Neither source could be read: keep the integration updates found before.

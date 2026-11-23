@@ -99,6 +99,9 @@ Full endpoint list: wiki → *REST API*. Rules for new endpoints:
   with `cachedByRevision()` (`src/revision-cache.ts`), keyed by `store.revision()` (SQLite `total_changes()` – every
   store shares one connection), so they are rebuilt only after a write. Don't use it for values that depend on anything
   else (time, settings, in-memory task state).
+- **Shared helpers:** `errorMessage()` (`src/errors.ts`) for the message of a caught value, `parseJson()` /
+  `parseStringArray()` (`src/json.ts`) for JSON columns. Prefer Bun built-ins over own code (`Bun.escapeHTML`,
+  `Bun.stripANSI`, `Bun.cron.parse`, `Bun.zstdCompressSync`).
 - **Queries:** read only the columns an endpoint needs (`listStatusFields()`, `listAppVersions()`, `statusCounts()`,
   `advisoryTotals()`) – full entities decrypt secrets and parse JSON. Let SQLite count, filter and sort; keep version
   comparisons in TypeScript and store their results when SQLite has to sort or filter by them (`AdvisoryImpacts` keeps
@@ -207,7 +210,8 @@ Shared components in `web/src/app/shared/`:
   as a logo), then the owner avatar (`src`), then a letter fallback.
 - `<app-icon-picker-dialog [value] [suggestion] (picked) (closed)>` – visual picker for selfh.st/icons (search, light/dark
   variants); emits `sh:<slug>`. The icon list (`index.json`) is fetched by the browser from jsDelivr once per page load.
-- `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass the shell's `now()` signal so values tick.
+- `relativeTime` pipe – “in 5 minutes” / “3 hours ago”; pass `ClockService.now` (`core/clock.service.ts`, ticked by the
+  shell's status poll) so values tick – pages start no timers of their own; call `tick()` after showing a new time.
 - `appInView` directive – emits `(inView)` when the element nears the viewport (`IntersectionObserver`); used for
   infinite scrolling: put `appInView` on a *Show N more* button below the list, so it also works by click and without the
   observer. It loads the next server page (`nextCursor`) for lists paged by the server, or renders a longer slice

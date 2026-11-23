@@ -3,6 +3,7 @@
  * over TCP. Read-only: only `GET /version`, `GET /containers/json` and `GET /images/{id}/json` are used, so a socket
  * proxy needs nothing but `CONTAINERS=1` and `IMAGES=1`.
  */
+import { errorMessage } from '../errors.ts';
 import { type EngineContainer, type EngineListing, keptLabels, parseEndpointUrl } from './domain.ts';
 
 /** Lists running containers; faked in tests. */
@@ -102,7 +103,7 @@ interface RawListedContainer {
 
 function describeConnectionError(error: unknown, where: string): string {
   const code = (error as { code?: string } | null)?.code;
-  const message = error instanceof Error ? error.message : String(error);
+  const message = errorMessage(error);
   if (code === 'EACCES' || /permission denied/i.test(message)) {
     return `No permission to use ${where} – add the user ReleaseWatcher runs as to the socket's group (e.g. group_add in compose) or use a socket proxy.`;
   }

@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter } from 'rxjs';
+import { ClockService } from './core/clock.service';
 import { AuthService } from './core/auth.service';
 import { PreferencesService } from './core/preferences.service';
 import { StatusService } from './core/status.service';
@@ -57,8 +58,9 @@ export class App {
   });
 
   protected readonly sidebarOpen = signal(false);
-  /** Ticks every 30 s so relative times ("in 5 minutes") stay current. */
-  protected readonly now = signal(Date.now());
+  private readonly clock = inject(ClockService);
+  /** Ticked with the status poll (every 30 s) so relative times ("in 5 minutes") stay current. */
+  protected readonly now = this.clock.now;
   protected readonly describeCron = describeCron;
   private readonly url = signal(this.router.url);
   /** Sign-in and setup pages: no sidebar. */
@@ -85,10 +87,10 @@ export class App {
       if (!signedIn || document.visibilityState === 'hidden') {
         return;
       }
-      this.now.set(Date.now());
+      this.clock.tick();
       void this.statusService.refresh();
       timer = setInterval(() => {
-        this.now.set(Date.now());
+        this.clock.tick();
         void this.statusService.refresh();
       }, 30_000);
     };

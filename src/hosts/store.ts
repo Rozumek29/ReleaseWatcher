@@ -41,6 +41,22 @@ export type SshKeySummary = Omit<SshKey, 'privateKey'> & {
   hostCount: number;
 };
 
+type KeySummaryRow = Omit<KeyRow, 'private_key'> & { host_count: number };
+
+/** Columns of a {@link SshKeySummary} (alias `k`), without the private key. */
+const KEY_SUMMARY_SELECT = `SELECT k.id, k.name, k.public_key, k.fingerprint, k.created_at,
+                                   (SELECT count(*) FROM hosts h WHERE h.ssh_key_id = k.id) AS host_count
+                            FROM ssh_keys k`;
+
+const toKeySummary = (r: KeySummaryRow): SshKeySummary => ({
+  id: r.id,
+  name: r.name,
+  publicKey: r.public_key,
+  fingerprint: r.fingerprint,
+  createdAt: r.created_at,
+  hostCount: r.host_count,
+});
+
 /** SQLite persistence of SSH keys (private keys encrypted) and hosts (tables created by `RepositoryStore`). */
 export class HostStore {
   private readonly db: Database;
@@ -53,20 +69,9 @@ export class HostStore {
 
   listKeys(): SshKeySummary[] {
     return this.db
-      .query<Omit<KeyRow, 'private_key'> & { host_count: number }, []>(
-        `SELECT k.id, k.name, k.public_key, k.fingerprint, k.created_at,
-                (SELECT count(*) FROM hosts h WHERE h.ssh_key_id = k.id) AS host_count
-         FROM ssh_keys k ORDER BY k.name COLLATE NOCASE, k.id`,
-      )
+      .query<KeySummaryRow, []>(`${KEY_SUMMARY_SELECT} ORDER BY k.name COLLATE NOCASE, k.id`)
       .all()
-      .map((r) => ({
-        id: r.id,
-        name: r.name,
-        publicKey: r.public_key,
-        fingerprint: r.fingerprint,
-        createdAt: r.created_at,
-        hostCount: r.host_count,
-      }));
+      .map(toKeySummary);
   }
 
   /** A key with its decrypted private part (for connecting); null when it does not exist. */
@@ -84,8 +89,15 @@ export class HostStore {
       : null;
   }
 
+  /** Names of all keys by id (nothing decrypted, hosts not counted). */
+  keyNames(): Map<number, string> {
+    const rows = this.db.query<{ id: number; name: string }, []>('SELECT id, name FROM ssh_keys').all();
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
   keySummary(id: number): SshKeySummary | null {
-    return this.listKeys().find((k) => k.id === id) ?? null;
+    const r = this.db.query<KeySummaryRow, [number]>(`${KEY_SUMMARY_SELECT} WHERE k.id = ?`).get(id);
+    return r ? toKeySummary(r) : null;
   }
 
   keyNameExists(name: string, exceptId: number | null = null): boolean {
@@ -140,11 +152,11 @@ export class HostStore {
   }
 
   addHost(input: HostInput): Host {
-    const result = this.db
-      .query(
-        'INSERT INTO hosts (type, name, address, port, user, ssh_key_id, backup_storage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    const row = this.db
+      .query<HostRow, [string, string, string, number, string, number | null, string | null, string]>(
+        'INSERT INTO hosts (type, name, address, port, user, ssh_key_id, backup_storage, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) RETURNING *',
       )
-      .run(
+      .get(
         input.type,
         input.name.trim(),
         input.address,
@@ -153,8 +165,8 @@ export class HostStore {
         input.sshKeyId,
         input.backupStorage,
         new Date().toISOString(),
-      );
-    return this.getHost(Number(result.lastInsertRowid))!;
+      )!;
+    return toHost(row);
   }
 
   /** Saves the connection fields (the type of a host never changes). */

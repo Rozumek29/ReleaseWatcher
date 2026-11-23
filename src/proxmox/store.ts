@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { parseJson, parseStringArray } from '../json.ts';
 import type { SecretBox } from '../secret-box.ts';
 import type { HomeAssistantState } from './home-assistant.ts';
 import {
@@ -83,32 +84,9 @@ interface RunRow {
   output: string | Uint8Array;
 }
 
-function parseJson<T>(json: string | null): T | null {
-  if (!json) {
-    return null;
-  }
-  try {
-    return JSON.parse(json) as T;
-  } catch {
-    return null;
-  }
-}
-
 function parsePackages(json: string | null): AptPackage[] {
-  if (!json) {
-    return [];
-  }
-  try {
-    const parsed = JSON.parse(json) as unknown;
-    return Array.isArray(parsed) ? parsed.filter((p): p is AptPackage => typeof p?.name === 'string') : [];
-  } catch {
-    return [];
-  }
-}
-
-function parseStrings(json: string | null): string[] {
-  const parsed = parseJson<unknown>(json);
-  return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === 'string') : [];
+  const parsed = parseJson<unknown>(json, null);
+  return Array.isArray(parsed) ? parsed.filter((p): p is AptPackage => typeof p?.name === 'string') : [];
 }
 
 const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
@@ -124,10 +102,10 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   checkCron: r.check_cron,
   updateCores: r.update_cores,
   updateMemoryMb: r.update_memory_mb,
-  resourcesToRestore: parseJson<ResourceChange>(r.resources_to_restore),
+  resourcesToRestore: parseJson<ResourceChange | null>(r.resources_to_restore, null),
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
-  restartReasons: parseStrings(r.restart_reasons),
+  restartReasons: parseStringArray(r.restart_reasons),
   osRelease: parseOsReleaseJson(r.os_release),
   homeAssistant: parseHomeAssistant(r.home_assistant),
   homeAssistantUrl: r.home_assistant_url,
@@ -145,7 +123,7 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
 const OS_RELEASE_KEYS = ['id', 'name', 'versionId', 'pointVersion', 'codename', 'prettyName', 'proxmoxVersion'] as const;
 
 function parseOsReleaseJson(json: string | null): OsRelease | null {
-  const parsed = parseJson<Record<string, unknown>>(json);
+  const parsed = parseJson<Record<string, unknown> | null>(json, null);
   if (!parsed || typeof parsed !== 'object') {
     return null;
   }
@@ -162,7 +140,7 @@ function parseOsReleaseJson(json: string | null): OsRelease | null {
 }
 
 function parseHomeAssistant(json: string | null): HomeAssistantState | null {
-  const parsed = parseJson<HomeAssistantState>(json);
+  const parsed = parseJson<HomeAssistantState | null>(json, null);
   return parsed && Array.isArray(parsed.updates) ? parsed : null;
 }
 
@@ -196,6 +174,9 @@ const toRun = (r: RunRow): Run => ({
   exitCode: r.exit_code,
   output: unpackOutput(r.output),
 });
+
+/** Free database pages (4 KiB each) collected before pruned runs give them back to the file system. */
+const FREE_PAGES_TO_RELEASE = 256;
 
 /** Output shorter than this stays plain text (compression would not pay off). */
 const PACK_OUTPUT_FROM = 512;
@@ -246,12 +227,44 @@ export class ContainerStore {
     return row ? this.toContainer(row) : null;
   }
 
+  /** Names of all targets by id – without reading (and decrypting) the rest of each row. */
+  names(): Map<number, string> {
+    const rows = this.db.query<{ id: number; name: string }, []>('SELECT id, name FROM containers').all();
+    return new Map(rows.map((r) => [r.id, r.name]));
+  }
+
+  /** The fields the check schedule needs of every enabled target (no secrets decrypted, no JSON parsed). */
+  listEnabledSchedules(): Pick<Container, 'id' | 'hostId' | 'checkCron'>[] {
+    return this.db
+      .query<Pick<ContainerRow, 'id' | 'host_id' | 'check_cron'>, []>(
+        'SELECT id, host_id, check_cron FROM containers WHERE is_enabled = 1 ORDER BY vmid',
+      )
+      .all()
+      .map((r) => ({ id: r.id, hostId: r.host_id, checkCron: r.check_cron }));
+  }
+
+  /** Ids of the targets reached through the host `hostId` (the node itself, its guests, a server). */
+  idsOnHost(hostId: number | null): number[] {
+    return this.db
+      .query<{ id: number }, [number | null]>('SELECT id FROM containers WHERE host_id IS ?')
+      .all(hostId)
+      .map((r) => r.id);
+  }
+
   /** True when guest `vmid` of the node `hostId` has been added. */
   existsVmid(hostId: number, vmid: number): boolean {
     return (
       this.db.query("SELECT 1 FROM containers WHERE host_id = ? AND vmid = ? AND kind IN ('lxc', 'vm')").get(hostId, vmid) !==
       null
     );
+  }
+
+  /** VMIDs of the guests (containers, virtual machines) of the node `hostId` that have been added. */
+  addedVmids(hostId: number): Set<number> {
+    const rows = this.db
+      .query<{ vmid: number }, [number]>("SELECT vmid FROM containers WHERE host_id = ? AND kind IN ('lxc', 'vm')")
+      .all(hostId);
+    return new Set(rows.map((r) => r.vmid));
   }
 
   /** The entry of the Proxmox node `hostId` itself, when it has been added. */
@@ -264,10 +277,7 @@ export class ContainerStore {
 
   /** Adds the Proxmox node `hostId` itself as a target (apt only). */
   addNode(hostId: number, name: string): Container {
-    const result = this.db
-      .query("INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, 'node', ?, ?, ?)")
-      .run(hostId, NODE_VMID, name, new Date().toISOString());
-    return this.get(Number(result.lastInsertRowid))!;
+    return this.insert(hostId, 'node', NODE_VMID, name);
   }
 
   /** The target of the server `hostId` (a server host has exactly one). */
@@ -280,18 +290,21 @@ export class ContainerStore {
 
   /** Adds the target of the server `hostId` (apt and applications, commands run directly on it). */
   addServer(hostId: number, name: string): Container {
-    const result = this.db
-      .query("INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, 'server', ?, ?, ?)")
-      .run(hostId, NODE_VMID, name, new Date().toISOString());
-    return this.get(Number(result.lastInsertRowid))!;
+    return this.insert(hostId, 'server', NODE_VMID, name);
   }
 
   /** Adds a container or virtual machine of the node `hostId`. */
   add(hostId: number, vmid: number, name: string, kind: GuestKind = 'lxc'): Container {
-    const result = this.db
-      .query('INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, ?, ?, ?, ?)')
-      .run(hostId, kind, vmid, name, new Date().toISOString());
-    return this.get(Number(result.lastInsertRowid))!;
+    return this.insert(hostId, kind, vmid, name);
+  }
+
+  private insert(hostId: number, kind: TargetKind, vmid: number, name: string): Container {
+    const row = this.db
+      .query<ContainerRow, [number, string, number, string, string]>(
+        'INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *',
+      )
+      .get(hostId, kind, vmid, name, new Date().toISOString())!;
+    return this.toContainer(row);
   }
 
   save(c: Container): void {
@@ -407,10 +420,13 @@ export class ContainerStore {
   }
 
   addApp(containerId: number, input: AppInput): ContainerApp {
-    const result = this.db
-      .query('INSERT INTO container_apps (container_id, name, created_at) VALUES (?, ?, ?)')
-      .run(containerId, input.name, new Date().toISOString());
-    const app = this.getApp(containerId, Number(result.lastInsertRowid))!;
+    const app = toApp(
+      this.db
+        .query<AppRow, [number, string, string]>(
+          'INSERT INTO container_apps (container_id, name, created_at) VALUES (?, ?, ?) RETURNING *',
+        )
+        .get(containerId, input.name, new Date().toISOString())!,
+    );
     Object.assign(app, input);
     this.saveApp(app);
     return app;
@@ -446,12 +462,13 @@ export class ContainerStore {
   }
 
   startRun(containerId: number, appId: number | null, kind: RunKind, trigger: RunTrigger): Run {
-    const result = this.db
-      .query(
-        `INSERT INTO container_runs (container_id, app_id, kind, trigger, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)`,
+    const row = this.db
+      .query<RunRow, [number, number | null, string, string, string]>(
+        `INSERT INTO container_runs (container_id, app_id, kind, trigger, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)
+         RETURNING id, container_id, app_id, kind, trigger, status, started_at, finished_at, exit_code, output`,
       )
-      .run(containerId, appId, kind, trigger, new Date().toISOString());
-    return this.getRun(Number(result.lastInsertRowid))!;
+      .get(containerId, appId, kind, trigger, new Date().toISOString())!;
+    return toRun(row);
   }
 
   saveRunOutput(id: number, output: string): void {
@@ -471,7 +488,7 @@ export class ContainerStore {
       )
       .all()
       .flatMap((r) => {
-        const resume = parseJson<RunResume>(r.resume);
+        const resume = parseJson<RunResume | null>(r.resume, null);
         return resume ? [{ run: toRun(r), resume }] : [];
       });
   }
@@ -502,8 +519,7 @@ export class ContainerStore {
       )
       .run(containerId, checks, others).changes;
     if (pruned > 0) {
-      // Give the freed pages back to the file system (the database uses auto_vacuum = INCREMENTAL).
-      this.db.run('PRAGMA incremental_vacuum');
+      this.releaseFreePages();
     }
     return pruned;
   }
@@ -560,7 +576,18 @@ export class ContainerStore {
         update.run(packOutput(output), id);
       }
     })();
-    this.db.run('PRAGMA incremental_vacuum');
+    this.releaseFreePages(1);
     return rows.length;
+  }
+
+  /**
+   * Gives free pages back to the file system (the database uses auto_vacuum = INCREMENTAL) once at least `minPages`
+   * have piled up: a prune after a finished run frees a page or two – not worth moving pages around every time.
+   */
+  private releaseFreePages(minPages = FREE_PAGES_TO_RELEASE): void {
+    const free = this.db.query<{ freelist_count: number }, []>('PRAGMA freelist_count').get()!.freelist_count;
+    if (free >= minPages) {
+      this.db.run('PRAGMA incremental_vacuum');
+    }
   }
 }

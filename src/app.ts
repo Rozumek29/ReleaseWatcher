@@ -18,7 +18,8 @@ import { ReleaseChecker } from './checker.ts';
 import { type AdvisoryCursor, type AdvisoryFilter, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
 import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
-import { errorMessage, noStore, problem, validationProblem } from './http.ts';
+import { errorMessage } from './errors.ts';
+import { noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
 import { CHANNEL_NAMES, CHANNEL_SETTINGS, MASK_VISIBLE_START } from './notifiers/channels.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
@@ -564,7 +565,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     registry: deps.registry ?? new OciRegistryClient(),
     log,
     ...(deps.dockerEngine ? { engine: deps.dockerEngine } : {}),
-    targetName: (targetId) => containerStore.get(targetId)?.name ?? null,
+    targetNames: () => containerStore.names(),
     notify: (notification) => dispatcher.dispatchDockerUpdates(notification),
   });
   const dockerJob = new CronJob({
@@ -604,6 +605,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const settingsDto = () => {
     const current = settings.current;
+    const nodes = hostStore.listProxmoxHosts().map((h) => ({
+      id: h.id,
+      name: h.name,
+      configured: shells.forHost(h.id).isConfigured,
+      backupStorage: h.backupStorage,
+    }));
     return {
       discord: {
         webhookConfigured: !!current.discordWebhookUrl,
@@ -625,14 +632,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       },
       proxmox: {
         // A Proxmox node is added (Settings → Connections) and has an SSH key.
-        configured: hostStore.listProxmoxHosts().some((h) => shells.forHost(h.id).isConfigured),
+        configured: nodes.some((n) => n.configured),
         /** Proxmox nodes guests can be added from (the first one is the default). */
-        nodes: hostStore.listProxmoxHosts().map((h) => ({
-          id: h.id,
-          name: h.name,
-          configured: shells.forHost(h.id).isConfigured,
-          backupStorage: h.backupStorage,
-        })),
+        nodes,
         checkCron: current.containerCheckCron,
         checkCronSource: settings.sourceOf('containerCheckCron'),
         checkConcurrency: current.containerCheckConcurrency,
@@ -712,6 +714,19 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     };
   };
 
+  /** Docker counts of the status summary – derived only from the database, so rebuilt only after a write. */
+  const dockerStatus = cachedByRevision(
+    () => store.revision(),
+    () => {
+      const shown = docker.describe(dockerStore.listContainers()).filter((c) => c.present && !c.ignored);
+      return {
+        total: shown.length,
+        /** A newer image for the tag or a newer release of the linked repository. */
+        updatesAvailable: shown.filter((c) => c.registry.state === 'update-available' || c.updateAvailable === true).length,
+      };
+    },
+  );
+
   const statusDto = () => {
     const repositories = store.listStatusFields();
     return {
@@ -725,14 +740,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
       containers: containerStatus(containerStore),
-      docker: (() => {
-        const shown = docker.describe(dockerStore.listContainers()).filter((c) => c.present && !c.ignored);
-        return {
-          total: shown.length,
-          /** A newer image for the tag or a newer release of the linked repository. */
-          updatesAvailable: shown.filter((c) => c.registry.state === 'update-available' || c.updateAvailable === true).length,
-        };
-      })(),
+      docker: dockerStatus(),
       advisories: (() => {
         impacts.refresh();
         return store.advisoryTotals();

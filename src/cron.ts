@@ -104,19 +104,22 @@ export function parseCron(expression: string): CronSchedule {
     return dayOk && weekdayOk;
   };
 
+  // Bun's native parser finds the next time without walking minute by minute (up to ~527,000 steps for a yearly
+  // schedule). The fields were validated above, so it accepts the expression.
+  const fields = parts.join(' ');
+  const limit = (from: Date) => from.getTime() + 366 * 24 * 60 * 60_000;
   return {
     expression: normalized,
     matches,
     next(from) {
-      const date = new Date(from);
-      date.setSeconds(0, 0);
-      for (let i = 0; i < 366 * 24 * 60; i++) {
-        date.setMinutes(date.getMinutes() + 1);
-        if (matches(date)) {
-          return new Date(date);
-        }
+      const end = limit(from);
+      let date = Bun.cron.parse(fields, from);
+      // A time skipped by a daylight saving change (02:30 on the day clocks jump to 03:00) comes back as the time it
+      // is moved to, which `matches` – and so the scheduler – would not run at: look further, as before.
+      while (date && date.getTime() <= end && !matches(date)) {
+        date = Bun.cron.parse(fields, date);
       }
-      return null;
+      return date && date.getTime() <= end ? date : null;
     },
   };
 }

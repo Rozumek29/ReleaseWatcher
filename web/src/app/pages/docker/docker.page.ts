@@ -1,6 +1,7 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, signal, untracked } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, effect, inject, signal, untracked } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
+import { ClockService } from '../../core/clock.service';
 import { ApiService } from '../../core/api.service';
 import { DockerContainer, DockerEndpoint, DockerOverview } from '../../core/models';
 import { StatusService } from '../../core/status.service';
@@ -49,7 +50,7 @@ export class DockerPage {
   protected readonly loadError = signal<string | null>(null);
   protected readonly filter = signal<DockerFilter>('all');
   protected readonly checkingAll = signal(false);
-  protected readonly now = signal(Date.now());
+  protected readonly now = inject(ClockService).now;
 
   protected readonly filters: { value: DockerFilter; label: string }[] = [
     { value: 'all', label: 'All' },
@@ -118,8 +119,6 @@ export class DockerPage {
       const timer = setTimeout(() => void this.load(), POLL_MS);
       onCleanup(() => clearTimeout(timer));
     });
-    const tick = setInterval(() => this.now.set(Date.now()), 30_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(tick));
   }
 
   protected async load(): Promise<void> {

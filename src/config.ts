@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { intervalToCron } from './cron.ts';
+import { errorMessage } from './errors.ts';
 import type { LogFileOptions } from './log.ts';
 import { SMTP_SECURITY, type SmtpSecurity } from './notifiers/smtp.ts';
 import { WEBHOOK_METHODS, type WebhookMethod } from './notifiers/webhook.ts';
@@ -196,7 +197,7 @@ function readKeyFile(path: string): string {
   try {
     return readFileSync(path, 'utf8');
   } catch (error) {
-    throw new Error(`Cannot read PROXMOX_SSH_KEY_FILE "${path}": ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Cannot read PROXMOX_SSH_KEY_FILE "${path}": ${errorMessage(error)}`);
   }
 }
 

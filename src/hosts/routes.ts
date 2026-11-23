@@ -1,4 +1,5 @@
-import { errorMessage, problem, validationProblem } from '../http.ts';
+import { errorMessage } from '../errors.ts';
+import { problem, validationProblem } from '../http.ts';
 import type { Logger } from '../log.ts';
 import { describeSshFailure, ShellNotConfiguredError } from '../proxmox/ssh.ts';
 import { type ObjectSchema, parseId, readBody } from '../validation.ts';
@@ -97,8 +98,14 @@ const keyDto = (k: SshKeySummary) => ({
 export function hostRoutes(deps: HostRoutesDeps) {
   const { hosts, shells, keyTool } = deps;
 
-  const hostDto = (h: Host, targetCounts = hosts.targetCounts()) => {
-    const key = h.sshKeyId === null ? null : hosts.keySummary(h.sshKeyId);
+  /** Target counts and key names for {@link hostDto} – read once for a whole list. */
+  const hostContext = () => ({
+    targetCounts: hosts.targetCounts(),
+    keyNames: hosts.keyNames(),
+  });
+
+  const hostDto = (h: Host, { targetCounts, keyNames } = hostContext()) => {
+    const keyName = h.sshKeyId === null ? null : (keyNames.get(h.sshKeyId) ?? null);
     return {
       id: h.id,
       type: h.type,
@@ -107,11 +114,11 @@ export function hostRoutes(deps: HostRoutesDeps) {
       port: h.port,
       user: h.user,
       sshKeyId: h.sshKeyId,
-      sshKeyName: key?.name ?? null,
+      sshKeyName: keyName,
       /** Proxmox node: storage for backups before updates; null = the global setting. */
       backupStorage: h.backupStorage,
       /** A key is chosen, so commands can run (whether the host answers shows "Test connection"). */
-      configured: key !== null,
+      configured: keyName !== null,
       /** Containers, virtual machines and the node itself watched through this host. */
       targetCount: targetCounts.get(h.id) ?? 0,
       createdAt: h.createdAt,
@@ -194,8 +201,8 @@ export function hostRoutes(deps: HostRoutesDeps) {
 
     '/api/hosts': {
       GET: () => {
-        const counts = hosts.targetCounts();
-        return Response.json(hosts.listHosts().map((h) => hostDto(h, counts)));
+        const context = hostContext();
+        return Response.json(hosts.listHosts().map((h) => hostDto(h, context)));
       },
       POST: async (req: Request) => {
         const body = await readBody<HostBody>(req, hostSchema);

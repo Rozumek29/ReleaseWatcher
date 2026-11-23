@@ -1,6 +1,7 @@
 import type { RepositoryStore } from '../db.ts';
 import { fullName, iconUrls } from '../domain.ts';
-import { errorMessage, problem, validationProblem } from '../http.ts';
+import { errorMessage } from '../errors.ts';
+import { problem, validationProblem } from '../http.ts';
 import { maskSecret } from '../settings.ts';
 import { validateCron } from '../cron.ts';
 import { type ObjectSchema, parseId, readBody, RequestValidationError, validate } from '../validation.ts';
@@ -199,6 +200,19 @@ function runCursor(value: string | null): number | null {
   return Number(value);
 }
 
+/**
+ * Runs a request to the Proxmox node: a failure becomes a 502 with `title` (the node was reached for this request), a
+ * missing connection is left to {@link guard} (409).
+ */
+async function nodeRequest(title: string, action: () => Promise<Response>): Promise<Response> {
+  try {
+    return await action();
+  } catch (error) {
+    if (error instanceof ShellNotConfiguredError) throw error;
+    return problem(502, title, { detail: errorMessage(error) });
+  }
+}
+
 async function guard(action: () => Response | Promise<Response>): Promise<Response> {
   try {
     return await action();
@@ -323,8 +337,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
   };
 
   const listDtos = () => {
-    const allApps = containers.listApps();
-    return containers.list().map((c) => containerDto(c, allApps.filter((a) => a.containerId === c.id)));
+    const appsOf = Map.groupBy(containers.listApps(), (a) => a.containerId);
+    return containers.list().map((c) => containerDto(c, appsOf.get(c.id) ?? []));
   };
 
   const findContainer = (rawId: string) => containers.get(parseId(rawId));
@@ -450,12 +464,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       POST: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
-          try {
-            return Response.json({ output: await service.testConnection(hostId) });
-          } catch (error) {
-            if (error instanceof ShellNotConfiguredError) throw error;
-            return problem(502, 'Could not connect to the Proxmox node.', { detail: errorMessage(error) });
-          }
+          return nodeRequest('Could not connect to the Proxmox node.', async () =>
+            Response.json({ output: await service.testConnection(hostId) }),
+          );
         }),
     },
     // Containers present on the node (`pct list`), marked when already added.
@@ -463,13 +474,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       GET: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
-          try {
+          return nodeRequest('Listing containers failed.', async () => {
             const found = await service.discover(hostId);
-            return Response.json(found.map((c) => ({ ...c, added: containers.existsVmid(hostId, c.vmid) })));
-          } catch (error) {
-            if (error instanceof ShellNotConfiguredError) throw error;
-            return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
-          }
+            const added = containers.addedVmids(hostId);
+            return Response.json(found.map((c) => ({ ...c, added: added.has(c.vmid) })));
+          });
         }),
     },
 
@@ -478,12 +487,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       GET: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
-          try {
-            return Response.json(await service.backupStorages(hostId));
-          } catch (error) {
-            if (error instanceof ShellNotConfiguredError) throw error;
-            return problem(502, 'Listing storages failed.', { detail: errorMessage(error) });
-          }
+          return nodeRequest('Listing storages failed.', async () => Response.json(await service.backupStorages(hostId)));
         }),
     },
 
@@ -547,8 +551,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           } catch (error) {
             return problem(502, 'Listing containers failed.', { detail: errorMessage(error) });
           }
+          const known = containers.addedVmids(hostId);
           const added = found
-            .filter((c) => c.kind === 'lxc' && !containers.existsVmid(hostId, c.vmid))
+            .filter((c) => c.kind === 'lxc' && !known.has(c.vmid))
             .map((c) => containers.add(hostId, c.vmid, c.name, c.kind));
           // Checks run through the scheduler queue, so the concurrency limit applies.
           void scheduler.checkMany(added.map((c) => c.id));
@@ -561,8 +566,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/check-all': {
       POST: () =>
         guard(() => {
-          const queued = containers.listEnabled().filter((c) => service.shellFor(c).isConfigured).length;
-          if (queued === 0 && containers.listEnabled().length > 0) {
+          const enabled = containers.listEnabledSchedules();
+          const queued = enabled.filter((c) => service.shellFor(c).isConfigured).length;
+          if (queued === 0 && enabled.length > 0) {
             throw new ShellNotConfiguredError();
           }
           void scheduler.checkAll();
@@ -750,8 +756,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           }
           if (capabilities(container.kind).restart === 'machine') {
             // Everything reached through this machine stops with it (a node's guests too).
-            const onHost = containers.list().filter((c) => c.hostId === container.hostId);
-            if (service.hasActiveTasksOn(container.hostId) || onHost.some((c) => updater.isQueued(c.id))) {
+            const onHost = containers.idsOnHost(container.hostId);
+            if (service.hasActiveTasksOn(container.hostId) || onHost.some((id) => updater.isQueued(id))) {
               return problem(409, `Checks or updates are running – restart ${targetLabel(container)} when they have finished.`);
             }
           } else if (container.status === 'stopped') {

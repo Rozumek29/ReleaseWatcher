@@ -1,5 +1,6 @@
-import { ChangeDetectionStrategy, Component, DestroyRef, OnInit, computed, effect, inject, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, OnInit, computed, effect, inject, output, signal } from '@angular/core';
 import { firstValueFrom } from 'rxjs';
+import { ClockService } from '../../core/clock.service';
 import { ApiService, describeError } from '../../core/api.service';
 import { DockerEndpoint, Host, HostType, SshKey } from '../../core/models';
 import { ToastService } from '../../core/toast.service';
@@ -42,7 +43,7 @@ export class ConnectionsPanel implements OnInit {
   protected readonly keyDialog = signal<SshKeyDialogMode | null>(null);
   protected readonly endpoints = signal<DockerEndpoint[] | null>(null);
   protected readonly editingEndpoint = signal<DockerEndpointDialogData | null>(null);
-  protected readonly now = signal(Date.now());
+  protected readonly now = inject(ClockService).now;
 
   /** Some endpoint is being checked: reload until it finished. */
   private readonly checking = computed(() => !!this.endpoints()?.some((e) => e.isChecking));
@@ -53,8 +54,6 @@ export class ConnectionsPanel implements OnInit {
       const timer = setTimeout(() => void this.reloadEndpoints(), POLL_MS);
       onCleanup(() => clearTimeout(timer));
     });
-    const tick = setInterval(() => this.now.set(Date.now()), 30_000);
-    inject(DestroyRef).onDestroy(() => clearInterval(tick));
   }
 
   async ngOnInit(): Promise<void> {

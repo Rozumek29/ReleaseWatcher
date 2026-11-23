@@ -1,3 +1,4 @@
+import { errorMessage } from '../errors.ts';
 import { type UpdateEntity, updateEntitiesFromStates } from './home-assistant.ts';
 
 /** `fetch` as used by the client (tests pass a fake – they must never reach a real Home Assistant). */
@@ -86,4 +87,4 @@ export class HomeAssistantApi {
   }
 }
 
-const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error)).replace(/\.$/, '');
+const describe = (error: unknown): string => errorMessage(error).replace(/\.$/, '');

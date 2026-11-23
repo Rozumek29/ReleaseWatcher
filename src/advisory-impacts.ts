@@ -12,6 +12,11 @@ export class AdvisoryImpacts {
   private readonly linkedVersions: () => ReadonlyMap<number, readonly (string | null)[]>;
   /** Installed versions (as JSON) each repository's impacts were computed with; empty after a restart. */
   private computedWith = new Map<number, string>();
+  /**
+   * `store.revision()` right after the last refresh. Advisories and every installed version live in the database
+   * (one connection), so nothing can have changed while it stays the same – the status poll then reads nothing.
+   */
+  private refreshedAt: number | null = null;
 
   constructor(store: RepositoryStore, linkedVersions: () => ReadonlyMap<number, readonly (string | null)[]>) {
     this.store = store;
@@ -20,6 +25,9 @@ export class AdvisoryImpacts {
 
   /** Brings the stored impacts up to date. Call before reading them; cheap when nothing changed. */
   refresh(): void {
+    if (this.refreshedAt === this.store.revision()) {
+      return;
+    }
     const linked = this.linkedVersions();
     const versions = new Map<number, string[]>();
     const keys = new Map<number, string>();
@@ -41,5 +49,6 @@ export class AdvisoryImpacts {
       }),
     );
     this.computedWith = keys;
+    this.refreshedAt = this.store.revision();
   }
 }

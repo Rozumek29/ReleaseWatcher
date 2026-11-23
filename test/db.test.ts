@@ -109,16 +109,22 @@ describe('RepositoryStore advisories', () => {
     const repo = store.add('acme', 'widget', false);
     repo.installedVersion = '1.0.0';
     store.save(repo);
-    const impacts = new AdvisoryImpacts(store, () => new Map());
-    const affects = () => store.pageAdvisories({}, null, 10).rows.map((r) => [r.advisory.id, r.affects, r.affectedVersions]);
+    let reads = 0;
+    const impacts = new AdvisoryImpacts(store, () => {
+      reads++;
+      return new Map();
+    });
+    const affects =() => store.pageAdvisories({}, null, 10).rows.map((r) => [r.advisory.id, r.affects, r.affectedVersions]);
     store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 2.0.0'), new Date());
     assert.deepEqual(store.listAdvisoriesForImpact([]).map((a) => a.advisoryId), ['GHSA-a']);
 
     impacts.refresh();
     assert.deepEqual(affects(), [['GHSA-a', true, ['1.0.0']]]);
     const revision = store.revision();
+    const readsBefore = reads;
     impacts.refresh();
     assert.equal(store.revision(), revision, 'nothing changed – nothing written');
+    assert.equal(reads, readsBefore, 'nothing written since the last refresh – the installed versions are not read again');
 
     store.saveAdvisory(repo.id, advisory('GHSA-a', 1, '< 2.0.0', { summary: 'Reworded' }), new Date());
     assert.deepEqual(store.listAdvisoriesForImpact([]), []);
