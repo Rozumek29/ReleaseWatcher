@@ -255,9 +255,13 @@ describe('ContainersPage', () => {
 
   it('asks before upgrading apt packages and opens the run log', async () => {
     const { fixture, el } = await create([container()]);
+    // The package list stays expanded while upgrading.
+    [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
+    await settle(fixture);
+    expect(el.querySelector('app-apt-packages')).not.toBeNull();
 
     const upgrade = [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) =>
-      b.textContent?.includes('Upgrade'),
+      b.textContent?.trim() === 'Upgrade',
     )!;
     upgrade.click();
     await settle(fixture);
@@ -290,6 +294,9 @@ describe('ContainersPage', () => {
     http.expectOne('/api/status').flush({});
     await settle(fixture);
     expect(el.textContent).toContain('no pending packages');
+    // No empty package list (with its "No packages match" message) is left behind.
+    expect(el.querySelector('app-apt-packages')).toBeNull();
+    expect(el.textContent).not.toContain('No packages match');
   });
 
   it('shows why a restart is needed and restarts the container after a confirmation', async () => {

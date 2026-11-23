@@ -511,7 +511,7 @@
                     }
                   </div>
                 }
-                @if (expanded().has(c.id)) {
+                @if (expanded().has(c.id) && c.aptUpgradable.length > 0) {
                   <app-apt-packages [packages]="c.aptUpgradable" [listId]="c.id" />
                 }
               </div>
