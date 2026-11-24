@@ -328,17 +328,21 @@ export class DockerService {
     const all = store.listContainers();
     this.updateInstalledVersions(all);
     this.prune(all, fresh);
-    await this.notifyNewImages(containers, options.note);
+    await this.notifyNewImages(containers, fresh, options.note);
   }
 
   /**
    * Reports the tags whose registry has an image the containers do not run yet and that was not reported before. Each
-   * image is reported once (`notified_digest`), even while the notification type is switched off.
+   * image is reported once (`notified_digest`), even while the notification type is switched off. `states` = the tag
+   * states read after this pass asked the registries (pruning only drops tags no container runs).
    */
-  private async notifyNewImages(containers: readonly DockerContainer[], note?: NoteFn): Promise<void> {
+  private async notifyNewImages(
+    containers: readonly DockerContainer[],
+    states: ReadonlyMap<string, ImageTagState>,
+    note?: NoteFn,
+  ): Promise<void> {
     const { store, notify, log } = this.deps;
     if (!notify) return;
-    const states = store.listTagStates();
     const updates = new Map<string, { digest: string; image: DockerImageUpdate }>();
     for (const view of this.describe(containers.filter((c) => c.present && !c.ignored))) {
       if (view.registry.state !== 'update-available') continue;
