@@ -57,6 +57,13 @@ if (process.argv.includes('--reset-login')) {
   console.log('Open the UI and create the account again with the setup code from the log / setup-code file.');
   process.exit(0);
 }
+// Way back in when password sign-in is off and neither a passkey nor single sign-on works (e.g. the provider is down).
+if (process.argv.includes('--enable-password-login')) {
+  new AuthStore(store.database).setPasswordLogin(true);
+  store.close();
+  console.log('Password sign-in turned on – sign in with the user name and password of the account.');
+  process.exit(0);
+}
 const seeded = store.seedNewDatabase(localVersionUrl(config.host, config.port));
 if (seeded) {
   log.info({ repository: `${seeded.owner}/${seeded.name}` }, 'New database – watching ReleaseWatcher itself for new releases');

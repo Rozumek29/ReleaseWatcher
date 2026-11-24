@@ -13,7 +13,9 @@ import {
 } from '@simplewebauthn/server';
 import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
-import type { ApiToken, ApiTokenScope, AuthStore, LoginMethod, Passkey, Session } from './store.ts';
+import { type SettingSource, type SettingsService, SettingsValidationError, maskSecret } from '../settings.ts';
+import { type OidcClient, type OidcConfig, OidcError, normalizeIssuer } from './oidc.ts';
+import type { ApiToken, ApiTokenScope, AuthStore, LoginMethod, OidcLink, Passkey, Session } from './store.ts';
 
 export const SESSION_COOKIE = 'rw_session';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60_000;
@@ -26,6 +28,10 @@ export const MAX_API_TOKEN_DAYS = 3650;
 /** The last use of an API token is written at most this often. */
 const API_TOKEN_TOUCH_MS = 60_000;
 const MAX_PENDING_CHALLENGES = 1000;
+/** Time a browser has to come back from the OIDC provider. */
+const OIDC_REQUEST_TTL_MS = 10 * 60_000;
+/** Path of the OIDC redirect URI (register `<origin>` + this at the provider). */
+export const OIDC_CALLBACK_PATH = '/api/auth/oidc/callback';
 
 export const MIN_PASSWORD_LENGTH = 10;
 const MAX_PASSWORD_LENGTH = 256;
@@ -63,8 +69,63 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   hasPasskeys: boolean;
-  /** False when only passkeys sign in (the login screen then starts the passkey prompt right away). */
+  /** False when the password does not sign in (passkeys / single sign-on only). */
   passwordLogin: boolean;
+  /** Name of the OIDC provider when signing in with it works (configured and linked), otherwise null. */
+  oidcLogin: string | null;
+}
+
+/** The single sign-on section of the Account page (GET /api/auth/oidc). */
+export interface OidcSettingsState {
+  /** Issuer and client ID are set. */
+  configured: boolean;
+  issuer: string | null;
+  issuerSource: SettingSource;
+  clientId: string | null;
+  clientIdSource: SettingSource;
+  hasClientSecret: boolean;
+  clientSecretMasked: string | null;
+  clientSecretSource: SettingSource;
+  name: string | null;
+  nameSource: SettingSource;
+  /** Register this at the provider. */
+  redirectUri: string;
+  /** The linked identity, or null. */
+  link: OidcLink | null;
+}
+
+/** PUT /api/auth/oidc – omitted = keep, null = back to the env value. */
+export interface OidcSettingsChange {
+  currentPassword: string;
+  issuer?: string | null;
+  clientId?: string | null;
+  clientSecret?: string | null;
+  name?: string | null;
+}
+
+export type OidcMode = 'login' | 'link';
+
+/** A failed OIDC callback; `mode` tells where to send the browser back to. */
+export class OidcCallbackError extends AuthError {
+  override name = 'OidcCallbackError';
+  readonly mode: OidcMode;
+
+  constructor(mode: OidcMode, status: number, message: string) {
+    super(status, message);
+    this.mode = mode;
+  }
+}
+
+interface PendingOidc {
+  mode: OidcMode;
+  /** SHA-256 of the value in the browser's binding cookie: the callback must come back to the same browser. */
+  bindingHash: string;
+  codeVerifier: string;
+  nonce: string;
+  redirectUri: string;
+  /** Linking: the session that started it. */
+  sessionId: string | null;
+  expires: number;
 }
 
 /** Blocks a client after repeated failed logins (exponential lock, per key – usually the IP address). */
@@ -141,9 +202,11 @@ export interface AuthServiceOptions {
   dataDir: string | null;
   log: Pick<Logger, 'info' | 'warn'>;
   now?: () => Date;
+  /** Sign-in with an OpenID Connect provider: its settings (`oidc*`) and the client that talks to it. */
+  oidc: { settings: Pick<SettingsService, 'current' | 'update' | 'sourceOf'>; client: OidcClient };
 }
 
-/** Single-account login: password + passkeys, sessions in the database, first-run setup with a one-time code. */
+/** Single-account login: password, passkeys and OIDC; sessions in the database, first-run setup with a one-time code. */
 export class AuthService {
   private readonly store: AuthStore;
   private readonly options: AuthServiceOptions;
@@ -154,6 +217,8 @@ export class AuthService {
   private readonly registrations = new Map<string, { challenge: string; expires: number }>();
   /** Pending passkey logins per challenge ID (no session yet). */
   private readonly logins = new Map<string, { challenge: string; expires: number }>();
+  /** Pending OIDC sign-ins and links per `state`. */
+  private readonly oidcRequests = new Map<string, PendingOidc>();
 
   constructor(store: AuthStore, options: AuthServiceOptions) {
     this.store = store;
@@ -166,9 +231,28 @@ export class AuthService {
     return this.store.getAccount() !== null;
   }
 
-  /** Passkeys only: user verification (PIN, biometrics) is required, so a passkey is never a single factor. */
+  /** Password sign-in off: user verification (PIN, biometrics) is required, so a passkey is never a single factor. */
   private get passkeysOnly(): boolean {
     return this.store.getAccount()?.passwordLogin === false;
+  }
+
+  /** The configured OIDC provider, or null when the issuer or the client ID is missing. */
+  private get oidcConfig(): OidcConfig | null {
+    const s = this.options.oidc.settings.current;
+    return s.oidcIssuer && s.oidcClientId
+      ? { issuer: s.oidcIssuer, clientId: s.oidcClientId, clientSecret: s.oidcClientSecret, name: s.oidcName || 'OIDC' }
+      : null;
+  }
+
+  /** The account is linked to an identity of the configured provider, so single sign-on can work. */
+  private oidcUsable(account = this.store.getAccount()): boolean {
+    const config = this.oidcConfig;
+    return !!config && !!account?.oidc && normalizeIssuer(account.oidc.issuer) === normalizeIssuer(config.issuer);
+  }
+
+  /** Whether the account can sign in without the password (a passkey or single sign-on). */
+  private hasPasswordlessSignIn(account = this.store.getAccount()): boolean {
+    return this.store.listPasskeys().length > 0 || this.oidcUsable(account);
   }
 
   /**
@@ -227,6 +311,7 @@ export class AuthService {
       username: session && account ? account.username : null,
       hasPasskeys: account !== null && this.store.listPasskeys().length > 0,
       passwordLogin: account?.passwordLogin ?? true,
+      oidcLogin: account && this.oidcUsable(account) ? this.oidcConfig!.name : null,
     };
   }
 
@@ -254,7 +339,7 @@ export class AuthService {
     this.checkThrottle(ctx);
     const account = this.store.getAccount();
     if (account && !account.passwordLogin) {
-      throw new AuthError(409, 'Password sign-in is turned off – sign in with a passkey.');
+      throw new AuthError(409, 'Password sign-in is turned off – sign in with a passkey or single sign-on.');
     }
     // Always verify a hash, so response times don't reveal whether the user name exists.
     const hash = account?.passwordHash ?? (await this.dummyHash());
@@ -319,16 +404,10 @@ export class AuthService {
     session: Session,
     change: { currentPassword: string; username?: string | null; newPassword?: string | null; passwordLogin?: boolean | null },
   ): Promise<void> {
-    const account = this.store.getAccount();
-    if (!account) {
-      throw new AuthError(401, 'Not signed in.');
-    }
-    if (!(await Bun.password.verify(change.currentPassword, account.passwordHash))) {
-      throw new AuthError(400, 'The current password is wrong.', 'currentPassword');
-    }
+    const account = await this.verifyCurrentPassword(change.currentPassword);
     const passwordLogin = change.passwordLogin ?? account.passwordLogin;
-    if (!passwordLogin && this.store.listPasskeys().length === 0) {
-      throw new AuthError(409, 'Add a passkey before turning off password sign-in.');
+    if (!passwordLogin && !this.hasPasswordlessSignIn(account)) {
+      throw new AuthError(409, 'Add a passkey or link single sign-on before turning off password sign-in.');
     }
     if (change.username !== undefined && change.username !== null && change.username.trim() !== account.username) {
       this.store.updateUsername(validateUsername(change.username));
@@ -341,9 +420,9 @@ export class AuthService {
     if (passwordLogin !== account.passwordLogin) {
       this.store.setPasswordLogin(passwordLogin);
       if (!passwordLogin) {
-        this.store.deleteOtherNonPasskeySessions(session.id);
+        this.store.deleteOtherPasswordSessions(session.id);
       }
-      this.options.log.info({ passwordLogin }, passwordLogin ? 'Password sign-in turned on' : 'Password sign-in turned off – passkeys only');
+      this.options.log.info({ passwordLogin }, passwordLogin ? 'Password sign-in turned on' : 'Password sign-in turned off');
     }
   }
 
@@ -461,10 +540,211 @@ export class AuthService {
     if (!this.store.getPasskey(id)) {
       return false;
     }
-    if (this.passkeysOnly && this.store.listPasskeys().length === 1) {
+    if (this.passkeysOnly && this.store.listPasskeys().length === 1 && !this.oidcUsable()) {
       throw new AuthError(409, 'This is the last passkey – turn on password sign-in before removing it.');
     }
     return this.store.deletePasskey(id);
+  }
+
+  // --- Single sign-on (OpenID Connect) ---
+
+  oidcSettings(ctx: RequestContext): OidcSettingsState {
+    const settings = this.options.oidc.settings;
+    const s = settings.current;
+    return {
+      configured: this.oidcConfig !== null,
+      issuer: s.oidcIssuer,
+      issuerSource: settings.sourceOf('oidcIssuer'),
+      clientId: s.oidcClientId,
+      clientIdSource: settings.sourceOf('oidcClientId'),
+      hasClientSecret: !!s.oidcClientSecret,
+      clientSecretMasked: maskSecret(s.oidcClientSecret, 2),
+      clientSecretSource: settings.sourceOf('oidcClientSecret'),
+      name: s.oidcName,
+      nameSource: settings.sourceOf('oidcName'),
+      redirectUri: `${ctx.origin}${OIDC_CALLBACK_PATH}`,
+      link: this.store.getAccount()?.oidc ?? null,
+    };
+  }
+
+  /**
+   * Saves the provider settings (the current password is required). Another issuer removes the link – the linked
+   * identity belongs to the former provider – which is refused while single sign-on is the only way to sign in.
+   */
+  async updateOidcSettings(session: Session, change: OidcSettingsChange): Promise<void> {
+    const account = await this.verifyCurrentPassword(change.currentPassword);
+    const settings = this.options.oidc.settings;
+    const ssoOnly = !account.passwordLogin && this.store.listPasskeys().length === 0 && this.oidcUsable(account);
+    const issuerChanges =
+      change.issuer !== undefined && normalizeIssuer(change.issuer ?? '') !== normalizeIssuer(settings.current.oidcIssuer ?? '');
+    if (ssoOnly && (issuerChanges || (change.clientId !== undefined && !change.clientId?.trim()))) {
+      throw new AuthError(409, 'Single sign-on is the only way to sign in – turn on password sign-in or add a passkey first.');
+    }
+    try {
+      settings.update({
+        oidcIssuer: change.issuer,
+        oidcClientId: change.clientId,
+        oidcClientSecret: change.clientSecret,
+        oidcName: change.name,
+      });
+    } catch (error) {
+      if (error instanceof SettingsValidationError) {
+        const fields: Record<string, string> = {
+          oidcIssuer: 'issuer',
+          oidcClientId: 'clientId',
+          oidcClientSecret: 'clientSecret',
+          oidcName: 'name',
+        };
+        throw new AuthError(400, error.message, fields[error.field] ?? error.field);
+      }
+      throw error;
+    }
+    const issuer = settings.current.oidcIssuer;
+    if (account.oidc && (!issuer || normalizeIssuer(issuer) !== normalizeIssuer(account.oidc.issuer))) {
+      this.unlink(session);
+    }
+    this.options.log.info({ issuer }, 'Single sign-on settings saved');
+  }
+
+  /** Removes the link to the OIDC identity and ends the other sessions opened with it (false = not linked). */
+  unlinkOidc(session: Session): boolean {
+    const account = this.store.getAccount();
+    if (!account?.oidc) {
+      return false;
+    }
+    if (!account.passwordLogin && this.store.listPasskeys().length === 0) {
+      throw new AuthError(409, 'Single sign-on is the only way to sign in – turn on password sign-in or add a passkey first.');
+    }
+    this.unlink(session);
+    return true;
+  }
+
+  private unlink(session: Session): void {
+    this.store.setOidcLink(null);
+    this.store.deleteOtherOidcSessions(session.id);
+    this.options.log.info({}, 'Single sign-on unlinked');
+  }
+
+  /**
+   * Starts signing in (`login`, no session needed) or linking the account (`link`, signed in) at the provider.
+   * Returns the provider URL to open and the value for the browser-binding cookie.
+   */
+  async startOidc(mode: OidcMode, session: Session | null, ctx: RequestContext): Promise<{ url: string; binding: string }> {
+    const config = this.oidcConfig;
+    if (!config) {
+      throw new AuthError(409, 'Single sign-on is not set up.');
+    }
+    if (mode === 'login') {
+      this.checkThrottle(ctx);
+      if (!this.oidcUsable()) {
+        throw new AuthError(409, 'Single sign-on is not linked to the account – sign in another way and link it on the Account page.');
+      }
+    } else if (!session) {
+      throw new AuthError(401, 'Not signed in.');
+    }
+    const state = randomToken();
+    const binding = randomToken();
+    const request: PendingOidc = {
+      mode,
+      bindingHash: sha256(binding),
+      codeVerifier: randomToken(48),
+      nonce: randomToken(),
+      redirectUri: `${ctx.origin}${OIDC_CALLBACK_PATH}`,
+      sessionId: session?.id ?? null,
+      expires: this.now().getTime() + OIDC_REQUEST_TTL_MS,
+    };
+    let url: string;
+    try {
+      url = await this.options.oidc.client.authorizationUrl(config, { ...request, state });
+    } catch (error) {
+      throw this.oidcFailure(error);
+    }
+    const now = this.now().getTime();
+    for (const [key, value] of this.oidcRequests) {
+      if (value.expires <= now) this.oidcRequests.delete(key);
+    }
+    if (this.oidcRequests.size >= MAX_PENDING_CHALLENGES) {
+      this.oidcRequests.delete(this.oidcRequests.keys().next().value!);
+    }
+    this.oidcRequests.set(state, request);
+    return { url, binding };
+  }
+
+  /**
+   * Handles the provider's redirect: checks the state and the browser binding, redeems the code and then signs in
+   * (returns the session token) or links the identity to the account. Throws {@link OidcCallbackError}.
+   */
+  async finishOidc(
+    params: { state: string | null; code: string | null; error: string | null; errorDescription: string | null },
+    binding: string | null,
+    ctx: RequestContext,
+  ): Promise<{ mode: OidcMode; token: string | null }> {
+    const pending = params.state ? this.oidcRequests.get(params.state) : undefined;
+    if (pending) {
+      this.oidcRequests.delete(params.state!);
+    }
+    if (!pending || pending.expires <= this.now().getTime() || !binding || !equalStrings(sha256(binding), pending.bindingHash)) {
+      throw new OidcCallbackError(
+        pending?.mode ?? 'login',
+        400,
+        'The single sign-on request expired or was started in another browser – try again.',
+      );
+    }
+    const { mode } = pending;
+    if (params.error) {
+      throw new OidcCallbackError(mode, 400, `The provider refused the sign-in: ${(params.errorDescription || params.error).slice(0, 200)}`);
+    }
+    const config = this.oidcConfig;
+    if (!config) {
+      throw new OidcCallbackError(mode, 409, 'Single sign-on is not set up.');
+    }
+    if (!params.code) {
+      throw new OidcCallbackError(mode, 400, 'The provider sent no authorization code.');
+    }
+    if (mode === 'login') {
+      this.checkThrottle(ctx);
+    }
+    let identity;
+    try {
+      identity = await this.options.oidc.client.exchange(config, {
+        code: params.code,
+        redirectUri: pending.redirectUri,
+        codeVerifier: pending.codeVerifier,
+        nonce: pending.nonce,
+      });
+    } catch (error) {
+      const failure = this.oidcFailure(error);
+      throw new OidcCallbackError(mode, failure.status, failure.message);
+    }
+    const account = this.store.getAccount();
+    if (mode === 'link') {
+      if (!account || !pending.sessionId || !this.store.getSession(pending.sessionId)) {
+        throw new OidcCallbackError(mode, 401, 'Your session ended – sign in again and link single sign-on once more.');
+      }
+      this.store.setOidcLink(identity);
+      this.options.log.info({ issuer: identity.issuer, subject: identity.subject }, 'Single sign-on linked');
+      return { mode, token: null };
+    }
+    const link = account?.oidc;
+    if (!account || !link || link.issuer !== identity.issuer || link.subject !== identity.subject) {
+      this.throttle.fail(this.throttleKey(ctx));
+      this.options.log.warn({ ip: ctx.ip, issuer: identity.issuer, subject: identity.subject }, 'Single sign-on with an identity that is not linked');
+      throw new OidcCallbackError(mode, 401, `${identity.label ?? 'This account'} at ${config.name} is not linked to ReleaseWatcher.`);
+    }
+    if (identity.label !== link.label) {
+      this.store.setOidcLabel(identity.label);
+    }
+    this.throttle.succeed(this.throttleKey(ctx));
+    return { mode, token: this.createSession('oidc', ctx) };
+  }
+
+  /** An {@link OidcError} (the provider failed or sent something invalid) becomes a 502; others are rethrown. */
+  private oidcFailure(error: unknown): AuthError {
+    if (error instanceof OidcError) {
+      this.options.log.warn({ err: error.message }, 'Single sign-on failed');
+      return new AuthError(502, error.message);
+    }
+    throw error;
   }
 
   // --- API tokens ---
@@ -528,6 +808,17 @@ export class AuthService {
   }
 
   // --- helpers ---
+
+  private async verifyCurrentPassword(password: string) {
+    const account = this.store.getAccount();
+    if (!account) {
+      throw new AuthError(401, 'Not signed in.');
+    }
+    if (!(await Bun.password.verify(password, account.passwordHash))) {
+      throw new AuthError(400, 'The current password is wrong.', 'currentPassword');
+    }
+    return account;
+  }
 
   private createSession(method: LoginMethod, ctx: RequestContext): string {
     const token = randomToken();

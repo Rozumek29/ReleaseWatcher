@@ -28,6 +28,7 @@ export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set([
   'pushoverAppToken',
   'webhookUrl',
   'webhookHeaders',
+  'oidcClientSecret',
 ]);
 
 /** Known plain text stored encrypted in `app_meta` to detect a wrong encryption key at startup. */
@@ -528,6 +529,11 @@ const MIGRATIONS: readonly string[] = [
    UPDATE docker_image_tags SET notified_digest = remote_digest;`,
   // Docker containers are linked through their labels by the lower-case `owner/name` of a repository.
   `CREATE INDEX idx_watched_repositories_full_name ON watched_repositories (lower(owner || '/' || name));`,
+  // Sign-in with an OpenID Connect provider: the account is linked to one identity (issuer + subject).
+  `ALTER TABLE account ADD COLUMN oidc_issuer TEXT;
+   ALTER TABLE account ADD COLUMN oidc_subject TEXT;
+   ALTER TABLE account ADD COLUMN oidc_label TEXT;
+   ALTER TABLE account ADD COLUMN oidc_linked_at TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

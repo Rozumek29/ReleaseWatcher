@@ -8,8 +8,21 @@ export interface Account {
   webauthnUserId: string;
   createdAt: string;
   passwordChangedAt: string;
-  /** False = passkeys only: the password no longer signs in (it still confirms account changes). */
+  /** False = the password no longer signs in (passkeys / OIDC only); it still confirms account changes. */
   passwordLogin: boolean;
+  /** The linked OpenID Connect identity, or null. */
+  oidc: OidcLink | null;
+}
+
+/** The identity at the OpenID Connect provider that may sign in to the account. */
+export interface OidcLink {
+  /** `iss` of the ID token. */
+  issuer: string;
+  /** `sub` of the ID token. */
+  subject: string;
+  /** User name / e-mail at the provider, only for display. */
+  label: string | null;
+  linkedAt: string;
 }
 
 export interface Passkey {
@@ -25,7 +38,7 @@ export interface Passkey {
   lastUsedAt: string | null;
 }
 
-export type LoginMethod = 'password' | 'passkey' | 'setup';
+export type LoginMethod = 'password' | 'passkey' | 'setup' | 'oidc';
 
 export interface Session {
   /** SHA-256 of the session token (the token itself is only in the browser's cookie). */
@@ -85,6 +98,10 @@ interface AccountRow {
   created_at: string;
   password_changed_at: string;
   password_login: number;
+  oidc_issuer: string | null;
+  oidc_subject: string | null;
+  oidc_label: string | null;
+  oidc_linked_at: string | null;
 }
 
 interface PasskeyRow {
@@ -149,6 +166,10 @@ export class AuthStore {
           createdAt: r.created_at,
           passwordChangedAt: r.password_changed_at,
           passwordLogin: r.password_login === 1,
+          oidc:
+            r.oidc_issuer && r.oidc_subject
+              ? { issuer: r.oidc_issuer, subject: r.oidc_subject, label: r.oidc_label, linkedAt: r.oidc_linked_at ?? r.created_at }
+              : null,
         }
       : null;
   }
@@ -175,6 +196,18 @@ export class AuthStore {
 
   setPasswordLogin(enabled: boolean): void {
     this.db.query('UPDATE account SET password_login = ? WHERE id = 1').run(enabled ? 1 : 0);
+  }
+
+  /** Links the account to an OIDC identity (null = unlinks it). */
+  setOidcLink(link: Omit<OidcLink, 'linkedAt'> | null): void {
+    this.db
+      .query('UPDATE account SET oidc_issuer = ?, oidc_subject = ?, oidc_label = ?, oidc_linked_at = ? WHERE id = 1')
+      .run(link?.issuer ?? null, link?.subject ?? null, link?.label ?? null, link ? new Date().toISOString() : null);
+  }
+
+  /** Updates the display name of the linked identity (it can change at the provider). */
+  setOidcLabel(label: string | null): void {
+    this.db.query('UPDATE account SET oidc_label = ? WHERE id = 1').run(label);
   }
 
   /** Removes the account with all passkeys, sessions and API tokens (`--reset-login`). */
@@ -259,9 +292,14 @@ export class AuthStore {
     return this.db.query('DELETE FROM sessions WHERE id IS NOT ?').run(keepId).changes;
   }
 
-  /** Deletes every session not signed in with a passkey, except `keepId`. */
-  deleteOtherNonPasskeySessions(keepId: string): number {
-    return this.db.query("DELETE FROM sessions WHERE id IS NOT ? AND method <> 'passkey'").run(keepId).changes;
+  /** Deletes every session signed in with the password (or the setup), except `keepId`. */
+  deleteOtherPasswordSessions(keepId: string): number {
+    return this.db.query("DELETE FROM sessions WHERE id IS NOT ? AND method IN ('password', 'setup')").run(keepId).changes;
+  }
+
+  /** Deletes every session signed in through OIDC, except `keepId`. */
+  deleteOtherOidcSessions(keepId: string | null): number {
+    return this.db.query("DELETE FROM sessions WHERE id IS NOT ? AND method = 'oidc'").run(keepId).changes;
   }
 
   deleteExpiredSessions(now: string): number {

@@ -1,7 +1,16 @@
 import type { AuthenticationResponseJSON, RegistrationResponseJSON } from '@simplewebauthn/server';
 import { problem, validationProblem } from '../http.ts';
 import { type ObjectSchema, parseId, readBody } from '../validation.ts';
-import { AuthError, type AuthService, type RequestContext, sessionCookie, sessionTokenFrom } from './service.ts';
+import {
+  AuthError,
+  type AuthService,
+  OidcCallbackError,
+  type OidcSettingsChange,
+  type RequestContext,
+  isHttps,
+  sessionCookie,
+  sessionTokenFrom,
+} from './service.ts';
 import type { ApiTokenScope, Session } from './store.ts';
 
 /** Routes reachable without a session (everything else under /api requires one). */
@@ -13,7 +22,41 @@ export const PUBLIC_ROUTES: ReadonlySet<string> = new Set([
   '/api/auth/login',
   '/api/auth/passkey/options',
   '/api/auth/passkey/login',
+  '/api/auth/oidc/login',
+  '/api/auth/oidc/callback',
 ]);
+
+/** Binds a single sign-on request to the browser that started it (checked by the callback). */
+const OIDC_COOKIE = 'rw_oidc';
+const OIDC_COOKIE_PATH = '/api/auth/oidc';
+
+/** SameSite=Lax: the provider's redirect back is a cross-site navigation, which Strict cookies would miss. */
+function oidcCookie(req: Request, binding: string | null): string {
+  const attributes = [`Path=${OIDC_COOKIE_PATH}`, 'HttpOnly', 'SameSite=Lax', ...(isHttps(req) ? ['Secure'] : [])];
+  return [`${OIDC_COOKIE}=${binding ?? ''}`, `Max-Age=${binding ? 600 : 0}`, ...attributes].join('; ');
+}
+
+function cookieValue(req: Request, name: string): string | null {
+  for (const part of req.headers.get('cookie')?.split(';') ?? []) {
+    const [key, ...value] = part.trim().split('=');
+    if (key === name) {
+      return value.join('=') || null;
+    }
+  }
+  return null;
+}
+
+const oidcSettingsSchema: ObjectSchema = {
+  type: 'object',
+  properties: {
+    currentPassword: { type: 'string', maxLength: 1000 },
+    issuer: { type: 'string', nullable: true, maxLength: 500 },
+    clientId: { type: 'string', nullable: true, maxLength: 500 },
+    clientSecret: { type: 'string', nullable: true, maxLength: 500 },
+    name: { type: 'string', nullable: true, maxLength: 100 },
+  },
+  required: ['currentPassword'],
+};
 
 const credentialsSchema: ObjectSchema = {
   type: 'object',
@@ -141,6 +184,70 @@ export function authRoutes({ auth, context }: AuthRoutesDeps) {
         } catch (error) {
           return authProblem(error);
         }
+      },
+    },
+    // Single sign-on: the UI opens the returned provider URL; the provider redirects back to /callback.
+    '/api/auth/oidc/login': {
+      POST: async (req: Request, server: Bun.Server<undefined>) => {
+        try {
+          const { url, binding } = await auth.startOidc('login', null, context(req, server));
+          return Response.json({ url }, { headers: { 'set-cookie': oidcCookie(req, binding) } });
+        } catch (error) {
+          return authProblem(error);
+        }
+      },
+    },
+    '/api/auth/oidc/link': {
+      POST: (req: Request, server: Bun.Server<undefined>) =>
+        withSession(req, async (session) => {
+          const { url, binding } = await auth.startOidc('link', session, context(req, server));
+          return Response.json({ url }, { headers: { 'set-cookie': oidcCookie(req, binding) } });
+        }),
+      DELETE: (req: Request) =>
+        withSession(req, (session) =>
+          auth.unlinkOidc(session) ? new Response(null, { status: 204 }) : problem(404, 'Single sign-on is not linked.'),
+        ),
+    },
+    '/api/auth/oidc/callback': {
+      GET: async (req: Request, server: Bun.Server<undefined>) => {
+        const params = new URL(req.url).searchParams;
+        const headers = new Headers({ 'set-cookie': oidcCookie(req, null) });
+        try {
+          const result = await auth.finishOidc(
+            {
+              state: params.get('state'),
+              code: params.get('code'),
+              error: params.get('error'),
+              errorDescription: params.get('error_description'),
+            },
+            cookieValue(req, OIDC_COOKIE),
+            context(req, server),
+          );
+          if (result.token) {
+            headers.append('set-cookie', sessionCookie(req, result.token));
+            headers.set('location', '/');
+          } else {
+            headers.set('location', '/account?sso=linked');
+          }
+        } catch (error) {
+          if (!(error instanceof AuthError)) {
+            throw error;
+          }
+          const page = error instanceof OidcCallbackError && error.mode === 'link' ? '/account' : '/login';
+          headers.set('location', `${page}?${new URLSearchParams({ ssoError: error.message })}`);
+        }
+        return new Response(null, { status: 303, headers });
+      },
+    },
+    '/api/auth/oidc': {
+      GET: (req: Request, server: Bun.Server<undefined>) =>
+        withSession(req, () => Response.json(auth.oidcSettings(context(req, server)))),
+      PUT: async (req: Request, server: Bun.Server<undefined>) => {
+        const body = await readBody<OidcSettingsChange>(req, oidcSettingsSchema);
+        return withSession(req, async (session) => {
+          await auth.updateOidcSettings(session, body);
+          return Response.json(auth.oidcSettings(context(req, server)));
+        });
       },
     },
     '/api/auth/logout': {

@@ -72,6 +72,8 @@ export interface Config {
   publicUrl: string | null;
   /** Trust X-Forwarded-For for the client IP (only behind a reverse proxy that sets it). */
   trustProxy: boolean;
+  /** Sign-in with an OpenID Connect provider (defaults of the Account page settings). */
+  oidc: { issuer: string | null; clientId: string | null; clientSecret: string | null; name: string | null };
   log: {
     /** Minimum level (`debug`, `info`, `warn`, `error`) or `silent`. */
     level: string;
@@ -144,6 +146,12 @@ export function loadConfig(env: Env = process.env): Config {
     basicAuth: authUser && authPassword ? { username: authUser, password: authPassword } : null,
     publicUrl: publicUrl(str(env, 'PUBLIC_URL')),
     trustProxy: (str(env, 'TRUST_PROXY') ?? 'false').toLowerCase() === 'true',
+    oidc: {
+      issuer: str(env, 'OIDC_ISSUER'),
+      clientId: str(env, 'OIDC_CLIENT_ID'),
+      clientSecret: str(env, 'OIDC_CLIENT_SECRET'),
+      name: str(env, 'OIDC_NAME'),
+    },
     log: {
       level: str(env, 'LOG_LEVEL') ?? 'info',
       file: logFile

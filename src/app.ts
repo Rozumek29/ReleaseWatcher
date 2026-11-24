@@ -11,6 +11,7 @@ import {
   type SecurityAdvisory,
 } from './advisories.ts';
 import { AdvisoryImpacts } from './advisory-impacts.ts';
+import { type FetchLike, OidcClient } from './auth/oidc.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
@@ -158,6 +159,8 @@ export interface AppDeps {
     dataDir?: string | null;
     /** Creates the account from these credentials when none exists (former BASIC_AUTH_*). */
     bootstrap?: { username: string; password: string } | null;
+    /** `fetch` for the OpenID Connect provider (tests pass a fake provider; defaults to the global `fetch`). */
+    oidcFetch?: FetchLike;
   };
 }
 
@@ -563,7 +566,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     clearLegacy: () => settings.clearLegacyBackupStorage(),
     log,
   });
-  const auth = new AuthService(new AuthStore(store.database), { dataDir: deps.auth?.dataDir ?? null, log });
+  const auth = new AuthService(new AuthStore(store.database), {
+    dataDir: deps.auth?.dataDir ?? null,
+    log,
+    oidc: { settings, client: new OidcClient(deps.auth?.oidcFetch ? { fetch: deps.auth.oidcFetch } : {}) },
+  });
   await auth.bootstrap(deps.auth?.bootstrap ?? null);
   auth.ensureSetupCode();
   const interrupted = containerStore.failInterruptedRuns();

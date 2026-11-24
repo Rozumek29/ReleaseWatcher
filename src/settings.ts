@@ -77,6 +77,13 @@ export interface Settings {
   advisoriesGithub: boolean;
   /** Query OSV.dev for repositories with an OSV package. */
   advisoriesOsv: boolean;
+  /** OpenID Connect provider: issuer or discovery URL (edited on the Account page, not through PUT /api/settings). */
+  oidcIssuer: string | null;
+  oidcClientId: string | null;
+  /** Secret: null = public client (PKCE only). */
+  oidcClientSecret: string | null;
+  /** Name on the sign-in button; null = "OIDC". */
+  oidcName: string | null;
 }
 
 /** On/off settings (stored as "true"/"false"). */
@@ -183,6 +190,10 @@ export class SettingsService {
       notifyDockerUpdates: DEFAULT_NOTIFICATION_PREFERENCES.dockerUpdates,
       advisoriesGithub: true,
       advisoriesOsv: true,
+      oidcIssuer: config.oidc.issuer,
+      oidcClientId: config.oidc.clientId,
+      oidcClientSecret: config.oidc.clientSecret,
+      oidcName: config.oidc.name,
     };
     this.legacyDefaults = {
       host: config.proxmox.host,
@@ -290,6 +301,10 @@ export class SettingsService {
       notifyDockerUpdates: flag('notifyDockerUpdates'),
       advisoriesGithub: flag('advisoriesGithub'),
       advisoriesOsv: flag('advisoriesOsv'),
+      oidcIssuer: o.oidcIssuer ?? this.defaults.oidcIssuer,
+      oidcClientId: o.oidcClientId ?? this.defaults.oidcClientId,
+      oidcClientSecret: o.oidcClientSecret ?? this.defaults.oidcClientSecret,
+      oidcName: o.oidcName ?? this.defaults.oidcName,
     };
   }
 
@@ -416,6 +431,25 @@ function validate(key: SettingKey, value: string): void {
       }
       return;
     case 'githubToken':
+      return;
+    case 'oidcIssuer': {
+      requireHttpUrl(key, value, 'Issuer URL');
+      const url = new URL(value);
+      if (url.search || url.hash || url.username || url.password) {
+        throw new SettingsValidationError(key, 'Enter the issuer URL without query, fragment or credentials.');
+      }
+      return;
+    }
+    case 'oidcClientId':
+    case 'oidcClientSecret':
+      if (value.length > 500 || /\s/.test(value)) {
+        throw new SettingsValidationError(key, 'Must be a single word of at most 500 characters.');
+      }
+      return;
+    case 'oidcName':
+      if (value.length > 40) {
+        throw new SettingsValidationError(key, 'The name can have at most 40 characters.');
+      }
       return;
     case 'smtpHost':
       if (!/^[A-Za-z0-9][A-Za-z0-9.:_-]*$/.test(value) || value.length > 253) {

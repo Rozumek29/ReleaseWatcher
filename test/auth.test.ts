@@ -74,6 +74,7 @@ describe('login', () => {
       username: null,
       hasPasskeys: false,
       passwordLogin: true,
+      oidcLogin: null,
     });
     assert.equal((await browser.request('GET', '/api/repositories')).status, 401);
     assert.equal((await browser.request('GET', '/api/settings')).status, 401);
