@@ -37,6 +37,25 @@ described in `DESIGN.md` – follow it for every UI or API change so new code lo
   bun run typecheck && bun run test && bun run build
   ```
 
+## Releasing a version
+
+1. Pick the version from the changes since the last tag (`git log $(git describe --tags --abbrev=0)..main`):
+   new features → minor, fixes only → patch.
+2. On a branch `chore/release-X.Y.Z` from the current `main`, bump `"version"` in `package.json` and the version badge
+   (`version-X.Y.Z-5865f2`) in `README.md` – nothing else carries the version.
+3. Commit and open the PR as “Release X.Y.Z”, wait for CI, squash-merge (as for any PR).
+4. Tag the merged commit on `main` and push only the tag:
+
+   ```bash
+   git switch main && git pull
+   git tag vX.Y.Z && git push origin vX.Y.Z
+   ```
+
+   `.github/workflows/release.yml` then creates the GitHub Release (zip + Linux executables, generated notes) and the
+   Docker images (`:X.Y.Z`, `:X.Y`, `:latest`). Don't create the release on github.com by hand. A `beta-X.Y.Z` tag
+   makes a pre-release.
+5. Watch the *Release* workflow (`gh run watch`) until it finishes.
+
 ## Commands
 
 | Command              | Purpose                                                    |
