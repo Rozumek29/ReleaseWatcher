@@ -1,0 +1,282 @@
+<div class="sections">
+  <!-- Export -->
+  <section class="card section enter" style="--i: 0" aria-labelledby="export-title">
+    <div class="section-head">
+      <span class="section-icon export"><app-icon name="download" /></span>
+      <div class="section-title">
+        <h2 id="export-title">Export</h2>
+        <p>Download the configuration as a JSON file, e.g. before moving to a new server.</p>
+      </div>
+    </div>
+
+    <div class="section-body">
+      @if (exportError(); as error) {
+        <p class="error-text" role="alert">{{ error }}</p>
+      }
+
+      <div class="list-block">
+        <h3><app-icon name="check" [size]="16" /> Included</h3>
+        <ul class="items included">
+          <li>
+            <span>Settings saved in the UI – schedules, notification types, channel addresses</span>
+            @if (counts(); as c) {
+              <span class="count">{{ c.settings }}</span>
+            }
+          </li>
+          <li>
+            <span
+              >Watched repositories with icons, installed-version and vulnerability settings</span
+            >
+            @if (counts(); as c) {
+              <span class="count">{{ c.repositories }}</span>
+            }
+          </li>
+          <li>
+            <span>
+              Machines: hosts with their containers, VMs and applications
+              @if (counts(); as c) {
+                <span class="muted"
+                  >({{ c.hosts }} hosts, {{ c.targets }} machines, {{ c.apps }} applications)</span
+                >
+              }
+            </span>
+          </li>
+          <li>
+            <span>Docker endpoints</span>
+            @if (counts(); as c) {
+              <span class="count">{{ c.endpoints }}</span>
+            }
+          </li>
+          <li class="switch-item">
+            <app-switch
+              [checked]="includeAppearance()"
+              [showLabel]="false"
+              label="Include the appearance of this browser"
+              (toggled)="includeAppearance.set(!includeAppearance())"
+            />
+            <span class="switch-text">Appearance of this browser (theme, accent, layouts)</span>
+          </li>
+        </ul>
+      </div>
+
+      <div class="list-block">
+        <h3><app-icon name="lock" [size]="16" /> Not included</h3>
+        @if (current()?.secretsOmitted?.length) {
+          <p class="hint">
+            These secrets are saved here but left out – enter them again after importing:
+          </p>
+          <ul class="items secrets">
+            @for (s of current()!.secretsOmitted; track s) {
+              <li><app-icon name="key" [size]="14" /> {{ s }}</li>
+            }
+          </ul>
+        }
+        <ul class="items excluded">
+          @for (item of alwaysExcluded; track item) {
+            <li>{{ item }}</li>
+          }
+        </ul>
+      </div>
+
+      <div class="section-actions">
+        <button type="button" class="btn" (click)="download()" [disabled]="downloading()">
+          <app-icon
+            [name]="downloading() ? 'refresh' : 'download'"
+            [size]="16"
+            [class.spin]="downloading()"
+          />
+          {{ downloading() ? 'Exporting…' : 'Download backup' }}
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Import -->
+  <section class="card section enter" style="--i: 1" aria-labelledby="import-title">
+    <div class="section-head">
+      <span class="section-icon import"><app-icon name="upload" /></span>
+      <div class="section-title">
+        <h2 id="import-title">Import</h2>
+        <p>Restore a backup file. You see what changes before anything is saved.</p>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <div class="field">
+        <span class="label" id="mode-title">Mode</span>
+        <div class="modes" role="radiogroup" aria-labelledby="mode-title">
+          @for (m of modes; track m.mode) {
+            <button
+              type="button"
+              role="radio"
+              class="mode-option"
+              [class.selected]="mode() === m.mode"
+              [attr.aria-checked]="mode() === m.mode"
+              [disabled]="previewing() || importing()"
+              (click)="setMode(m.mode)"
+            >
+              <span class="option-label">{{ m.label }}</span>
+              <span class="hint">{{ m.hint }}</span>
+            </button>
+          }
+        </div>
+      </div>
+
+      <div class="file-row">
+        <label class="btn btn-secondary file-button" [class.disabled]="importing()">
+          <app-icon name="upload" [size]="16" /> Choose file…
+          <input
+            type="file"
+            accept=".json,application/json"
+            class="visually-hidden"
+            [disabled]="importing()"
+            (change)="fileSelected($event)"
+          />
+        </label>
+        @if (fileName(); as name) {
+          <span class="mono file-name" title="{{ name }}">{{ name }}</span>
+        } @else {
+          <span class="muted">No file chosen</span>
+        }
+      </div>
+
+      @if (previewing()) {
+        <p class="muted busy">
+          <app-icon name="refresh" [size]="14" class="spin" /> Reading the file…
+        </p>
+      }
+      @if (previewError(); as error) {
+        <p class="error-text" role="alert">{{ error }}</p>
+      }
+
+      @if (preview(); as p) {
+        <div class="preview fade-in" aria-live="polite">
+          <p class="meta">
+            Backup from ReleaseWatcher {{ p.appVersion ?? 'unknown version' }}
+            @if (p.exportedAt) {
+              · exported {{ p.exportedAt | date: 'medium' }}
+            }
+          </p>
+
+          @for (s of p.sections; track s.key) {
+            <div class="change">
+              <div class="change-head">
+                <span class="change-title">{{ s.title }}</span>
+                @if (s.added.length) {
+                  <span class="badge badge-success">+{{ s.added.length }} new</span>
+                }
+                @if (s.updated.length) {
+                  <span class="badge badge-accent">{{ s.updated.length }} updated</span>
+                }
+                @if (s.removed.length) {
+                  <span class="badge badge-danger">{{ s.removed.length }} removed</span>
+                }
+                @if (!changeCount(s)) {
+                  <span class="badge">{{
+                    s.unchanged ? 'No changes' : 'Nothing in the file'
+                  }}</span>
+                } @else if (s.unchanged) {
+                  <span class="muted small">{{ s.unchanged }} unchanged</span>
+                }
+              </div>
+              @for (group of groups(s); track group.kind) {
+                @if (group.names.length) {
+                  <p class="names" [class]="group.kind">
+                    <span class="names-label">{{ group.label }}:</span>
+                    {{ group.names.slice(0, maxNames).join(', ') }}
+                    @if (more(group.names)) {
+                      <span class="muted">+{{ more(group.names) }} more</span>
+                    }
+                  </p>
+                }
+              }
+            </div>
+          }
+
+          @if (p.secretsToReenter.length) {
+            <div class="callout">
+              <app-icon name="key" [size]="16" />
+              <div>
+                <strong>Enter these secrets again after importing:</strong>
+                <ul>
+                  @for (s of p.secretsToReenter; track s) {
+                    <li>{{ s }}</li>
+                  }
+                </ul>
+              </div>
+            </div>
+          }
+          @if (p.warnings.length) {
+            <div class="callout">
+              <app-icon name="alert" [size]="16" />
+              <ul>
+                @for (w of p.warnings; track w) {
+                  <li>{{ w }}</li>
+                }
+              </ul>
+            </div>
+          }
+
+          @if (fileAppearance()) {
+            <div class="switch-row">
+              <app-switch
+                [checked]="applyAppearance()"
+                [showLabel]="false"
+                label="Use the appearance from the file in this browser"
+                (toggled)="applyAppearance.set(!applyAppearance())"
+              />
+              <span class="switch-text">Use the appearance from the file in this browser</span>
+            </div>
+          }
+        </div>
+
+        <div class="section-actions">
+          <button type="button" class="btn btn-ghost" (click)="reset()" [disabled]="importing()">
+            Cancel
+          </button>
+          <span class="spacer"></span>
+          @if (removals() > 0) {
+            <span class="danger-note">{{ removals() }} item(s) will be removed.</span>
+          }
+          <button
+            type="button"
+            class="btn"
+            (click)="import()"
+            [disabled]="importing() || (!hasChanges() && !fileAppearance())"
+          >
+            <app-icon
+              [name]="importing() ? 'refresh' : 'upload'"
+              [size]="16"
+              [class.spin]="importing()"
+            />
+            {{
+              importing() ? 'Importing…' : mode() === 'replace' ? 'Replace configuration' : 'Import'
+            }}
+          </button>
+        </div>
+      }
+
+      @if (result(); as r) {
+        <div class="done fade-in" role="status">
+          <p class="success-text">
+            <app-icon name="check" [size]="16" /> The configuration was imported.
+          </p>
+          @if (r.secretsToReenter.length) {
+            <div class="callout">
+              <app-icon name="key" [size]="16" />
+              <div>
+                <strong>Enter these secrets again</strong> (Settings → Notifications and
+                Connections, the repository settings and the machine settings):
+                <ul>
+                  @for (s of r.secretsToReenter; track s) {
+                    <li>{{ s }}</li>
+                  }
+                </ul>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    </div>
+  </section>
+</div>

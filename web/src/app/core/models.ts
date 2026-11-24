@@ -914,3 +914,55 @@ export interface DockerContainerRequest {
   linkAuto?: boolean;
   repositoryId?: number | null;
 }
+
+// --- Backup & restore (Settings → Backup) ---
+
+/** Per-browser preferences the UI adds to a backup file (the server ignores them). */
+export interface BackupAppearance {
+  theme: string;
+  accent: string;
+  repositoryLayout: string;
+  containerSort: string;
+}
+
+/** A backup file (`GET /api/backup/export`); secrets are never part of it. */
+export interface BackupFile {
+  format: string;
+  schemaVersion: number;
+  appVersion: string;
+  exportedAt: string;
+  settings: Record<string, string | number | boolean>;
+  repositories: { owner: string; name: string }[];
+  hosts: { type: string; name: string; targets: { kind: string; name: string; apps: unknown[] }[] }[];
+  dockerEndpoints: { name: string; url: string }[];
+  /** Secrets that were configured but left out. */
+  secretsOmitted: string[];
+  /** Added by the UI when the user includes this browser's appearance. */
+  appearance?: BackupAppearance;
+}
+
+export type ImportMode = 'merge' | 'replace';
+
+export interface ImportSectionPreview {
+  key: 'settings' | 'repositories' | 'machines' | 'dockerEndpoints';
+  title: string;
+  added: string[];
+  updated: string[];
+  removed: string[];
+  unchanged: number;
+}
+
+export interface ImportPreview {
+  mode: ImportMode;
+  appVersion: string | null;
+  exportedAt: string | null;
+  sections: ImportSectionPreview[];
+  secretsToReenter: string[];
+  warnings: string[];
+}
+
+/** Response of `POST /api/backup/import`. */
+export interface ImportResponse {
+  applied: boolean;
+  preview: ImportPreview;
+}

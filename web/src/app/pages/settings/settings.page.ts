@@ -27,13 +27,14 @@ import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 import { AppearancePanel } from './appearance';
+import { BackupPanel } from './backup';
 import { CHANNELS, ChannelCard } from './channel-card';
 import { ConnectionsPanel } from './connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
 const SECTIONS: readonly Section[] = ['discord', 'email', 'notifications', 'github', 'polling', 'advisories', 'proxmox'];
-type Tab = 'general' | 'connections' | 'notifications' | 'appearance';
-const TABS: readonly Tab[] = ['general', 'connections', 'notifications', 'appearance'];
+type Tab = 'general' | 'connections' | 'notifications' | 'appearance' | 'backup';
+const TABS: readonly Tab[] = ['general', 'connections', 'notifications', 'appearance', 'backup'];
 
 /** Default port of each SMTP security mode (used when the port still has the previous mode's default). */
 const SMTP_PORTS: Record<SmtpSecurity, number> = { starttls: 587, tls: 465, none: 25 };
@@ -68,6 +69,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
     FormsModule,
     DecimalPipe,
     AppearancePanel,
+    BackupPanel,
     ChannelCard,
     ConnectionsPanel,
     Icon,
@@ -285,6 +287,16 @@ export class SettingsPage implements OnInit {
   }
 
   /** Hosts or keys changed: whether a Proxmox node is configured may have changed too. */
+  /** An imported backup changed the settings: show the new values (unsaved edits are discarded). */
+  protected async backupImported(): Promise<void> {
+    try {
+      this.apply(await firstValueFrom(this.api.getSettings()));
+      void this.statusService.refresh();
+    } catch (error) {
+      this.toast.error(error);
+    }
+  }
+
   protected async connectionsChanged(): Promise<void> {
     try {
       this.settings.set(await firstValueFrom(this.api.getSettings()));

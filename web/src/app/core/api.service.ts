@@ -7,6 +7,7 @@ import {
   AdvisoryQuery,
   AppSettings,
   AppStatus,
+  BackupFile,
   BackupStorage,
   CheckResult,
   Container,
@@ -22,6 +23,8 @@ import {
   HeaderInput,
   Host,
   HostInput,
+  ImportMode,
+  ImportResponse,
   InstalledVersionTestResult,
   Notifier,
   RateLimit,
@@ -217,6 +220,16 @@ export class ApiService {
   /** Lists the endpoints again and asks the registries for every image (runs in the background). */
   checkDocker(): Observable<DockerOverview> {
     return this.http.post<DockerOverview>(`${this.baseUrl}/docker/check`, {});
+  }
+
+  /** The configuration without secrets (Settings → Backup). */
+  exportBackup(): Observable<BackupFile> {
+    return this.http.get<BackupFile>(`${this.baseUrl}/backup/export`);
+  }
+
+  /** Imports a backup file; `dryRun` only returns the preview. */
+  importBackup(backup: unknown, mode: ImportMode, dryRun: boolean): Observable<ImportResponse> {
+    return this.http.post<ImportResponse>(`${this.baseUrl}/backup/import`, { backup, mode, dryRun });
   }
 
   getDockerEndpoints(): Observable<DockerEndpoint[]> {

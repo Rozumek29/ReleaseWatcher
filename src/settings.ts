@@ -332,7 +332,7 @@ export class SettingsService {
         normalized.set(key, null);
         continue;
       }
-      validate(key, text);
+      validateSetting(key, text);
       normalized.set(key, text);
     }
 
@@ -353,7 +353,8 @@ export class SettingsService {
   }
 }
 
-function validate(key: SettingKey, value: string): void {
+/** Checks a setting value (as stored: booleans and numbers as text); throws {@link SettingsValidationError}. */
+export function validateSetting(key: SettingKey, value: string): void {
   if (BOOLEAN_SETTINGS.has(key)) {
     if (value !== 'true' && value !== 'false') {
       throw new SettingsValidationError(key, 'Must be true or false.');

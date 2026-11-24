@@ -15,6 +15,8 @@ import { type FetchLike, OidcClient } from './auth/oidc.ts';
 import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
+import { backupRoutes } from './backup/routes.ts';
+import { BackupService } from './backup/service.ts';
 import { ReleaseChecker } from './checker.ts';
 import { type AdvisoryCursor, type AdvisoryFilter, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
 import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
@@ -606,6 +608,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
   });
   const updater = new ContainerUpdater({ store: containerStore, service: containers, log });
+  const backup = new BackupService({
+    store,
+    settings,
+    hosts: hostStore,
+    containers: containerStore,
+    docker: dockerStore,
+    isBusy: (id) => containers.isBusy(id) || updater.isQueued(id),
+    onHostRemoved: (id) => shells.remove(id),
+    onDockerDisabled: (container) => docker.clearTarget(container),
+  });
 
   const settingsDto = () => {
     const current = settings.current;
@@ -1128,6 +1140,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           },
         }),
         ...dockerRoutes({ store: dockerStore, repositories: store, service: docker, job: dockerJob }),
+        ...backupRoutes({
+          service: backup,
+          // Imported repositories have no release baseline yet: read it right away.
+          onImported: (result) => {
+            if (result.repositoriesAdded > 0) {
+              releaseJob.runNow().catch((error: unknown) => log.error({ err: error }, 'Checking imported repositories failed'));
+            }
+          },
+        }),
         ...hostRoutes({
           hosts: hostStore,
           shells,

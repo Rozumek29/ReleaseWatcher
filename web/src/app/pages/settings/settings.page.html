@@ -18,12 +18,19 @@
   <button type="button" role="tab" class="tab" id="tab-appearance" aria-controls="panel-appearance" [class.active]="tab() === 'appearance'" [attr.aria-selected]="tab() === 'appearance'" (click)="selectTab('appearance')">
     <app-icon name="palette" [size]="15" /> Appearance
   </button>
+  <button type="button" role="tab" class="tab" id="tab-backup" aria-controls="panel-backup" [class.active]="tab() === 'backup'" [attr.aria-selected]="tab() === 'backup'" (click)="selectTab('backup')">
+    <app-icon name="archive" [size]="15" /> Backup
+  </button>
 </div>
 
 @if (tab() === 'appearance') {
 <!-- Per-browser, so it does not wait for the server settings. -->
 <div class="fade-in" id="panel-appearance" role="tabpanel" aria-labelledby="tab-appearance">
   <app-appearance />
+</div>
+} @else if (tab() === 'backup') {
+<div class="fade-in" id="panel-backup" role="tabpanel" aria-labelledby="tab-backup">
+  <app-backup (imported)="backupImported()" />
 </div>
 } @else {
 

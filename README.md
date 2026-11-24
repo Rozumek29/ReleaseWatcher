@@ -57,6 +57,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 - One self-contained executable or a Docker image, one SQLite file, no external services.
 - Password, **passkeys** and/or **single sign-on** (OpenID Connect: Pocket ID, Authentik, Keycloak…), **API tokens** for dashboards like Homepage, secrets encrypted at rest (AES-256-GCM).
 - Light and dark themes with accent colours; every setting can be changed in the UI without a restart.
+- **Backup & restore**: export the configuration as a JSON file (secrets left out) and import it with a preview, merging or replacing.
 
 <table>
   <tr>
