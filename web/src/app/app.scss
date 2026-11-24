@@ -177,6 +177,17 @@ nav {
   }
 }
 
+/* Short screens (phones in landscape): smaller items so the whole list fits more often. */
+@media (max-height: 480px) {
+  .edit-bar {
+    padding-bottom: 2px;
+  }
+
+  .nav-item {
+    padding-block: 5px;
+  }
+}
+
 @keyframes wiggle {
   from {
     rotate: -1deg;

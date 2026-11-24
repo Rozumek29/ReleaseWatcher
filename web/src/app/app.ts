@@ -34,7 +34,19 @@ interface NavDrag {
   /** Item heights (by page) and the gap between items, measured when the drag starts. */
   heights: Map<NavPageId, number>;
   gap: number;
+  /**
+   * The scrolling sidebar, the area it may scroll into view (edit bar + list) and the last pointer position, for
+   * scrolling while the pointer rests near an edge.
+   */
+  scroller: HTMLElement | null;
+  area: HTMLElement;
+  clientY: number;
+  frame: number | null;
 }
+
+/** Distance from the sidebar's top/bottom edge (px) in which dragging scrolls it, and the fastest speed (px/frame). */
+const SCROLL_EDGE = 48;
+const SCROLL_SPEED = 12;
 
 /** App shell: sidebar navigation, poller status and global toasts; sign-in pages get a bare layout. */
 @Component({
@@ -153,21 +165,34 @@ export class App {
         items.map((item, i) => [item.dataset['page'] as NavPageId, rects[i]?.height ?? 0]),
       ),
       gap: first && second ? Math.max(0, second.top - first.bottom) : 0,
+      scroller: list.closest<HTMLElement>('.sidebar'),
+      area: list.parentElement ?? list,
+      clientY: event.clientY,
+      frame: null,
     };
     list.setPointerCapture?.(event.pointerId);
     this.draggingId.set(id);
     this.dragOffset.set(0);
   }
 
-  /** Moves the dragged item into a neighbour's slot once it is dragged past half of that neighbour. */
   protected moveDrag(event: PointerEvent): void {
     const drag = this.drag;
     if (!drag || event.pointerId !== drag.pointerId) return;
+    drag.clientY = event.clientY;
+    this.followPointer(drag);
+    this.autoScroll(drag);
+  }
+
+  /**
+   * Moves the dragged item into a neighbour's slot once it is dragged past half of that neighbour; the item does not
+   * leave the list (above its first or below its last slot).
+   */
+  private followPointer(drag: NavDrag): void {
     const step = (id: NavPageId | undefined) => (id ? (drag.heights.get(id) ?? 0) + drag.gap : 0);
     for (;;) {
       const order = this.navigation.pages().map((p) => p.id);
       const index = order.indexOf(drag.id);
-      const offset = event.clientY - drag.originY;
+      const offset = drag.clientY - drag.originY;
       const next = order[index + 1];
       const previous = order[index - 1];
       if (next && offset > step(next) / 2) {
@@ -177,14 +202,52 @@ export class App {
         this.navigation.move(index, index - 1);
         drag.originY -= step(previous);
       } else {
-        break;
+        const last = index === order.length - 1;
+        this.dragOffset.set(
+          Math.max(index === 0 ? 0 : -Infinity, Math.min(last ? 0 : Infinity, offset)),
+        );
+        return;
       }
     }
-    this.dragOffset.set(event.clientY - drag.originY);
+  }
+
+  /**
+   * On short screens the list can be taller than the visible sidebar: while the pointer rests near its top or bottom
+   * edge, the sidebar scrolls (faster closer to the edge) and the item travels with the pointer.
+   */
+  private autoScroll(drag: NavDrag): void {
+    const scroller = drag.scroller;
+    if (!scroller || drag.frame !== null) return;
+    const { top, bottom } = scroller.getBoundingClientRect();
+    // Scroll only as far as needed to show the whole list, with a little room at the edge.
+    const area = drag.area.getBoundingClientRect();
+    const hiddenBelow = Math.max(0, area.bottom + 8 - bottom);
+    const hiddenAbove = Math.max(0, top - (area.top - 8));
+    const speed = (distance: number) =>
+      Math.ceil(SCROLL_SPEED * (1 - Math.max(0, distance) / SCROLL_EDGE));
+    const delta =
+      drag.clientY > bottom - SCROLL_EDGE
+        ? Math.min(hiddenBelow, speed(bottom - drag.clientY))
+        : drag.clientY < top + SCROLL_EDGE
+          ? -Math.min(hiddenAbove, speed(drag.clientY - top))
+          : 0;
+    if (delta === 0) return;
+    const before = scroller.scrollTop;
+    scroller.scrollTop = before + delta;
+    const scrolled = scroller.scrollTop - before;
+    if (scrolled === 0) return;
+    // The list moved by `scrolled` under the resting pointer.
+    drag.originY -= scrolled;
+    this.followPointer(drag);
+    drag.frame = requestAnimationFrame(() => {
+      drag.frame = null;
+      if (this.drag === drag) this.autoScroll(drag);
+    });
   }
 
   protected endDrag(): void {
     if (!this.drag) return;
+    if (this.drag.frame !== null) cancelAnimationFrame(this.drag.frame);
     this.drag = null;
     this.draggingId.set(null);
     this.dragOffset.set(0);

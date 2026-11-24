@@ -178,4 +178,36 @@ describe('App shell', () => {
     expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Repositories', 'Vulnerabilities', 'Settings']);
     expect(item.classList).not.toContain('dragging');
   });
+
+  it('scrolls a short sidebar while an item is held near its edge', async () => {
+    const { fixture, el, labels, navigation } = await signedIn();
+    navigation.editing.set(true);
+    await settle(fixture);
+    // A sidebar 120px high that can scroll by 100px; items 36px high with a 4px gap.
+    const sidebar = el.querySelector<HTMLElement>('.sidebar')!;
+    let scrollTop = 0;
+    Object.defineProperty(sidebar, 'scrollTop', {
+      get: () => scrollTop,
+      set: (value: number) => (scrollTop = Math.max(0, Math.min(100, value))),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === sidebar) return { top: 0, bottom: 120, height: 120 } as DOMRect;
+      if (this.localName === 'nav') return { top: -scrollTop, bottom: 200 - scrollTop } as DOMRect;
+      const index = [...el.querySelectorAll('.nav-item')].indexOf(this);
+      return { top: index * 40 - scrollTop, bottom: index * 40 + 36 - scrollTop, height: 36 } as DOMRect;
+    });
+    const item = el.querySelector<HTMLButtonElement>('[data-page="repositories"]')!;
+    const pointer = (type: string, clientY: number) =>
+      item.dispatchEvent(new MouseEvent(type, { clientY, button: 0, bubbles: true }));
+
+    pointer('pointerdown', 10);
+    pointer('pointermove', 115);
+    // Only as far as the end of the list (200px + 8px of room - 120px).
+    await vi.waitFor(() => expect(scrollTop).toBe(88));
+    pointer('pointerup', 115);
+    await settle(fixture);
+
+    // 115px on screen + 88px scrolled is below the last item.
+    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Vulnerabilities', 'Settings', 'Repositories']);
+  });
 });
