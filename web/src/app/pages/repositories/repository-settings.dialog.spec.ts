@@ -14,6 +14,7 @@ const repo: WatchedRepository = {
   url: 'https://github.com/dani-garcia/vaultwarden',
   avatarUrl: 'https://avatars.githubusercontent.com/dani-garcia?s=64',
   icon: null,
+  groupId: null,
   iconUrls: [],
   includePrereleases: false,
   isEnabled: true,
@@ -112,6 +113,59 @@ describe('RepositorySettingsDialog', () => {
     icon.dispatchEvent(new Event('input'));
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     expect(http.expectOne('/api/repositories/7').request.body.icon).toBeNull();
+  });
+
+  it('suggests existing groups and saves a new or no group', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    const group = (id: number, name: string) => ({ id, name, icon: null, iconUrls: [], repositoryCount: 1 });
+    fixture.componentRef.setInput('groups', [group(1, 'Home'), group(2, 'Media')]);
+    fixture.componentRef.setInput('repository', { ...repo, groupId: 2 });
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const input = el.querySelector<HTMLInputElement>('#repo-group')!;
+    const options = () => [...el.querySelectorAll('#repo-group-list [role=option]')].map((o) => o.textContent?.replace(/\s+/g, ' ').trim());
+    await fixture.whenStable();
+    expect(input.value).toBe('Media');
+    expect(el.querySelector('#repo-group-list')).toBeNull();
+
+    // Opening lists every group, the current one is checked.
+    input.dispatchEvent(new Event('focus'));
+    await settle(fixture);
+    expect(options()).toEqual(['Home', 'Media']);
+    expect(el.querySelector('#repo-group-list [aria-selected=true]')?.textContent).toContain('Media');
+
+    // Typing filters the groups and offers a new one; arrows and Enter pick a suggestion.
+    input.value = 'e';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(options()).toEqual(['New group e', 'Home', 'Media']);
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown' }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    await settle(fixture);
+    expect(input.value).toBe('Home');
+    expect(el.querySelector('#repo-group-list')).toBeNull();
+
+    input.value = ' Security ';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(options()).toEqual(['New group Security']);
+    el.querySelector('#repo-group-list [role=option]')!.dispatchEvent(new MouseEvent('mousedown'));
+    await settle(fixture);
+    expect(el.querySelector('.dialog-foot app-unsaved-changes')).not.toBeNull();
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    expect(http.expectOne('/api/repositories/7').request.body.groupName).toBe('Security');
+
+    input.value = '';
+    input.dispatchEvent(new Event('input'));
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    expect(http.expectOne('/api/repositories/7').request.body.groupName).toBeNull();
   });
 
   it('saves the installed-version URL when the form is submitted', async () => {

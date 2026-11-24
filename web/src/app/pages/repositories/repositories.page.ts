@@ -1,4 +1,4 @@
-import { DatePipe } from '@angular/common';
+import { DatePipe, NgTemplateOutlet } from '@angular/common';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -12,8 +12,8 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/api.service';
-import { Notifier, WatchedRepository } from '../../core/models';
-import { PreferencesService } from '../../core/preferences.service';
+import { Notifier, RepositoryGroup, WatchedRepository } from '../../core/models';
+import { PreferencesService, type RepositoryGrouping } from '../../core/preferences.service';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
@@ -21,6 +21,8 @@ import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
 import { AdvisoriesDialog } from './advisories.dialog';
+import { groupKeys, groupRepositories } from './grouping';
+import { RepositoryGroupDialog } from './repository-group.dialog';
 import { RepositorySettingsDialog } from './repository-settings.dialog';
 
 type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors';
@@ -28,7 +30,7 @@ type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors'
 @Component({
   selector: 'app-repositories-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DatePipe, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, AdvisoriesDialog],
+  imports: [FormsModule, DatePipe, NgTemplateOutlet, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, RepositoryGroupDialog, AdvisoriesDialog],
   templateUrl: './repositories.page.html',
   styleUrl: './repositories.page.scss',
 })
@@ -40,6 +42,10 @@ export class RepositoriesPage {
 
   protected readonly repositories = signal<WatchedRepository[]>([]);
   protected readonly notifiers = signal<Notifier[]>([]);
+  /** Custom groups (Group: Custom). */
+  protected readonly customGroups = signal<RepositoryGroup[]>([]);
+  /** Custom group whose options dialog is open. */
+  protected readonly editingGroup = signal<RepositoryGroup | null>(null);
   protected readonly loading = signal(true);
   protected readonly busyIds = signal<ReadonlySet<number>>(new Set());
   protected readonly adding = signal(false);
@@ -72,6 +78,12 @@ export class RepositoriesPage {
     };
   });
 
+  protected readonly groupings: { value: RepositoryGrouping; label: string; title: string }[] = [
+    { value: 'none', label: 'None', title: "Don't group repositories" },
+    { value: 'owner', label: 'Owner', title: 'Group owners with several repositories' },
+    { value: 'custom', label: 'Custom', title: 'Group by the groups set in the repository settings' },
+  ];
+
   protected readonly filters: { value: Filter; label: string }[] = [
     { value: 'all', label: 'All' },
     { value: 'enabled', label: 'Active' },
@@ -96,6 +108,24 @@ export class RepositoriesPage {
     );
   });
 
+  /** The visible repositories as shown: group cards first, then repositories in no group. */
+  protected readonly entries = computed(() =>
+    groupRepositories(this.repositories(), this.visible(), this.preferences.repositoryGrouping(), this.customGroups()),
+  );
+  protected readonly groups = computed(() => this.entries().flatMap((e) => (e.kind === 'group' ? [e.group] : [])));
+  protected readonly ungrouped = computed(() =>
+    this.entries().flatMap((e) => (e.kind === 'repository' ? [e.repository] : [])),
+  );
+
+
+  protected readonly collapsed = computed(() => new Set(this.preferences.collapsedGroups()));
+
+  /** Every visible group is collapsed, so the toolbar offers "Expand all". */
+  protected readonly allCollapsed = computed(() => {
+    const collapsed = this.collapsed();
+    return this.groups().every((g) => collapsed.has(g.key));
+  });
+
   constructor() {
     // Reload whenever "Check all now" finished in the sidebar.
     effect(() => {
@@ -106,12 +136,14 @@ export class RepositoriesPage {
 
   protected async load(): Promise<void> {
     try {
-      const [repositories, notifiers] = await Promise.all([
+      const [repositories, notifiers, groups] = await Promise.all([
         firstValueFrom(this.api.getRepositories()),
         firstValueFrom(this.api.getNotifiers()),
+        firstValueFrom(this.api.getRepositoryGroups()),
       ]);
       this.repositories.set(repositories);
       this.notifiers.set(notifiers);
+      this.customGroups.set(groups);
     } catch (error) {
       this.toast.error(error);
     } finally {
@@ -220,6 +252,8 @@ export class RepositoriesPage {
 
   protected onSettingsSaved(updated: WatchedRepository): void {
     this.replace(updated);
+    // The repository may have created, joined or left (and so removed) a group.
+    void this.loadGroups();
     this.editing.set(null);
     this.toast.success(
       updated.installedVersionError
@@ -236,6 +270,44 @@ export class RepositoriesPage {
     return affecting > 0
       ? `${affecting} of ${total} security advisories affect installed ${repo.installedVersion}${severity}`
       : `${total} security ${total === 1 ? 'advisory' : 'advisories'}${severity} – show details`;
+  }
+
+  protected toggleGroup(key: string): void {
+    this.preferences.collapsedGroups.update((keys) =>
+      keys.includes(key) ? keys.filter((k) => k !== key) : [...keys, key],
+    );
+  }
+
+  /** Collapses every group, or expands them all when they already are. */
+  protected toggleAllGroups(): void {
+    const grouping = this.preferences.repositoryGrouping();
+    const keys = new Set(groupKeys(this.repositories(), grouping, this.customGroups()));
+    this.preferences.collapsedGroups.update((collapsed) =>
+      this.allCollapsed()
+        ? collapsed.filter((key) => !keys.has(key))
+        : [...new Set([...collapsed, ...keys])],
+    );
+  }
+
+  protected onGroupSaved(updated: RepositoryGroup): void {
+    this.customGroups.update((groups) => groups.map((g) => (g.id === updated.id ? updated : g)));
+    this.editingGroup.set(null);
+    this.toast.success(`Group ${updated.name} saved.`);
+  }
+
+  protected onGroupRemoved(group: RepositoryGroup): void {
+    this.customGroups.update((groups) => groups.filter((g) => g.id !== group.id));
+    this.repositories.update((list) => list.map((r) => (r.groupId === group.id ? { ...r, groupId: null } : r)));
+    this.editingGroup.set(null);
+    this.toast.success(`Group ${group.name} removed.`);
+  }
+
+  private async loadGroups(): Promise<void> {
+    try {
+      this.customGroups.set(await firstValueFrom(this.api.getRepositoryGroups()));
+    } catch (error) {
+      this.toast.error(error);
+    }
   }
 
   protected isBusy(id: number): boolean {

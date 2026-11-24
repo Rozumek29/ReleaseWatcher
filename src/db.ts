@@ -10,7 +10,7 @@ import {
   type AdvisoryVulnerability,
   type SecurityAdvisory,
 } from './advisories.ts';
-import type { MachineAppRef, WatchedRepository } from './domain.ts';
+import type { MachineAppRef, RepositoryGroup, WatchedRepository } from './domain.ts';
 import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -63,6 +63,7 @@ interface Row {
   osv_package: string | null;
   advisory_baselines: string | null;
   icon: string | null;
+  group_id: number | null;
 }
 
 interface AdvisoryRow {
@@ -131,6 +132,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   osvPackage: r.osv_package,
   advisoryBaselines: parseStringArray(r.advisory_baselines),
   icon: r.icon,
+  groupId: r.group_id,
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -621,6 +623,28 @@ export const MIGRATIONS: readonly string[] = [
    UPDATE watched_repositories
       SET installed_version = d.installed_version, installed_version_checked_at = d.last_seen_at, installed_version_error = NULL
      FROM docker_containers d WHERE d.id = watched_repositories.installed_docker_id;`,
+  // Custom groups of repositories on the Repositories page (name + icon). A group lives as long as it has repositories:
+  // the triggers remove it when its last repository leaves it or is removed, whichever code path does that.
+  `CREATE TABLE repository_groups (
+     id         INTEGER PRIMARY KEY,
+     name       TEXT    NOT NULL UNIQUE COLLATE NOCASE,
+     icon       TEXT,
+     created_at TEXT    NOT NULL
+   );
+   ALTER TABLE watched_repositories ADD COLUMN group_id INTEGER REFERENCES repository_groups (id) ON DELETE SET NULL;
+   CREATE INDEX idx_watched_repositories_group ON watched_repositories (group_id);
+   CREATE TRIGGER repository_group_left AFTER UPDATE OF group_id ON watched_repositories
+     WHEN OLD.group_id IS NOT NULL AND OLD.group_id IS NOT NEW.group_id
+   BEGIN
+     DELETE FROM repository_groups
+      WHERE id = OLD.group_id AND NOT EXISTS (SELECT 1 FROM watched_repositories WHERE group_id = OLD.group_id);
+   END;
+   CREATE TRIGGER repository_group_removed AFTER DELETE ON watched_repositories
+     WHEN OLD.group_id IS NOT NULL
+   BEGIN
+     DELETE FROM repository_groups
+      WHERE id = OLD.group_id AND NOT EXISTS (SELECT 1 FROM watched_repositories WHERE group_id = OLD.group_id);
+   END;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -770,7 +794,7 @@ export class RepositoryStore {
            installed_version_checked_at = IIF(${FROM_MACHINE}, installed_version_checked_at, ?),
            installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), github_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
-           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?
+           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?, group_id = ?
          WHERE id = ?`,
       )
       .run(
@@ -795,6 +819,7 @@ export class RepositoryStore {
         repo.osvPackage,
         repo.advisoryBaselines.length > 0 ? JSON.stringify(repo.advisoryBaselines) : null,
         repo.icon,
+        repo.groupId,
         repo.id,
       );
   }
@@ -1090,6 +1115,56 @@ export class RepositoryStore {
 
   delete(id: number): boolean {
     return this.db.query('DELETE FROM watched_repositories WHERE id = ?').run(id).changes > 0;
+  }
+
+  // --- Custom repository groups ---
+
+  /** Custom groups with their number of repositories, sorted by name. */
+  listGroups(): RepositoryGroup[] {
+    return this.db
+      .query<{ id: number; name: string; icon: string | null; repository_count: number }, []>(
+        `SELECT g.id, g.name, g.icon, count(r.id) AS repository_count
+           FROM repository_groups g LEFT JOIN watched_repositories r ON r.group_id = g.id
+          GROUP BY g.id ORDER BY g.name`,
+      )
+      .all()
+      .map((r) => ({ id: r.id, name: r.name, icon: r.icon, repositoryCount: r.repository_count }));
+  }
+
+  getGroup(id: number): RepositoryGroup | null {
+    return this.listGroups().find((g) => g.id === id) ?? null;
+  }
+
+  /**
+   * Id of the group with this name (case-insensitive), created when there is none. Repositories put into it keep it;
+   * an unused group is removed by the triggers once a repository leaves it, so call this right before assigning.
+   */
+  ensureGroup(name: string): number {
+    const row = this.db.query<{ id: number }, [string]>('SELECT id FROM repository_groups WHERE name = ?').get(name);
+    if (row) return row.id;
+    return this.db
+      .query<{ id: number }, [string, string]>('INSERT INTO repository_groups (name, created_at) VALUES (?, ?) RETURNING id')
+      .get(name, new Date().toISOString())!.id;
+  }
+
+  /** Renames a group / sets its icon. False when another group has the name already (case-insensitive). */
+  updateGroup(id: number, changes: { name?: string; icon?: string | null }): boolean {
+    const group = this.getGroup(id);
+    if (!group) return false;
+    const name = changes.name ?? group.name;
+    const clash = this.db
+      .query<{ id: number }, [string, number]>('SELECT id FROM repository_groups WHERE name = ? AND id <> ?')
+      .get(name, id);
+    if (clash) return false;
+    this.db
+      .query('UPDATE repository_groups SET name = ?, icon = ? WHERE id = ?')
+      .run(name, changes.icon === undefined ? group.icon : changes.icon, id);
+    return true;
+  }
+
+  /** Removes a group; its repositories stay, without a group. */
+  deleteGroup(id: number): boolean {
+    return this.db.query('DELETE FROM repository_groups WHERE id = ?').run(id).changes > 0;
   }
 
   /** Returns all persisted settings as raw key/value pairs. */

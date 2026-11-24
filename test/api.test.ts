@@ -293,6 +293,49 @@ describe('HTTP API', () => {
     assert.deepEqual([reset.icon, reset.iconUrls], [null, []]);
   });
 
+  it('puts repositories into custom groups, renames them and sets their icon', async () => {
+    source.existing.add('acme/gadget');
+    const widget = (await add('acme/widget')).json();
+    const gadget = (await add('acme/gadget')).json();
+    assert.equal(widget.groupId, null);
+    const put = (id: number, payload: object) =>
+      inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+    const groups = async () => (await inject('/api/repository-groups')).json();
+
+    // A new name creates the group; the same name in another case joins it.
+    const grouped = (await put(widget.id, { groupName: '  Home   lab ' })).json();
+    assert.equal((await put(gadget.id, { groupName: 'home lab' })).json().groupId, grouped.groupId);
+    assert.deepEqual(await groups(), [{ id: grouped.groupId, name: 'Home lab', icon: null, iconUrls: [], repositoryCount: 2 }]);
+    // Omitted = keep.
+    assert.equal((await put(widget.id, {})).json().groupId, grouped.groupId);
+    assert.equal((await put(widget.id, { groupName: 'x'.repeat(61) })).statusCode, 400);
+
+    const groupUrl = `/api/repository-groups/${grouped.groupId}`;
+    const renamed = await inject({ method: 'PUT', url: groupUrl, payload: { name: 'Lab', icon: 'sh:proxmox' } });
+    assert.equal(renamed.statusCode, 200);
+    assert.equal(renamed.json().name, 'Lab');
+    assert.equal(renamed.json().iconUrls[0], 'https://cdn.jsdelivr.net/gh/selfhst/icons/svg/proxmox.svg');
+    assert.equal((await inject({ method: 'PUT', url: groupUrl, payload: { icon: 'logo.png' } })).statusCode, 400);
+    assert.equal((await inject({ method: 'PUT', url: groupUrl, payload: { name: ' ' } })).statusCode, 400);
+    assert.equal((await inject({ method: 'PUT', url: '/api/repository-groups/999', payload: { name: 'X' } })).statusCode, 404);
+    // Omitted icon = keep, null = the folder again.
+    assert.equal((await inject({ method: 'PUT', url: groupUrl, payload: { name: 'Lab' } })).json().icon, 'sh:proxmox');
+
+    // Names are unique (case-insensitive).
+    await put(gadget.id, { groupName: 'Media' });
+    const clash = await inject({ method: 'PUT', url: groupUrl, payload: { name: 'MEDIA' } });
+    assert.equal(clash.statusCode, 409);
+    assert.match(clash.json().title, /already exists/);
+
+    // A group disappears with its last repository; removing a group keeps its repositories.
+    await put(widget.id, { groupName: null });
+    assert.deepEqual((await groups()).map((g: { name: string }) => g.name), ['Media']);
+    const media = (await groups())[0].id;
+    assert.equal((await inject({ method: 'DELETE', url: `/api/repository-groups/${media}` })).statusCode, 204);
+    assert.deepEqual(await groups(), []);
+    assert.equal((await inject(`/api/repositories/${gadget.id}`)).json().groupId, null);
+  });
+
   it('marks API responses as not cacheable', async () => {
     assert.equal((await inject('/api/repositories')).headers.get('cache-control'), 'no-store');
     assert.equal((await add('not a repository')).headers.get('cache-control'), 'no-store');

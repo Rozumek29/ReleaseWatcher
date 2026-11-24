@@ -16,6 +16,7 @@ import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError } from '../../core/api.service';
 import {
   HeaderInput,
+  RepositoryGroup,
   InstalledVersionSource,
   InstalledVersionTestResult,
   MachineAppGroup,
@@ -57,6 +58,9 @@ export class RepositorySettingsDialog {
 
   /** Repository being edited; null closes the dialog. */
   readonly repository = input<WatchedRepository | null>(null);
+  /** Custom groups in use, suggested in the group field. */
+  readonly groups = input<readonly RepositoryGroup[]>([]);
+  private readonly groupNames = computed(() => this.groups().map((g) => g.name));
   readonly saved = output<WatchedRepository>();
   readonly closed = output<void>();
 
@@ -91,6 +95,25 @@ export class RepositorySettingsDialog {
   protected readonly iconPreview = computed(() => iconUrls(this.icon()));
   /** Value the icon picker opens with; null = closed. */
   protected readonly picking = signal<string | null>(null);
+  /** Custom group on the Repositories page; empty = none. */
+  protected readonly groupName = signal('');
+  /** Whether the group suggestions are open, and the highlighted one (-1 = none). */
+  protected readonly groupListOpen = signal(false);
+  protected readonly groupIndex = signal(-1);
+  /** Text typed since the list opened; null = just opened, so every group is listed. */
+  private readonly groupFilter = signal<string | null>(null);
+  /** Group choices for the typed text: existing groups containing it, and "New group" for a name not used yet. */
+  protected readonly groupOptions = computed(() => {
+    const typed = (this.groupFilter() ?? '').trim().replace(/\s+/g, ' ');
+    const query = typed.toLowerCase();
+    const options = this.groupNames()
+      .filter((name) => name.toLowerCase().includes(query))
+      .map((name) => ({ name, isNew: false }));
+    if (typed && !this.groupNames().some((name) => name.toLowerCase() === query)) {
+      options.unshift({ name: typed, isNew: true });
+    }
+    return options;
+  });
   private nextHeaderId = 1;
   /** The form as opened, to tell whether it has unsaved changes. */
   private savedValues: unknown = null;
@@ -118,7 +141,54 @@ export class RepositorySettingsDialog {
       this.osvEcosystem,
       this.osvPackage,
       this.icon(),
+      this.groupName(),
     ];
+  }
+
+  protected typeGroup(value: string): void {
+    this.groupName.set(value);
+    this.groupFilter.set(value);
+    this.groupListOpen.set(true);
+    this.groupIndex.set(-1);
+  }
+
+  /** Opens the group list with every group (filtering starts with typing). */
+  protected openGroups(): void {
+    if (!this.groupListOpen()) {
+      this.groupFilter.set(null);
+      this.groupIndex.set(-1);
+      this.groupListOpen.set(true);
+    }
+  }
+
+  protected pickGroup(name: string): void {
+    this.groupName.set(name);
+    this.groupListOpen.set(false);
+  }
+
+  /** Keyboard of the group combobox: arrows move through the suggestions, Enter picks, Escape closes the list. */
+  protected groupKey(event: KeyboardEvent): void {
+    const count = this.groupOptions().length;
+    const open = this.groupListOpen() && count > 0;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!this.groupListOpen()) {
+        this.openGroups();
+        return;
+      }
+      if (count > 0) {
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        this.groupIndex.update((i) => (i + step + count) % count);
+      }
+    } else if (event.key === 'Enter' && open && this.groupIndex() >= 0) {
+      event.preventDefault();
+      this.pickGroup(this.groupOptions()[this.groupIndex()]!.name);
+    } else if (event.key === 'Escape' && open) {
+      // Close only the list, not the dialog.
+      event.preventDefault();
+      event.stopPropagation();
+      this.groupListOpen.set(false);
+    }
   }
 
   /** Whether the form differs from the saved repository (read by the template on every check). */
@@ -145,6 +215,9 @@ export class RepositorySettingsDialog {
         this.osvEcosystem = repo.osvEcosystem ?? '';
         this.osvPackage = repo.osvPackage ?? '';
         this.icon.set(repo.icon ?? '');
+        // Not tracked: a reloaded group list must not reset the form.
+        this.groupName.set(untracked(() => this.groups()).find((g) => g.id === repo.groupId)?.name ?? '');
+        this.groupListOpen.set(false);
         this.picking.set(null);
         this.headers = repo.installedVersionHeaders.map((h) => ({ id: this.nextHeaderId++, name: h.name, value: '', saved: h.hasValue }));
         this.showValues.set(false);
@@ -278,6 +351,7 @@ export class RepositorySettingsDialog {
           osvEcosystem: hasOsv ? this.osvEcosystem : null,
           osvPackage: hasOsv ? this.osvPackage.trim() : null,
           icon: this.icon().trim() || null,
+          groupName: this.groupName().trim() || null,
         }),
       );
       this.saved.emit(updated);

@@ -78,6 +78,21 @@
     }
   </div>
   <div class="toolbar-right">
+  @if (groups().length > 0) {
+    <button type="button" class="btn btn-sm btn-ghost" (click)="toggleAllGroups()">
+      {{ allCollapsed() ? 'Expand all' : 'Collapse all' }}
+    </button>
+  }
+  <div class="layout-toggle grouping-toggle" role="radiogroup" aria-label="Group by">
+    <span class="toggle-label" aria-hidden="true">Group</span>
+    @for (g of groupings; track g.value) {
+      <button type="button" role="radio" class="seg-btn" [title]="g.title"
+        [class.active]="preferences.repositoryGrouping() === g.value" [attr.aria-checked]="preferences.repositoryGrouping() === g.value"
+        (click)="preferences.repositoryGrouping.set(g.value)">
+        {{ g.label }}
+      </button>
+    }
+  </div>
   <div class="layout-toggle" role="radiogroup" aria-label="Layout">
     <button type="button" role="radio" class="icon-btn" title="List" aria-label="List view"
       [class.active]="preferences.repositoryLayout() === 'list'" [attr.aria-checked]="preferences.repositoryLayout() === 'list'"
@@ -116,128 +131,198 @@
     <p>Try a different search or filter.</p>
   </div>
 } @else {
-  <ul class="list" [class.grid]="preferences.repositoryLayout() === 'grid'">
-    @for (repo of visible(); track repo.id; let i = $index) {
-      <li class="card row enter" [style.--i]="i" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
-        <app-avatar class="avatar" [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
-        <div class="main">
-          <div class="title-line">
-            <a [href]="repo.url" target="_blank" rel="noopener" class="name">
-              <span class="owner">{{ repo.owner }}/</span>{{ repo.name }}
-            </a>
-            @if (!repo.isEnabled) {
-              <span class="badge">Paused</span>
-            }
-            @if (repo.includePrereleases) {
-              <span class="badge badge-accent">Pre-releases</span>
-            }
-            @if (repo.updateAvailable === true) {
-              <span class="badge badge-warning" [title]="'Installed ' + repo.installedVersion + ', latest ' + repo.lastSeenTag">
-                <app-icon name="arrowUp" [size]="12" /> Update available
-              </span>
-            } @else if (repo.updateAvailable === false) {
-              <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
-            }
-            @if (repo.advisories.total > 0) {
+  @if (groups().length > 0) {
+    <div class="owner-groups">
+      @for (group of groups(); track group.key) {
+        @let open = !collapsed().has(group.key);
+        <section class="owner-group" [attr.aria-label]="group.label">
+          <h2 class="group-head">
+            <div class="card group-card">
               <button
                 type="button"
-                class="badge badge-btn"
-                [class.badge-danger]="repo.advisories.affecting > 0"
-                [title]="advisoryTitle(repo)"
-                (click)="viewingAdvisories.set(repo)"
+                class="group-toggle"
+                [attr.aria-expanded]="open"
+                [attr.aria-controls]="'repository-group-' + $index"
+                (click)="toggleGroup(group.key)"
+                [title]="(open ? 'Collapse ' : 'Expand ') + group.label"
               >
-                <app-icon name="shield" [size]="12" />
-                @if (repo.advisories.affecting > 0) {
-                  {{ repo.advisories.affecting }} {{ repo.advisories.affecting === 1 ? 'vulnerability affects' : 'vulnerabilities affect' }} installed
+                @if (group.avatarUrl) {
+                  <app-avatar [src]="group.avatarUrl" [name]="group.label" [size]="40" />
+                } @else if (group.iconUrls.length > 0) {
+                  <app-avatar class="group-logo" [icons]="group.iconUrls" [name]="group.label" [size]="40" />
                 } @else {
-                  {{ repo.advisories.total }} {{ repo.advisories.total === 1 ? 'advisory' : 'advisories' }}
+                  <span class="folder-icon"><app-icon name="folder" [size]="20" /></span>
                 }
+                <span class="group-main">
+                  <span class="group-title">
+                    <span class="group-name">{{ group.label }}</span>
+                    @if (group.updates > 0) {
+                      <span class="badge badge-warning">
+                        <app-icon name="arrowUp" [size]="12" />
+                        {{ group.updates }} {{ group.updates === 1 ? 'update' : 'updates' }} available
+                      </span>
+                    }
+                  </span>
+                  <span class="group-meta">
+                    <span class="group-count">{{ group.repositories.length }}</span>
+                    {{ group.repositories.length === 1 ? 'repository' : 'repositories' }}
+                  </span>
+                </span>
+                <app-icon name="chevronDown" [size]="18" class="chevron" [class.collapsed]="!open" />
               </button>
-            }
-          </div>
-          <div class="meta">
-            <span class="meta-item" title="Latest release">
-              <app-icon name="tag" [size]="14" />
-              @if (repo.lastSeenTag) {
-                <a [href]="repo.url + '/releases/tag/' + repo.lastSeenTag" target="_blank" rel="noopener" class="mono">{{ repo.lastSeenTag }}</a>
-              } @else {
-                <span>No releases yet</span>
-              }
-            </span>
-            @if (repo.lastSeenPublishedAt) {
-              <span class="meta-item" [title]="repo.lastSeenPublishedAt | date: 'medium'">
-                released {{ repo.lastSeenPublishedAt | relativeTime }}
-              </span>
-            }
-            @if (repo.installedVersion) {
-              <span class="meta-item installed" [title]="installedFrom(repo)">
-                <app-icon name="server" [size]="14" />
-                installed <span class="mono">{{ repo.installedVersion }}</span>
-                @if (repo.installedVersionApp; as a) {
-                  on {{ a.machine }}
-                }
-                @if (repo.updateAvailable) {
-                  <span class="arrow">→</span> <span class="mono">{{ repo.lastSeenTag }}</span>
-                }
-              </span>
-            }
-            <span class="meta-item" [title]="repo.lastCheckedAt ? (repo.lastCheckedAt | date: 'medium') : 'Never checked'">
-              <app-icon name="clock" [size]="14" />
-              checked {{ repo.lastCheckedAt ? (repo.lastCheckedAt | relativeTime) : 'never' }}
-            </span>
-          </div>
-          @if (repo.lastError) {
-            <div class="error-line">
-              <app-icon name="alert" [size]="14" />
-              <span>{{ repo.lastError }}</span>
-            </div>
-          }
-          @if (repo.advisories.error) {
-            <div class="error-line warn">
-              <app-icon name="shield" [size]="14" />
-              <span>Security advisories: {{ repo.advisories.error }}</span>
-            </div>
-          }
-          @if (repo.installedVersionError) {
-            <div class="error-line warn">
-              <app-icon name="server" [size]="14" />
-              <span>Installed version: {{ repo.installedVersionError }}</span>
-            </div>
-          }
-        </div>
-
-        <div class="controls">
-          <app-switch label="Pre-releases" [checked]="repo.includePrereleases" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'includePrereleases')" />
-          <app-switch label="Active" [checked]="repo.isEnabled" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'isEnabled')" />
-          <div class="actions">
-            @if (confirmDeleteId() === repo.id) {
-              <span class="confirm-text">Remove?</span>
-              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(repo)">Yes</button>
-              <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteId.set(null)">No</button>
-            } @else {
-              @if (canMarkInstalled(repo)) {
-                <button type="button" class="btn btn-sm btn-secondary" (click)="markInstalled(repo)" [disabled]="isBusy(repo.id)" [title]="'Set the installed version to ' + repo.lastSeenTag">
-                  <app-icon name="check" [size]="14" />
-                  Mark as installed
+              @if (group.customGroup; as custom) {
+                <button
+                  type="button"
+                  class="icon-btn group-options"
+                  (click)="editingGroup.set(custom)"
+                  [attr.aria-label]="'Settings of group ' + group.label"
+                  title="Group settings"
+                >
+                  <app-icon name="sliders" [size]="16" />
                 </button>
               }
-              <button type="button" class="btn btn-sm btn-secondary" (click)="checkNow(repo)" [disabled]="isBusy(repo.id)">
-                <app-icon name="refresh" [size]="14" [class.spin]="isBusy(repo.id)" />
-                Check
-              </button>
-              <button type="button" class="icon-btn" (click)="editing.set(repo)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Settings of ' + repo.fullName" title="Settings">
-                <app-icon name="sliders" [size]="16" />
-              </button>
-              <button type="button" class="icon-btn" (click)="confirmDeleteId.set(repo.id)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Remove ' + repo.fullName" title="Remove">
-                <app-icon name="trash" [size]="16" />
-              </button>
-            }
-          </div>
-        </div>
-      </li>
-    }
-  </ul>
+            </div>
+          </h2>
+          @if (open) {
+            <ul class="list group-list fade-in" [id]="'repository-group-' + $index" [class.grid]="preferences.repositoryLayout() === 'grid'">
+              @for (repo of group.repositories; track repo.id; let i = $index) {
+                <ng-container *ngTemplateOutlet="card; context: { $implicit: repo, index: i }" />
+              }
+            </ul>
+          }
+        </section>
+      }
+    </div>
+  }
+  @if (ungrouped().length > 0) {
+    <ul class="list" [class.grid]="preferences.repositoryLayout() === 'grid'" [class.after-groups]="groups().length > 0">
+      @for (repo of ungrouped(); track repo.id; let i = $index) {
+        <ng-container *ngTemplateOutlet="card; context: { $implicit: repo, index: i }" />
+      }
+    </ul>
+  }
 }
 
+<ng-template #card let-repo let-i="index">
+  <li class="card row enter" [style.--i]="i" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
+    <app-avatar class="avatar" [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+    <div class="main">
+      <div class="title-line">
+        <a [href]="repo.url" target="_blank" rel="noopener" class="name">
+          <span class="owner">{{ repo.owner }}/</span>{{ repo.name }}
+        </a>
+        @if (!repo.isEnabled) {
+          <span class="badge">Paused</span>
+        }
+        @if (repo.includePrereleases) {
+          <span class="badge badge-accent">Pre-releases</span>
+        }
+        @if (repo.updateAvailable === true) {
+          <span class="badge badge-warning" [title]="'Installed ' + repo.installedVersion + ', latest ' + repo.lastSeenTag">
+            <app-icon name="arrowUp" [size]="12" /> Update available
+          </span>
+        } @else if (repo.updateAvailable === false) {
+          <span class="badge badge-success"><app-icon name="check" [size]="12" /> Up to date</span>
+        }
+        @if (repo.advisories.total > 0) {
+          <button
+            type="button"
+            class="badge badge-btn"
+            [class.badge-danger]="repo.advisories.affecting > 0"
+            [title]="advisoryTitle(repo)"
+            (click)="viewingAdvisories.set(repo)"
+          >
+            <app-icon name="shield" [size]="12" />
+            @if (repo.advisories.affecting > 0) {
+              {{ repo.advisories.affecting }} {{ repo.advisories.affecting === 1 ? 'vulnerability affects' : 'vulnerabilities affect' }} installed
+            } @else {
+              {{ repo.advisories.total }} {{ repo.advisories.total === 1 ? 'advisory' : 'advisories' }}
+            }
+          </button>
+        }
+      </div>
+      <div class="meta">
+        <span class="meta-item" title="Latest release">
+          <app-icon name="tag" [size]="14" />
+          @if (repo.lastSeenTag) {
+            <a [href]="repo.url + '/releases/tag/' + repo.lastSeenTag" target="_blank" rel="noopener" class="mono">{{ repo.lastSeenTag }}</a>
+          } @else {
+            <span>No releases yet</span>
+          }
+        </span>
+        @if (repo.lastSeenPublishedAt) {
+          <span class="meta-item" [title]="repo.lastSeenPublishedAt | date: 'medium'">
+            released {{ repo.lastSeenPublishedAt | relativeTime }}
+          </span>
+        }
+        @if (repo.installedVersion) {
+          <span class="meta-item installed" [title]="installedFrom(repo)">
+            <app-icon name="server" [size]="14" />
+            installed <span class="mono">{{ repo.installedVersion }}</span>
+            @if (repo.installedVersionApp; as a) {
+              on {{ a.machine }}
+            }
+            @if (repo.updateAvailable) {
+              <span class="arrow">→</span> <span class="mono">{{ repo.lastSeenTag }}</span>
+            }
+          </span>
+        }
+        <span class="meta-item" [title]="repo.lastCheckedAt ? (repo.lastCheckedAt | date: 'medium') : 'Never checked'">
+          <app-icon name="clock" [size]="14" />
+          checked {{ repo.lastCheckedAt ? (repo.lastCheckedAt | relativeTime) : 'never' }}
+        </span>
+      </div>
+      @if (repo.lastError) {
+        <div class="error-line">
+          <app-icon name="alert" [size]="14" />
+          <span>{{ repo.lastError }}</span>
+        </div>
+      }
+      @if (repo.advisories.error) {
+        <div class="error-line warn">
+          <app-icon name="shield" [size]="14" />
+          <span>Security advisories: {{ repo.advisories.error }}</span>
+        </div>
+      }
+      @if (repo.installedVersionError) {
+        <div class="error-line warn">
+          <app-icon name="server" [size]="14" />
+          <span>Installed version: {{ repo.installedVersionError }}</span>
+        </div>
+      }
+    </div>
+
+    <div class="controls">
+      <app-switch label="Pre-releases" [checked]="repo.includePrereleases" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'includePrereleases')" />
+      <app-switch label="Active" [checked]="repo.isEnabled" [disabled]="isBusy(repo.id)" (toggled)="toggle(repo, 'isEnabled')" />
+      <div class="actions">
+        @if (confirmDeleteId() === repo.id) {
+          <span class="confirm-text">Remove?</span>
+          <button type="button" class="btn btn-sm btn-danger-ghost" (click)="remove(repo)">Yes</button>
+          <button type="button" class="btn btn-sm btn-ghost" (click)="confirmDeleteId.set(null)">No</button>
+        } @else {
+          @if (canMarkInstalled(repo)) {
+            <button type="button" class="btn btn-sm btn-secondary" (click)="markInstalled(repo)" [disabled]="isBusy(repo.id)" [title]="'Set the installed version to ' + repo.lastSeenTag">
+              <app-icon name="check" [size]="14" />
+              Mark as installed
+            </button>
+          }
+          <button type="button" class="btn btn-sm btn-secondary" (click)="checkNow(repo)" [disabled]="isBusy(repo.id)">
+            <app-icon name="refresh" [size]="14" [class.spin]="isBusy(repo.id)" />
+            Check
+          </button>
+          <button type="button" class="icon-btn" (click)="editing.set(repo)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Settings of ' + repo.fullName" title="Settings">
+            <app-icon name="sliders" [size]="16" />
+          </button>
+          <button type="button" class="icon-btn" (click)="confirmDeleteId.set(repo.id)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Remove ' + repo.fullName" title="Remove">
+            <app-icon name="trash" [size]="16" />
+          </button>
+        }
+      </div>
+    </div>
+  </li>
+</ng-template>
+
 <app-advisories-dialog [repository]="viewingAdvisories()" (closed)="viewingAdvisories.set(null)" />
-<app-repository-settings-dialog [repository]="editing()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />
+<app-repository-settings-dialog [repository]="editing()" [groups]="customGroups()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />
+<app-repository-group-dialog [group]="editingGroup()" (saved)="onGroupSaved($event)" (removed)="onGroupRemoved($event)" (closed)="editingGroup.set(null)" />

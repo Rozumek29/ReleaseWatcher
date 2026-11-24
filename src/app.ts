@@ -16,10 +16,11 @@ import { PUBLIC_ROUTES, authRoutes } from './auth/routes.ts';
 import { AuthService, apiTokenFrom, requestContext, sessionTokenFrom } from './auth/service.ts';
 import { AuthStore } from './auth/store.ts';
 import { backupRoutes } from './backup/routes.ts';
+import { repositoryGroupRoutes } from './repository-groups.ts';
 import { BackupService } from './backup/service.ts';
 import { ReleaseChecker } from './checker.ts';
 import { type AdvisoryCursor, type AdvisoryFilter, type InstalledVersionAppName, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
-import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
+import { fullName, GROUP_NAME_MAX_LENGTH, ICON_MAX_LENGTH, normalizeGroupName, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import { errorMessage } from './errors.ts';
 import { noStore, problem, validationProblem } from './http.ts';
@@ -316,6 +317,8 @@ export const toDto = (
   icon: r.icon,
   /** Image URLs of the custom icon, best first (the UI falls back to `avatarUrl`). */
   iconUrls: iconUrls(r.icon),
+  /** Custom group on the Repositories page (`/api/repository-groups`); null = none. */
+  groupId: r.groupId,
   includePrereleases: r.includePrereleases,
   isEnabled: r.isEnabled,
   lastSeenTag: r.lastSeenTag,
@@ -381,6 +384,8 @@ const updateRepositorySchema = body({
   osvPackage: z.string().max(300).nullish(),
   /** Image URL or `sh:<slug>`; omit = keep, null/"" = owner avatar. */
   icon: z.string().max(ICON_MAX_LENGTH).nullish(),
+  /** Custom group by name (created when new); omit = keep, null/"" = none. */
+  groupName: z.string().max(GROUP_NAME_MAX_LENGTH).nullish(),
 });
 
 const testInstalledVersionSchema = body({
@@ -988,6 +993,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (stopApp) {
       store.setInstalledVersionApp(repo.id, null);
     }
+    if (body.groupName !== undefined) {
+      // Last, after every validation: a group named for the first time is created here.
+      const groupName = normalizeGroupName(body.groupName);
+      repo.groupId = groupName ? store.ensureGroup(groupName) : null;
+    }
     store.save(repo);
     if (machineApp) {
       machineApps.link(machineApp, repo.id);
@@ -1200,6 +1210,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           job: dockerJob,
           onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
         }),
+        ...repositoryGroupRoutes({ store }),
         ...backupRoutes({
           service: backup,
           // Imported repositories have no release baseline yet: read it right away.

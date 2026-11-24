@@ -38,6 +38,8 @@ import {
   SshKey,
   TestNotificationResult,
   UpdateContainerRequest,
+  RepositoryGroup,
+  UpdateRepositoryGroupRequest,
   UpdateRepositoryRequest,
   WatchedRepository,
   AppStore,
@@ -105,6 +107,18 @@ export class ApiService {
 
   deleteRepository(id: number): Observable<void> {
     return this.http.delete<void>(`${this.baseUrl}/repositories/${id}`);
+  }
+
+  getRepositoryGroups(): Observable<RepositoryGroup[]> {
+    return this.http.get<RepositoryGroup[]>(`${this.baseUrl}/repository-groups`);
+  }
+
+  updateRepositoryGroup(id: number, request: UpdateRepositoryGroupRequest): Observable<RepositoryGroup> {
+    return this.http.put<RepositoryGroup>(`${this.baseUrl}/repository-groups/${id}`, request);
+  }
+
+  deleteRepositoryGroup(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/repository-groups/${id}`);
   }
 
   /** One page of the advisories of all repositories (filters applied by the server). */

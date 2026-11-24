@@ -230,8 +230,9 @@ describe('RepositoryStore installed version from machines', () => {
     const path = join(dir, 'old.db');
     // A database of the previous version with apps already linked to repositories.
     const old = new Database(path);
-    for (const migration of MIGRATIONS.slice(0, -1)) old.exec(migration);
-    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    const upgrade = MIGRATIONS.findIndex((m) => m.includes('ADD COLUMN installed_app_id'));
+    for (const migration of MIGRATIONS.slice(0, upgrade)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${upgrade}`);
     const now = '2026-11-01T00:00:00.000Z';
     old.exec(`
       INSERT INTO watched_repositories (id, owner, name, created_at, installed_version) VALUES

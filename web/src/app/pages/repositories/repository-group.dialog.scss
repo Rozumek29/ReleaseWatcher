@@ -1,0 +1,54 @@
+.dialog {
+  width: min(480px, calc(100vw - 32px));
+}
+
+.group-icon {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+
+  img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+  }
+}
+
+.head-text p {
+  color: var(--text-muted);
+}
+
+.icon-row {
+  display: flex;
+  gap: 6px;
+
+  .input {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.dialog-foot {
+  flex-wrap: wrap;
+
+  .remove {
+    margin-right: auto;
+  }
+
+  app-unsaved-changes {
+    margin-right: 0;
+  }
+}
+
+.confirm-text {
+  margin-right: auto;
+  color: var(--danger);
+  font-size: 0.85rem;
+  font-weight: 550;
+}

@@ -10,6 +10,8 @@ export interface WatchedRepository {
   icon: string | null;
   /** Image URLs of the custom icon, best first; empty without one. Shown before `avatarUrl`. */
   iconUrls: string[];
+  /** Custom group on the Repositories page (`RepositoryGroup`); null = none. */
+  groupId: number | null;
   includePrereleases: boolean;
   isEnabled: boolean;
   lastSeenTag: string | null;
@@ -133,6 +135,25 @@ export interface UpdateRepositoryRequest {
   osvEcosystem?: string | null;
   osvPackage?: string | null;
   /** Image URL or `sh:<slug>`; omit to keep, null for the owner avatar. */
+  icon?: string | null;
+  /** Custom group by name (created when new); omit to keep, null for none. */
+  groupName?: string | null;
+}
+
+/** A custom group of repositories (GET /api/repository-groups); it exists while it has repositories. */
+export interface RepositoryGroup {
+  id: number;
+  name: string;
+  /** Custom icon as entered: an image URL or `sh:<slug>`; null = a folder. */
+  icon: string | null;
+  /** Image URLs of the custom icon, best first; empty without one. */
+  iconUrls: string[];
+  repositoryCount: number;
+}
+
+/** PUT /api/repository-groups/:id – omit to keep; `icon: null` for the folder again. */
+export interface UpdateRepositoryGroupRequest {
+  name?: string;
   icon?: string | null;
 }
 

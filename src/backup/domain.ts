@@ -24,6 +24,9 @@ export interface BackupRepository {
   includePrereleases: boolean;
   isEnabled: boolean;
   icon: string | null;
+  /** Custom group on the Repositories page, and the group's icon. */
+  groupName: string | null;
+  groupIcon: string | null;
   installedVersionUrl: string | null;
   installedVersionField: string | null;
   /** Names of the headers sent to the version URL; their values are secrets and are not exported. */

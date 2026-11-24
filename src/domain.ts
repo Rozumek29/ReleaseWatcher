@@ -47,6 +47,18 @@ export interface WatchedRepository {
   advisoryBaselines: string[];
   /** Custom icon: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = the owner's avatar. */
   icon: string | null;
+  /** Custom group (`repository_groups`) the repository is shown in on the Repositories page; null = none. */
+  groupId: number | null;
+}
+
+/** A custom group of repositories on the Repositories page. */
+export interface RepositoryGroup {
+  id: number;
+  name: string;
+  /** Custom icon: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = a folder. */
+  icon: string | null;
+  /** Repositories in the group (a group without any is removed). */
+  repositoryCount: number;
 }
 
 /** An app on a machine: an application of a target (`container_apps`) or a Docker container (`docker_containers`). */
@@ -71,6 +83,14 @@ export interface ReleaseInfo {
 /** Avatar of the repository owner (user or organization); served by GitHub without an API call. */
 export const ownerAvatarUrl = (owner: string, size = 64): string =>
   `https://avatars.githubusercontent.com/${encodeURIComponent(owner)}?s=${size}`;
+
+/** Longest custom group name. */
+export const GROUP_NAME_MAX_LENGTH = 60;
+
+/** A custom group name as stored: trimmed, inner whitespace collapsed; null for none. */
+export function normalizeGroupName(value: string | null | undefined): string | null {
+  return value?.trim().replace(/\s+/g, ' ') || null;
+}
 
 /** Longest custom icon value (URL or `sh:` shorthand). */
 export const ICON_MAX_LENGTH = 2000;

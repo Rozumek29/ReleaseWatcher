@@ -2,7 +2,7 @@ import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
-import { WatchedRepository } from '../../core/models';
+import { RepositoryGroup, WatchedRepository } from '../../core/models';
 import { settle } from '../../testing';
 import { RepositoriesPage } from './repositories.page';
 
@@ -16,6 +16,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     url: `https://github.com/${fullName}`,
     avatarUrl: `https://avatars.githubusercontent.com/${owner}?s=64`,
     icon: null,
+    groupId: null,
     iconUrls: [],
     includePrereleases: false,
     isEnabled: true,
@@ -47,6 +48,7 @@ describe('RepositoriesPage', () => {
   let http: HttpTestingController;
 
   beforeEach(async () => {
+    localStorage.clear();
     await TestBed.configureTestingModule({
       imports: [RepositoriesPage],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter([])],
@@ -54,12 +56,13 @@ describe('RepositoriesPage', () => {
     http = TestBed.inject(HttpTestingController);
   });
 
-  async function render(repositories: WatchedRepository[], discordEnabled = true) {
+  async function render(repositories: WatchedRepository[], discordEnabled = true, groups: RepositoryGroup[] = []) {
     const fixture = TestBed.createComponent(RepositoriesPage);
     fixture.detectChanges();
     await settle(fixture);
     http.expectOne('/api/repositories').flush(repositories);
     http.expectOne('/api/notifiers').flush([{ name: 'discord', isEnabled: discordEnabled }]);
+    http.expectOne('/api/repository-groups').flush(groups);
     await settle(fixture);
     return { el: fixture.nativeElement as HTMLElement, fixture };
   }
@@ -224,5 +227,149 @@ describe('RepositoriesPage', () => {
     expect(items[0]?.textContent).toContain('No fix yet');
     expect(items[1]?.textContent).toContain('Not affected');
     expect(el.querySelector('app-advisories-dialog .intro')?.textContent).toContain('installed versions 1.30.0, 1.29.0');
+  });
+
+  describe('grouping', () => {
+    const groupNames = (el: HTMLElement) => [...el.querySelectorAll('.group-name')].map((n) => n.textContent?.trim());
+    /** Names of the repositories shown outside of groups. */
+    const ungrouped = (el: HTMLElement) =>
+      [...el.querySelectorAll(':scope .list:not(.group-list) > .row .name')].map((n) => n.textContent?.replace(/\s/g, ''));
+    const groupBy = async (el: HTMLElement, fixture: { whenStable(): Promise<unknown>; detectChanges(): void }, label: string) => {
+      [...el.querySelectorAll<HTMLButtonElement>('.grouping-toggle button')].find((b) => b.textContent?.trim() === label)!.click();
+      await settle(fixture);
+    };
+    const groups = (): RepositoryGroup[] => [
+      { id: 1, name: 'Media', icon: 'sh:jellyfin', iconUrls: ['https://example.com/jellyfin.svg'], repositoryCount: 1 },
+      { id: 2, name: 'Home', icon: null, iconUrls: [], repositoryCount: 1 },
+    ];
+    const repositories = () => [
+      repo(1, 'immich-app/immich', { updateAvailable: true, installedVersion: 'v1.0.0', groupId: 1 }),
+      repo(2, 'home-assistant/core', { updateAvailable: true, groupId: 2 }),
+      repo(3, 'Home-Assistant/frontend', { updateAvailable: true }),
+      repo(4, 'home-assistant/supervisor', { updateAvailable: false }),
+      repo(5, 'angular/angular'),
+    ];
+
+    it('groups owners with several repositories, keeps single ones as they are and remembers the choice', async () => {
+      const { el, fixture } = await render(repositories());
+      expect(el.querySelector('.owner-group')).toBeNull();
+
+      await groupBy(el, fixture, 'Owner');
+      expect(groupNames(el)).toEqual(['home-assistant']);
+      const group = el.querySelector('.owner-group')!;
+      expect([...group.querySelectorAll('.row .name')].map((n) => n.textContent?.replace(/\s/g, ''))).toEqual([
+        'home-assistant/core',
+        'Home-Assistant/frontend',
+        'home-assistant/supervisor',
+      ]);
+      expect(group.querySelector('.group-meta')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('3 repositories');
+      expect(group.querySelector('.group-head .badge-warning')?.textContent).toContain('2 updates available');
+      expect(ungrouped(el)).toEqual(['immich-app/immich', 'angular/angular']);
+      expect(JSON.parse(localStorage.getItem('releasewatcher.preferences')!).repositoryGrouping).toBe('owner');
+
+      await groupBy(el, fixture, 'None');
+      expect(el.querySelector('.owner-group')).toBeNull();
+      expect(el.querySelectorAll('.row').length).toBe(5);
+    });
+
+    it('groups by the custom groups of the repositories', async () => {
+      const { el, fixture } = await render(repositories(), true, groups());
+      await groupBy(el, fixture, 'Custom');
+      expect(groupNames(el)).toEqual(['Home', 'Media']);
+      expect(el.querySelectorAll('.owner-group')[1]!.querySelector('.group-logo img')?.getAttribute('src')).toBe('https://example.com/jellyfin.svg');
+      expect(el.querySelector('.owner-group .group-meta')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('1 repository');
+      expect(ungrouped(el)).toEqual(['Home-Assistant/frontend', 'home-assistant/supervisor', 'angular/angular']);
+    });
+
+    it('collapses groups, remembers them and collapses or expands all', async () => {
+      const { el, fixture } = await render(repositories(), true, groups());
+      await groupBy(el, fixture, 'Custom');
+      const toggle = () => el.querySelectorAll<HTMLButtonElement>('.group-toggle')[1]!;
+      toggle().click();
+      await settle(fixture);
+      expect(toggle().getAttribute('aria-expanded')).toBe('false');
+      expect(el.querySelectorAll('.row').length).toBe(4);
+      expect(JSON.parse(localStorage.getItem('releasewatcher.preferences')!).collapsedGroups).toEqual(['group:1']);
+
+      const all = () => [...el.querySelectorAll<HTMLButtonElement>('.toolbar button')].find((b) => /all$/.test(b.textContent!.trim()))!;
+      expect(all().textContent?.trim()).toBe('Collapse all');
+      all().click();
+      await settle(fixture);
+      expect(el.querySelectorAll('.row').length).toBe(3);
+      expect(all().textContent?.trim()).toBe('Expand all');
+      all().click();
+      await settle(fixture);
+      expect(el.querySelectorAll('.row').length).toBe(5);
+    });
+
+    it('renames a custom group and removes it from its options', async () => {
+      const { el, fixture } = await render(repositories(), true, groups());
+      await groupBy(el, fixture, 'Owner');
+      // Owners have no options.
+      expect(el.querySelector('.group-options')).toBeNull();
+      await groupBy(el, fixture, 'Custom');
+      el.querySelector<HTMLButtonElement>('button[aria-label="Settings of group Media"]')!.click();
+      await settle(fixture);
+      const name = el.querySelector<HTMLInputElement>('#group-name')!;
+      await fixture.whenStable();
+      expect(name.value).toBe('Media');
+      expect(el.querySelector<HTMLInputElement>('#group-icon')!.value).toBe('sh:jellyfin');
+      name.value = 'Movies';
+      name.dispatchEvent(new Event('input'));
+      el.querySelector<HTMLButtonElement>('app-repository-group-dialog button[type=submit]')!.click();
+      const put = http.expectOne('/api/repository-groups/1');
+      expect(put.request.body).toEqual({ name: 'Movies', icon: 'sh:jellyfin' });
+      put.flush({ ...groups()[0], name: 'Movies' });
+      await settle(fixture);
+      expect(groupNames(el)).toEqual(['Home', 'Movies']);
+
+      el.querySelector<HTMLButtonElement>('button[aria-label="Settings of group Home"]')!.click();
+      await settle(fixture);
+      [...el.querySelectorAll<HTMLButtonElement>('app-repository-group-dialog button')].find((b) => b.textContent?.includes('Remove group'))!.click();
+      await settle(fixture);
+      [...el.querySelectorAll<HTMLButtonElement>('app-repository-group-dialog button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+      http.expectOne((r) => r.method === 'DELETE' && r.url === '/api/repository-groups/2').flush(null);
+      await settle(fixture);
+      expect(groupNames(el)).toEqual(['Movies']);
+      expect(ungrouped(el)).toContain('home-assistant/core');
+    });
+
+    it('starts with the remembered grouping and collapsed groups', async () => {
+      localStorage.setItem(
+        'releasewatcher.preferences',
+        JSON.stringify({ repositoryGrouping: 'owner', collapsedGroups: ['owner:home-assistant'] }),
+      );
+      const { el } = await render(repositories());
+      expect(groupNames(el)).toEqual(['home-assistant']);
+      expect(el.querySelector('.group-toggle')!.getAttribute('aria-expanded')).toBe('false');
+      expect(el.querySelectorAll('.row').length).toBe(2);
+    });
+
+    it('applies search and filters and hides empty groups', async () => {
+      const { el, fixture } = await render(repositories());
+      await groupBy(el, fixture, 'Owner');
+      const search = el.querySelector<HTMLInputElement>('#search')!;
+      search.value = 'immich';
+      search.dispatchEvent(new Event('input'));
+      await settle(fixture);
+      expect(groupNames(el)).toEqual([]);
+      expect(ungrouped(el)).toEqual(['immich-app/immich']);
+
+      search.value = '';
+      search.dispatchEvent(new Event('input'));
+      [...el.querySelectorAll<HTMLButtonElement>('.tab')].find((t) => t.textContent?.includes('Updates'))!.click();
+      await settle(fixture);
+      expect(groupNames(el)).toEqual(['home-assistant']);
+      expect(el.querySelector('.owner-group .group-meta')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('2 repositories');
+    });
+
+    it('groups in the grid layout too', async () => {
+      const { el, fixture } = await render(repositories());
+      await groupBy(el, fixture, 'Owner');
+      el.querySelector<HTMLButtonElement>('button[aria-label="Grid view"]')!.click();
+      await settle(fixture);
+      expect(el.querySelectorAll('.owner-group .list.grid').length).toBe(1);
+      expect(el.querySelectorAll('.list.grid.after-groups').length).toBe(1);
+    });
   });
 });

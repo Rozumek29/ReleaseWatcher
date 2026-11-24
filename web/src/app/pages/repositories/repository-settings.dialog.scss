@@ -92,3 +92,57 @@
     color: var(--text);
   }
 }
+
+/* Group combobox: suggestions of the existing groups below the input. */
+.combo {
+  position: relative;
+}
+
+.combo-list {
+  position: absolute;
+  z-index: 2;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 220px;
+  margin: 0;
+  padding: 4px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  list-style: none;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.combo-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.88rem;
+  cursor: pointer;
+
+  app-icon {
+    flex-shrink: 0;
+    color: var(--text-muted);
+  }
+
+  &:hover,
+  &.active {
+    background: var(--hover);
+  }
+
+  .combo-name {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .combo-check {
+    color: var(--accent-strong);
+  }
+}

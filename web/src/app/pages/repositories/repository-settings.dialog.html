@@ -45,6 +45,62 @@
         </div>
 
         <div class="field">
+          <label for="repo-group">Group <span class="optional">optional</span></label>
+          <div class="combo">
+            <input
+              id="repo-group"
+              class="input"
+              name="groupName"
+              role="combobox"
+              aria-autocomplete="list"
+              aria-controls="repo-group-list"
+              [attr.aria-expanded]="groupListOpen() && groupOptions().length > 0"
+              [attr.aria-activedescendant]="groupListOpen() && groupIndex() >= 0 ? 'repo-group-option-' + groupIndex() : null"
+              [ngModel]="groupName()"
+              (ngModelChange)="typeGroup($event)"
+              (focus)="openGroups()"
+              (click)="openGroups()"
+              (blur)="groupListOpen.set(false)"
+              (keydown)="groupKey($event)"
+              placeholder="e.g. Home automation"
+              maxlength="60"
+              autocomplete="off"
+            />
+            @if (groupListOpen() && groupOptions().length > 0) {
+              <ul id="repo-group-list" class="combo-list" role="listbox" aria-label="Groups">
+                @for (option of groupOptions(); track option.name; let i = $index) {
+                  <!-- mousedown (not click) so the input keeps its focus; the keyboard works through the input. -->
+                  <li
+                    [id]="'repo-group-option-' + i"
+                    role="option"
+                    class="combo-option"
+                    [class.active]="i === groupIndex()"
+                    [attr.aria-selected]="option.name === groupName().trim()"
+                    (mousedown)="$event.preventDefault(); pickGroup(option.name)"
+                  >
+                    <app-icon [name]="option.isNew ? 'plus' : 'folder'" [size]="14" />
+                    <span class="combo-name">
+                      @if (option.isNew) {
+                        New group <strong>{{ option.name }}</strong>
+                      } @else {
+                        {{ option.name }}
+                      }
+                    </span>
+                    @if (!option.isNew && option.name === groupName().trim()) {
+                      <app-icon name="check" [size]="14" class="combo-check" />
+                    }
+                  </li>
+                }
+              </ul>
+            }
+          </div>
+          <span class="hint">
+            Type a new name to create a group, or pick an existing one. Shown with <em>Group: Custom</em> on the
+            Repositories page; leave empty for none.
+          </span>
+        </div>
+
+        <div class="field">
           <label for="repo-token">GitHub token <span class="optional">optional</span></label>
           <input
             id="repo-token"

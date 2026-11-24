@@ -31,9 +31,17 @@
 
 .toolbar-right {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
-  flex: 0 1 300px;
+  flex: 0 1 auto;
+  margin-left: auto;
+
+  .search {
+    flex: 1 1 200px;
+    min-width: 160px;
+  }
 }
 
 .layout-toggle {
@@ -54,6 +62,146 @@
       box-shadow: var(--shadow-sm);
     }
   }
+}
+
+.grouping-toggle {
+  align-items: center;
+
+  .toggle-label {
+    padding: 0 6px 0 8px;
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+
+  .seg-btn {
+    height: 28px;
+    padding: 0 10px;
+    border: none;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 550;
+    cursor: pointer;
+
+    &:hover {
+      color: var(--text);
+    }
+
+    &.active {
+      background: var(--surface);
+      color: var(--text);
+      box-shadow: var(--shadow-sm);
+    }
+  }
+}
+
+/* ---------- Groups ---------- */
+
+.owner-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.group-head {
+  margin: 0;
+  font-size: 1rem;
+}
+
+/* The group card: the toggle (most of the card) expands or collapses the group; custom groups have options. */
+.group-card {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 0 0;
+  transition: background-color 0.12s;
+
+  &:has(.group-toggle:hover) {
+    background: var(--hover);
+  }
+}
+
+.group-toggle {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 4px 14px 16px;
+  border: none;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+
+  .chevron {
+    flex-shrink: 0;
+    margin-left: auto;
+    color: var(--text-muted);
+    transition: transform 0.16s ease-out;
+
+    &.collapsed {
+      transform: rotate(-90deg);
+    }
+  }
+}
+
+.group-options {
+  flex-shrink: 0;
+}
+
+.folder-icon {
+  display: inline-grid;
+  flex-shrink: 0;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.group-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.group-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.group-name {
+  font-weight: 620;
+  overflow-wrap: anywhere;
+}
+
+.group-meta {
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  font-weight: 400;
+}
+
+.group-count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Repositories in no group, below the groups. */
+.list.after-groups {
+  margin-top: 8px;
+}
+
+/* Repositories of an expanded group, indented under the group card. */
+.list.group-list {
+  margin: 8px 0 8px 28px;
 }
 
 .list {
@@ -270,6 +418,18 @@
 @media (max-width: 600px) {
   .toolbar-right {
     flex-basis: 100%;
+
+    .search {
+      flex-basis: 100%;
+    }
+  }
+
+  .grouping-toggle .toggle-label {
+    display: none;
+  }
+
+  .list.group-list {
+    margin-left: 14px;
   }
 
   .actions {
