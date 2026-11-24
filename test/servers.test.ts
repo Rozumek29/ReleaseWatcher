@@ -71,7 +71,7 @@ describe('servers', () => {
       ['server', 'Hetzner VPS', host.id, 'Hetzner VPS', true, 'running'],
     );
     assert.deepEqual(target.capabilities, capabilities('server'));
-    assert.equal(target.aptUpgradable.length, 1);
+    assert.equal(target.packageUpdates.length, 1);
     assert.equal(target.effectiveBackupBeforeUpdate, false);
     // Commands ran directly on the server – no pct/qm.
     assert.ok(shell.commands.some((c) => c.includes('apt list --upgradable')));
@@ -96,11 +96,11 @@ describe('servers', () => {
     shell.on(/apt list --upgradable/, { output: dnf });
     const { target } = await addServer();
     assert.equal(target.packageManager, 'dnf');
-    assert.deepEqual(target.aptUpgradable, [{ name: 'openssl-libs', newVersion: '1:3.2.4-1.fc41', currentVersion: '1:3.2.2-9.fc41' }]);
+    assert.deepEqual(target.packageUpdates, [{ name: 'openssl-libs', newVersion: '1:3.2.4-1.fc41', currentVersion: '1:3.2.2-9.fc41' }]);
     assert.equal(notifier.containerSent.at(-1)?.packageManager, 'dnf');
 
     shell.on(/dnf -y upgrade/, { output: 'Complete!\n' });
-    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`)).status, 202);
     const run = await app.containers.wait(target.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Upgrading the system packages of Hetzner VPS \(no backup\)/);
@@ -157,9 +157,9 @@ describe('servers', () => {
 
   it('upgrades apt with apt-get upgrade and runs application updates on the server itself', async () => {
     const { target } = await addServer();
-    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`, { backup: true })).status, 409);
+    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`, { backup: true })).status, 409);
     shell.on(/ upgrade && /, { output: 'Setting up nginx (1.26.1) ...\n' });
-    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`)).status, 202);
     const apt = await app.containers.wait(target.id);
     assert.equal(apt?.status, 'succeeded', apt?.output ?? '');
     assert.equal(shell.detached.at(-1)?.command, machinePackagesUpgradeScript('server'));
@@ -212,7 +212,7 @@ describe('servers', () => {
       await gate;
       return { output: '' };
     });
-    assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/containers/${node.id}/packages-upgrade`)).status, 202);
     assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
     release();
     await app.containers.wait(node.id);

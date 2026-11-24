@@ -172,7 +172,7 @@ describe('RepositoryStore file size', () => {
     assert.equal(containers.pruneRuns(), 0);
 
     limits = { checks: 10, others: 30 };
-    const updates = Array.from({ length: 32 }, () => finish(web.id, 'apt-upgrade'));
+    const updates = Array.from({ length: 32 }, () => finish(web.id, 'packages-upgrade'));
     const checks = Array.from({ length: 50 }, () => finish(web.id, 'check'));
     const dbChecks = Array.from({ length: 5 }, () => finish(db.id, 'check'));
 
@@ -280,9 +280,10 @@ describe('RepositoryStore providers', () => {
 
   it('rebuilds the repositories with provider and host, keeping links, advisories and triggers', () => {
     const path = join(dir, 'old.db');
+    const before = MIGRATIONS.findIndex((m) => m.includes('CREATE TABLE watched_repositories_new'));
     const old = new Database(path);
-    for (const migration of MIGRATIONS.slice(0, -1)) old.exec(migration);
-    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    for (const migration of MIGRATIONS.slice(0, before)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${before}`);
     const now = '2026-11-01T00:00:00.000Z';
     old.exec(`
       INSERT INTO watched_repositories (id, owner, name, created_at, github_token) VALUES
@@ -334,6 +335,46 @@ describe('RepositoryStore providers', () => {
   });
 });
 
+describe('Renamed columns', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-rename-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('keeps tokens, package updates, app sources, runs and settings of older databases', () => {
+    const path = join(dir, 'old.db');
+    const before = MIGRATIONS.findIndex((m) => m.includes('RENAME COLUMN github_token TO access_token'));
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, before)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${before}`);
+    const now = '2026-11-01T00:00:00.000Z';
+    old.exec(`
+      INSERT INTO watched_repositories (id, owner, name, created_at, github_token, etag) VALUES (1, 'acme', 'app', '${now}', 'tok', '"e1"');
+      INSERT INTO hosts (id, type, name, address, created_at) VALUES (1, 'proxmox', 'pve', 'pve.lan', '${now}');
+      INSERT INTO containers (id, host_id, vmid, name, created_at, apt_enabled, apt_upgradable, notified_signature) VALUES
+        (1, 1, 101, 'vault', '${now}', 0, '[{"name":"curl","currentVersion":"1","newVersion":"2"}]', 'apt:curl=2|app:1=3|flatpak:x=1');
+      INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id) VALUES (1, 1, 'App', '${now}', 'github', 1);
+      INSERT INTO container_runs (container_id, kind, trigger, status, started_at) VALUES (1, 'apt-upgrade', 'manual', 'success', '${now}');
+      INSERT INTO settings (key, value) VALUES ('notifyAptUpdates', 'false');
+    `);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    const repo = store.get(1)!;
+    assert.deepEqual([repo.accessToken, repo.releasesEtag], ['tok', '"e1"']);
+    const containers = new ContainerStore(store.database, store.secretBox);
+    const container = containers.get(1)!;
+    assert.equal(container.packagesEnabled, false);
+    assert.deepEqual(container.packageUpdates.map((p) => p.name), ['curl']);
+    assert.equal(container.notifiedSignature, 'pkg:curl=2|app:1=3|flatpak:x=1');
+    assert.equal(containers.listApps(1)[0]!.latestSource, 'repository');
+    assert.equal(containers.listRuns(1)[0]!.kind, 'packages-upgrade');
+    assert.equal(store.readSettings()['notifyPackageUpdates'], 'false');
+    store.close();
+  });
+});
+
 describe('ContainerStore run output', () => {
   it('stores the output of finished runs compressed and reads it back', () => {
     const store = new RepositoryStore(':memory:');
@@ -343,7 +384,7 @@ describe('ContainerStore run output', () => {
     const storedType = (id: number) =>
       (store.database.query('SELECT typeof(output) AS t FROM container_runs WHERE id = ?').get(id) as { t: string }).t;
 
-    const run = containers.startRun(container.id, null, 'apt-upgrade', 'manual');
+    const run = containers.startRun(container.id, null, 'packages-upgrade', 'manual');
     containers.saveRunOutput(run.id, log);
     assert.equal(storedType(run.id), 'text'); // live output stays text while running
     containers.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: log });

@@ -178,7 +178,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
   SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, the OIDC client secret, password hashes, session tokens, API tokens and the setup code are secrets
-  (a key is exposed only as its public key and fingerprint, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
+  (a key is exposed only as its public key and fingerprint, a repository token as `hasAccessToken` + `accessTokenMasked`, the Home Assistant token as
   `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.

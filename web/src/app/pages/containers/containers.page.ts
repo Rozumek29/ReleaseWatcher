@@ -25,7 +25,7 @@ import { DockerContainers } from '../../shared/docker-containers';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
-import { AptPackages } from './apt-packages';
+import { SystemPackages } from './system-packages';
 import { ContainerSettingsDialog } from './container-settings.dialog';
 import { RunLogDialog, RunLogTarget } from './run-log.dialog';
 import { kindLabel, packagesLabel, targetLabel, upgradeCommand } from './target';
@@ -48,7 +48,7 @@ const NARROW_QUERY = '(max-width: 1100px)';
     RelativeTimePipe,
     ContainerSettingsDialog,
     RunLogDialog,
-    AptPackages,
+    SystemPackages,
     HostDialog,
     DockerContainers,
   ],
@@ -473,10 +473,10 @@ export class ContainersPage {
     this.confirming.set(key);
   }
 
-  protected upgradeApt(container: Container): Promise<void> {
+  protected upgradePackages(container: Container): Promise<void> {
     this.confirming.set(null);
     const backup = this.backupFirst();
-    return this.startRun(container, () => this.api.upgradeApt(container.id, backup));
+    return this.startRun(container, () => this.api.upgradePackages(container.id, backup));
   }
 
   protected updateAppStore(container: Container, store: AppStore): Promise<void> {
@@ -639,7 +639,7 @@ export class ContainersPage {
     if (!container.capabilities.updateAll || !container.isEnabled || this.blockedWhileStopped(container)) {
       return 0;
     }
-    const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;
+    const apt = container.packagesEnabled && container.packageUpdates.length > 0 ? 1 : 0;
     // Flatpak and Snap update all their applications at once.
     const stores = container.appStores.filter((s) => s.packages.length > 0).length;
     // Home Assistant updates run as one task.

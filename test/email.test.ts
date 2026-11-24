@@ -265,7 +265,7 @@ describe('buildEmail', () => {
     { type: 'release', release: { owner: 'acme', repository: 'widget', release: release('v1.2.3', 1), installedVersion: 'v1.2.2' } },
     {
       type: 'container-updates',
-      updates: { vmid: 105, targetKind: 'lxc', containerName: 'cloud', apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }], aptPackages: [] },
+      updates: { vmid: 105, targetKind: 'lxc', containerName: 'cloud', apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }], systemPackages: [] },
     },
     { type: 'update-result', result: { vmid: 105, targetKind: 'lxc', containerName: 'cloud', kind: 'app-update', appName: 'Nextcloud', succeeded: false, detail: 'Update failed – exit code 1' } },
   ];

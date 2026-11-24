@@ -35,7 +35,7 @@ export function kindLabel(kind: RunKind): string {
   switch (kind) {
     case 'check':
       return 'Check';
-    case 'apt-upgrade':
+    case 'packages-upgrade':
       return 'Package upgrade';
     case 'app-update':
       return 'Application update';

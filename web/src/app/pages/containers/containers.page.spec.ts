@@ -59,17 +59,17 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.callout')).toBeNull();
 
     // The package list is collapsed until requested.
-    expect(el.querySelector('app-apt-packages')).toBeNull();
+    expect(el.querySelector('app-system-packages')).toBeNull();
     [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
     await settle(fixture);
-    expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
+    expect(el.querySelector('app-system-packages')?.textContent).toContain('libssl3');
   });
 
   it('shows Flatpak and Snap next to the system packages and updates them', async () => {
     const flatpak = { name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' };
     const { fixture, el } = await create([
       container({
-        aptUpgradable: [],
+        packageUpdates: [],
         apps: [],
         appStores: [
           { store: 'flatpak', label: 'Flatpak', packages: [flatpak] },
@@ -84,7 +84,7 @@ describe('ContainersPage', () => {
 
     stores[0]!.querySelector<HTMLButtonElement>('.link-btn')!.click();
     await settle(fixture);
-    expect(el.querySelector('.store-item app-apt-packages')?.textContent).toContain('org.gnome.Calculator');
+    expect(el.querySelector('.store-item app-system-packages')?.textContent).toContain('org.gnome.Calculator');
 
     [...stores[0]!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Update')!.click();
     await settle(fixture);
@@ -105,7 +105,7 @@ describe('ContainersPage', () => {
   });
 
   it('calls the packages of a machine not checked yet "System packages"', async () => {
-    const { el } = await create([container({ packageManager: null, aptUpgradable: [], lastCheckedAt: null })]);
+    const { el } = await create([container({ packageManager: null, packageUpdates: [], lastCheckedAt: null })]);
     expect(el.querySelector('.item-name')?.textContent).toContain('System packages');
   });
 
@@ -137,8 +137,8 @@ describe('ContainersPage', () => {
       kind: 'vm',
       vmid: 111,
       name: 'ha',
-      aptEnabled: false,
-      aptUpgradable: [],
+      packagesEnabled: false,
+      packageUpdates: [],
       apps: [],
       homeAssistant: homeAssistant(),
       updatesAvailable: 2,
@@ -192,7 +192,7 @@ describe('ContainersPage', () => {
     const ha = homeAssistant({ installEnabled: false, url: 'http://ha:8123' });
     ha.updates = ha.updates.map((u) => ({ ...u, installBlocker: blocked }));
     const { el } = await create([
-      container({ kind: 'vm', vmid: 111, name: 'ha', aptEnabled: false, aptUpgradable: [], apps: [], homeAssistant: ha }),
+      container({ kind: 'vm', vmid: 111, name: 'ha', packagesEnabled: false, packageUpdates: [], apps: [], homeAssistant: ha }),
     ]);
     expect(el.textContent).toContain('Mosquitto broker');
     expect(el.textContent).toContain('install in Home Assistant');
@@ -208,7 +208,7 @@ describe('ContainersPage', () => {
     const ha = homeAssistant({ hasToken: true, url: 'http://ha:8123', tokenMasked: 'eyJh…abcd', entitiesSavedAt: null });
     ha.updates = ha.updates.filter((u) => u.installable).map((u) => ({ ...u, installBlocker: null }));
     const { fixture, el } = await create([
-      container({ kind: 'vm', vmid: 111, name: 'ha', aptEnabled: false, aptUpgradable: [], apps: [], homeAssistant: ha }),
+      container({ kind: 'vm', vmid: 111, name: 'ha', packagesEnabled: false, packageUpdates: [], apps: [], homeAssistant: ha }),
     ]);
     expect(el.textContent).toContain('integrations read live through the API');
     [...el.querySelectorAll<HTMLButtonElement>('.ha-item button')].find((b) => b.textContent?.includes('Update all'))!.click();
@@ -313,14 +313,14 @@ describe('ContainersPage', () => {
     // The package list stays expanded while upgrading.
     [...el.querySelectorAll<HTMLButtonElement>('.link-btn')].find((b) => b.textContent?.includes('upgradable'))!.click();
     await settle(fixture);
-    expect(el.querySelector('app-apt-packages')).not.toBeNull();
+    expect(el.querySelector('app-system-packages')).not.toBeNull();
 
     const upgrade = [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) =>
       b.textContent?.trim() === 'Upgrade',
     )!;
     upgrade.click();
     await settle(fixture);
-    http.expectNone('/api/containers/1/apt-upgrade');
+    http.expectNone('/api/containers/1/packages-upgrade');
     expect(el.textContent).toContain('Upgrade 2 package(s)?');
     // "Backup first" starts with the container's default and can be changed for this update.
     const backup = el.querySelector<HTMLInputElement>('.backup-check input')!;
@@ -329,35 +329,35 @@ describe('ContainersPage', () => {
     backup.click();
 
     [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/apt-upgrade');
+    const request = http.expectOne('/api/containers/1/packages-upgrade');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: false });
-    request.flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
+    request.flush(run({ kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
       statusText: 'Accepted',
     });
     await settle(fixture);
 
     // The log dialog fetches the run; a finished run reloads the page data.
-    http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', output: 'Setting up curl (8.1) ...\n' }));
+    http.expectOne('/api/runs/9').flush(run({ kind: 'packages-upgrade', output: 'Setting up curl (8.1) ...\n' }));
     await settle(fixture);
     expect(el.querySelector('.output')?.textContent).toContain('Setting up curl');
     expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
 
-    http.expectOne('/api/containers').flush([container({ aptUpgradable: [], updatesAvailable: 1 })]);
+    http.expectOne('/api/containers').flush([container({ packageUpdates: [], updatesAvailable: 1 })]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     http.expectOne('/api/status').flush({});
     await settle(fixture);
     expect(el.textContent).toContain('no pending packages');
     // No empty package list (with its "No packages match" message) is left behind.
-    expect(el.querySelector('app-apt-packages')).toBeNull();
+    expect(el.querySelector('app-system-packages')).toBeNull();
     expect(el.textContent).not.toContain('No packages match');
   });
 
   it('shows why a restart is needed and restarts the container after a confirmation', async () => {
     const reasons = ['Requested by package libc6', 'Processes use upgraded files: nginx'];
     const { fixture, el } = await create([
-      container({ aptUpgradable: [], apps: [], updatesAvailable: 0, restartReasons: reasons }),
+      container({ packageUpdates: [], apps: [], updatesAvailable: 0, restartReasons: reasons }),
     ]);
 
     expect(el.querySelector('.ct-state.warning')).not.toBeNull();
@@ -387,7 +387,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
 
-    http.expectOne('/api/containers').flush([container({ aptUpgradable: [], apps: [], updatesAvailable: 0 })]);
+    http.expectOne('/api/containers').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 })]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     http.expectOne('/api/status').flush({});
     await settle(fixture);
@@ -397,7 +397,7 @@ describe('ContainersPage', () => {
 
   it('warns that restarting the Proxmox host stops its guests and hides restarts of stopped containers', async () => {
     const { fixture, el } = await create([
-      container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [], aptUpgradable: [], updatesAvailable: 0, restartReasons: ['Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running'] }),
+      container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [], packageUpdates: [], updatesAvailable: 0, restartReasons: ['Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running'] }),
       container({ id: 3, vmid: 103, name: 'idle', status: 'stopped', restartReasons: ['Requested by an upgraded package'] }),
     ]);
     await select(fixture, el, 'pve');
@@ -415,7 +415,7 @@ describe('ContainersPage', () => {
   it('updates the containers ticked after the first click on "Update", leaving out the host', async () => {
     const node = container({ id: 2, kind: 'node', vmid: 0, name: 'pve', apps: [] });
     const disabled = container({ id: 3, vmid: 103, name: 'off', isEnabled: false });
-    const second = container({ id: 4, vmid: 104, name: 'second', aptUpgradable: [], updatesAvailable: 1 });
+    const second = container({ id: 4, vmid: 104, name: 'second', packageUpdates: [], updatesAvailable: 1 });
     const { fixture, el } = await create([container(), node, disabled, second]);
     const headerButton = (text: string) =>
       [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.trim().startsWith(text))!;
@@ -455,7 +455,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(checkboxes()).toHaveLength(0);
 
-    http.expectOne('/api/containers').flush([container({ aptUpgradable: [], apps: [], updatesAvailable: 0 }), node]);
+    http.expectOne('/api/containers').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 }), node]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     await settle(fixture);
     http.expectOne('/api/status').flush({});
@@ -479,7 +479,7 @@ describe('ContainersPage', () => {
   });
 
   it('updates everything in one container after a confirmation', async () => {
-    const single = container({ id: 4, vmid: 104, name: 'single', aptUpgradable: [], updatesAvailable: 1 });
+    const single = container({ id: 4, vmid: 104, name: 'single', packageUpdates: [], updatesAvailable: 1 });
     const { fixture, el } = await create([container(), single]);
     const detail = () => el.querySelector<HTMLElement>('.detail')!;
     const detailButton = (text: string) =>
@@ -506,7 +506,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     http.expectOne('/api/status').flush({});
     // Like a single update, the live log of the running update opens.
-    http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
+    http.expectOne('/api/runs/9').flush(run({ kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }));
     await settle(fixture);
     expect(detail().textContent).toContain('Working…');
     expect(detailButton('Update all')!.disabled).toBe(true);
@@ -524,13 +524,13 @@ describe('ContainersPage', () => {
     try {
       el.querySelector<HTMLButtonElement>('.detail .badge-btn')!.click();
       await vi.advanceTimersByTimeAsync(0);
-      http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
+      http.expectOne('/api/runs/9').flush(run({ kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }));
       await vi.advanceTimersByTimeAsync(0);
       expect(el.querySelector('.run-dialog h2')?.textContent).toContain('Package upgrade');
 
       // The apt upgrade finishes; the application update starts as the next run.
       await vi.advanceTimersByTimeAsync(1000);
-      http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade' }));
+      http.expectOne('/api/runs/9').flush(run({ kind: 'packages-upgrade' }));
       await vi.advanceTimersByTimeAsync(0);
       http.expectOne('/api/status').flush({});
       http.expectOne('/api/containers').flush([container({ isBusy: true, activeRunId: 10 })]);
@@ -773,14 +773,14 @@ describe('ContainersPage', () => {
     expect(row.querySelector('.backup-check')).toBeNull();
     expect(row.textContent).toContain('dist-upgrade, no backup');
     [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const upgrade = http.expectOne('/api/containers/5/apt-upgrade');
+    const upgrade = http.expectOne('/api/containers/5/packages-upgrade');
     expect(upgrade.request.body).toEqual({ backup: false });
-    upgrade.flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
+    upgrade.flush(run({ containerId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
       statusText: 'Accepted',
     });
     await settle(fixture);
-    http.expectOne('/api/runs/9').flush(run({ containerId: 5, kind: 'apt-upgrade', status: 'running', finishedAt: null }));
+    http.expectOne('/api/runs/9').flush(run({ containerId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null }));
     await settle(fixture);
     expect(el.querySelector('app-run-log-dialog')?.textContent).toContain('Proxmox host (pve)');
   });
@@ -798,11 +798,11 @@ describe('ContainersPage', () => {
   it('filters, searches and sorts the list and shows the selected container in the detail pane', async () => {
     const base = container().apps[0]!;
     const { fixture, el } = await create([
-      container({ id: 1, vmid: 103, name: 'zigbee', aptUpgradable: [], apps: [], updatesAvailable: 0 }),
-      container({ id: 2, vmid: 102, name: 'broken', lastError: 'ssh failed', aptUpgradable: [], apps: [], updatesAvailable: 0 }),
+      container({ id: 1, vmid: 103, name: 'zigbee', packageUpdates: [], apps: [], updatesAvailable: 0 }),
+      container({ id: 2, vmid: 102, name: 'broken', lastError: 'ssh failed', packageUpdates: [], apps: [], updatesAvailable: 0 }),
       container({ id: 3, vmid: 101, name: 'vaultwarden' }),
       container({ id: 4, vmid: 104, name: 'media', isEnabled: false, apps: [{ ...base, name: 'Jellyfin' }] }),
-      container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], aptUpgradable: [], updatesAvailable: 0 }),
+      container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], packageUpdates: [], updatesAvailable: 0 }),
     ]);
     const names = () => [...el.querySelectorAll('.ct-name')].map((n) => n.textContent?.trim());
     const tab = (label: string) =>

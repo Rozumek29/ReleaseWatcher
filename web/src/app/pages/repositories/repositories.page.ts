@@ -136,7 +136,7 @@ export class RepositoriesPage {
           repository,
           includePrereleases: this.newIncludePrereleases,
           ...(this.newHost() && this.newProvider ? { provider: this.newProvider } : {}),
-          ...(this.newToken.trim() ? { githubToken: this.newToken.trim() } : {}),
+          ...(this.newToken.trim() ? { accessToken: this.newToken.trim() } : {}),
         }),
       );
       this.repositories.update((list) => [...list, created].sort(byName));

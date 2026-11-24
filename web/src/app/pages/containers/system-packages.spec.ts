@@ -1,7 +1,7 @@
 import { TestBed } from '@angular/core/testing';
-import { AptPackage } from '../../core/models';
+import { PackageUpdate } from '../../core/models';
 import { settle } from '../../testing';
-import { AptPackages, versionDiff } from './apt-packages';
+import { SystemPackages, versionDiff } from './system-packages';
 
 describe('versionDiff', () => {
   it('highlights whole changed version components', () => {
@@ -19,16 +19,16 @@ describe('versionDiff', () => {
   });
 });
 
-describe('AptPackages', () => {
-  const packages = (count: number): AptPackage[] =>
+describe('SystemPackages', () => {
+  const packages = (count: number): PackageUpdate[] =>
     Array.from({ length: count }, (_, i) => ({
       name: `lib${i}`,
       currentVersion: '1.0.0',
       newVersion: '1.0.1',
     }));
 
-  const create = async (list: AptPackage[]) => {
-    const fixture = TestBed.createComponent(AptPackages);
+  const create = async (list: PackageUpdate[]) => {
+    const fixture = TestBed.createComponent(SystemPackages);
     fixture.componentRef.setInput('packages', list);
     fixture.componentRef.setInput('listId', 1);
     await settle(fixture);

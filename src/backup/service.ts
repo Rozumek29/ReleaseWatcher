@@ -58,7 +58,7 @@ import {
   settingLabel,
   targetKey,
 } from './domain.ts';
-import type { BackupInput } from './schema.ts';
+import { upgradeBackupInput, type BackupInput } from './schema.ts';
 
 /** The file cannot be imported; `errors` are keyed by the path of the value in the file. */
 export class BackupValidationError extends Error {
@@ -132,7 +132,7 @@ export class BackupService {
       if (settings.sourceOf(key) === 'ui') secretsOmitted.push(label);
     }
     for (const r of repositories) {
-      if (r.githubToken) secretsOmitted.push(`${PROVIDER_LABELS[r.provider]} token of ${fullName(r)}`);
+      if (r.accessToken) secretsOmitted.push(`${PROVIDER_LABELS[r.provider]} token of ${fullName(r)}`);
       if (r.installedVersionHeaders.length > 0) {
         secretsOmitted.push(`Version URL headers of ${fullName(r)} (${r.installedVersionHeaders.map((h) => h.name).join(', ')})`);
       }
@@ -181,7 +181,7 @@ export class BackupService {
         ],
       });
     }
-    return new ImportPlanner(this.deps, input, mode).plan();
+    return new ImportPlanner(this.deps, upgradeBackupInput(input), mode).plan();
   }
 }
 
@@ -202,7 +202,7 @@ function exportRepository(r: WatchedRepository): BackupRepository {
     installedVersion: r.installedVersionUrl ? null : r.installedVersion,
     osvEcosystem: r.osvEcosystem,
     osvPackage: r.osvPackage,
-    hasGithubToken: r.githubToken !== null,
+    hasAccessToken: r.accessToken !== null,
   };
 }
 
@@ -242,7 +242,7 @@ function exportTarget(c: Container, apps: readonly ContainerApp[], repoNames: Re
     vmid: c.vmid,
     name: c.name,
     isEnabled: c.isEnabled,
-    aptEnabled: c.aptEnabled,
+    packagesEnabled: c.packagesEnabled,
     backupBeforeUpdate: c.backupBeforeUpdate,
     startWhenStopped: c.startWhenStopped,
     checkCron: c.checkCron,
@@ -426,12 +426,12 @@ class ImportPlanner {
         const missingHeaders = item.installedVersionHeaderNames.filter(
           (name) => !current.installedVersionHeaders.some((h) => h.name.toLowerCase() === name.toLowerCase()),
         );
-        if (item.hasGithubToken && !current.githubToken) this.secrets.push(`${PROVIDER_LABELS[current.provider]} token of ${label}`);
+        if (item.hasAccessToken && !current.accessToken) this.secrets.push(`${PROVIDER_LABELS[current.provider]} token of ${label}`);
         if (missingHeaders.length > 0) this.secrets.push(`Version URL headers of ${label} (${missingHeaders.join(', ')})`);
         // Secrets of an existing repository are kept, so they are not part of the comparison.
-        const before = { ...exportRepository(current), installedVersionHeaderNames: [], hasGithubToken: false };
+        const before = { ...exportRepository(current), installedVersionHeaderNames: [], hasAccessToken: false };
         // The provider of a host is found when the repository is added and is not changed by an import.
-        const after = { ...item, provider: current.provider, installedVersionHeaderNames: [], hasGithubToken: false };
+        const after = { ...item, provider: current.provider, installedVersionHeaderNames: [], hasAccessToken: false };
         if (sameItem(before, after)) {
           section.unchanged++;
           return;
@@ -445,7 +445,7 @@ class ImportPlanner {
         return;
       }
 
-      if (item.hasGithubToken) this.secrets.push(`${PROVIDER_LABELS[item.provider]} token of ${label}`);
+      if (item.hasAccessToken) this.secrets.push(`${PROVIDER_LABELS[item.provider]} token of ${label}`);
       if (item.installedVersionHeaderNames.length > 0) {
         this.secrets.push(`Version URL headers of ${label} (${item.installedVersionHeaderNames.join(', ')})`);
       }
@@ -512,7 +512,7 @@ class ImportPlanner {
       installedVersion: url ? null : blank(raw.installedVersion),
       osvEcosystem: ecosystem,
       osvPackage,
-      hasGithubToken: raw.hasGithubToken ?? false,
+      hasAccessToken: raw.hasAccessToken ?? false,
     };
   }
 
@@ -721,11 +721,11 @@ class ImportPlanner {
   }
 
   private appInput(app: BackupApp): AppInput {
-    const repositoryId = app.latestSource === 'github' && app.repository ? (this.repoIds.get(app.repository.toLowerCase()) ?? null) : null;
+    const repositoryId = app.latestSource === 'repository' && app.repository ? (this.repoIds.get(app.repository.toLowerCase()) ?? null) : null;
     return {
       name: app.name,
       versionCommand: app.versionCommand,
-      latestSource: (app.latestSource === 'github' && repositoryId === null ? 'none' : app.latestSource) as LatestSource,
+      latestSource: (app.latestSource === 'repository' && repositoryId === null ? 'none' : app.latestSource) as LatestSource,
       repositoryId,
       latestCommand: app.latestCommand,
       updateCommand: app.updateCommand,
@@ -828,9 +828,9 @@ class ImportPlanner {
           if (timeoutSeconds < MIN_APP_TIMEOUT_SECONDS || timeoutSeconds > MAX_APP_TIMEOUT_SECONDS) {
             fail(`${appPath}.timeoutSeconds`, `Timeout must be between ${MIN_APP_TIMEOUT_SECONDS} and ${MAX_APP_TIMEOUT_SECONDS} seconds.`);
           }
-          let repository = source === 'github' ? blank(a.repository) : null;
+          let repository = source === 'repository' ? blank(a.repository) : null;
           let latestSource = source;
-          if (source === 'github' && (!repository || !knownRepos.has(repository.toLowerCase()))) {
+          if (source === 'repository' && (!repository || !knownRepos.has(repository.toLowerCase()))) {
             this.warnings.push(
               `${appName} on ${name}: the repository ${repository ?? '(none)'} is not watched, so its latest version is not looked up.`,
             );
@@ -859,7 +859,7 @@ class ImportPlanner {
         vmid,
         name,
         isEnabled: t.isEnabled ?? true,
-        aptEnabled: !can.aptOptional || (t.aptEnabled ?? true),
+        packagesEnabled: !can.packagesOptional || (t.packagesEnabled ?? true),
         backupBeforeUpdate: can.backup === null ? null : (t.backupBeforeUpdate ?? null),
         startWhenStopped: can.power && (t.startWhenStopped ?? false),
         checkCron,
@@ -953,7 +953,7 @@ function backupRepositoryRef(raw: NonNullable<BackupInput['repositories']>[numbe
 function applyRepository(repo: WatchedRepository, item: BackupRepository): void {
   if (repo.includePrereleases !== item.includePrereleases) {
     // Filter changed: force a full fetch on the next check.
-    repo.etag = null;
+    repo.releasesEtag = null;
   }
   repo.includePrereleases = item.includePrereleases;
   repo.isEnabled = item.isEnabled;
@@ -983,8 +983,8 @@ function applyTarget(c: Container, t: BackupTarget): void {
   const can = capabilities(c.kind);
   c.name = t.name;
   c.isEnabled = t.isEnabled;
-  c.aptEnabled = t.aptEnabled;
-  if (!c.aptEnabled) c.aptUpgradable = [];
+  c.packagesEnabled = t.packagesEnabled;
+  if (!c.packagesEnabled) c.packageUpdates = [];
   c.backupBeforeUpdate = t.backupBeforeUpdate;
   c.startWhenStopped = t.startWhenStopped;
   c.checkCron = t.checkCron;
@@ -1010,7 +1010,7 @@ function defaultServerTarget(name: string): BackupTarget {
     vmid: NODE_VMID,
     name,
     isEnabled: true,
-    aptEnabled: true,
+    packagesEnabled: true,
     backupBeforeUpdate: null,
     startWhenStopped: false,
     checkCron: null,

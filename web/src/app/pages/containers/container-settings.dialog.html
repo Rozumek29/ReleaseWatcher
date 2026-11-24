@@ -23,8 +23,8 @@
 
           <div class="switches">
             <app-switch label="Active (scheduled checks)" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
-            @if (c.capabilities.aptOptional) {
-              <app-switch label="System packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
+            @if (c.capabilities.packagesOptional) {
+              <app-switch label="System packages" [checked]="packagesEnabled" (toggled)="packagesEnabled = !packagesEnabled" />
             }
             <app-switch
               label="Docker containers"
@@ -149,7 +149,7 @@
                 } @else {
                   the node's backup storage (not chosen yet – Settings → Connections → node → Edit)
                 }
-                before apt upgrades and application updates. You can still change it for every single update.
+                before package upgrades and application updates. You can still change it for every single update.
               </span>
             </div>
 
@@ -185,7 +185,7 @@
                 </div>
               </div>
               <span class="hint">
-                Raised with <code>pct set</code> before apt upgrades and application updates – e.g. for an update that
+                Raised with <code>pct set</code> before package upgrades and application updates – e.g. for an update that
                 compiles Rust – and set back to the previous values afterwards, also when the update fails. Values are
                 only raised, never lowered. Leave empty to keep the container's own values.
               </span>
@@ -392,11 +392,11 @@
         <label for="app-source">Latest version from</label>
         <select id="app-source" class="input" [ngModel]="f.latestSource" (ngModelChange)="setField('latestSource', $event)">
           <option value="none">Nothing (no comparison)</option>
-          <option value="github">A watched repository</option>
+          <option value="repository">A watched repository</option>
           <option value="command">A command</option>
         </select>
       </div>
-      @if (f.latestSource === 'github') {
+      @if (f.latestSource === 'repository') {
         <div class="field">
           <label for="app-repo">Repository</label>
           <select id="app-repo" class="input" [ngModel]="f.repositoryId" (ngModelChange)="setField('repositoryId', $event)">

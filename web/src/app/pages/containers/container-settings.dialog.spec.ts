@@ -56,7 +56,7 @@ describe('ContainerSettingsDialog', () => {
     expect(request.request.body).toEqual({
       name: 'vaultwarden',
       isEnabled: true,
-      aptEnabled: true,
+      packagesEnabled: true,
       startWhenStopped: true,
       dockerEnabled: true,
       backupBeforeUpdate: false,
@@ -74,7 +74,7 @@ describe('ContainerSettingsDialog', () => {
       kind: 'vm',
       vmid: 111,
       name: 'ha',
-      aptEnabled: false,
+      packagesEnabled: false,
       homeAssistant: homeAssistant({ url: 'http://ha:8123', hasToken: true, tokenMasked: 'eyJh…abcd' }),
     });
     const { fixture, el } = await open(vm);
@@ -202,7 +202,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
     type(el, '#app-name', 'Vaultwarden');
     type(el, '#app-version', 'cat /opt/vw_version.txt');
-    type(el, '#app-source', 'github');
+    type(el, '#app-source', 'repository');
     await settle(fixture);
     const repo = el.querySelector<HTMLSelectElement>('#app-repo')!;
     repo.selectedIndex = 1;
@@ -217,7 +217,7 @@ describe('ContainerSettingsDialog', () => {
     expect(request.request.body).toEqual({
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
-      latestSource: 'github',
+      latestSource: 'repository',
       repositoryId: 3,
       latestCommand: null,
       updateCommand: 'update',
@@ -335,7 +335,7 @@ describe('ContainerSettingsDialog', () => {
     expect(add.request.body).toEqual({
       name: 'Immich',
       versionCommand: 'cat /root/.immich',
-      latestSource: 'github',
+      latestSource: 'repository',
       repositoryId: 7,
       latestCommand: null,
       updateCommand: 'update',

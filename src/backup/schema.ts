@@ -26,6 +26,8 @@ const targetSchema = z.object({
   vmid: z.int().min(0).max(999_999_999),
   name: z.string().max(100),
   isEnabled: z.boolean().nullish(),
+  packagesEnabled: z.boolean().nullish(),
+  /** Format version 1 name of `packagesEnabled`. */
   aptEnabled: z.boolean().nullish(),
   backupBeforeUpdate: z.boolean().nullish(),
   startWhenStopped: z.boolean().nullish(),
@@ -64,6 +66,8 @@ const repositorySchema = z.object({
   installedVersion: text(100),
   osvEcosystem: text(50),
   osvPackage: text(300),
+  hasAccessToken: z.boolean().nullish(),
+  /** Format version 1 name of `hasAccessToken`. */
   hasGithubToken: z.boolean().nullish(),
 });
 
@@ -88,3 +92,30 @@ export const backupFileSchema = z.object({
 
 /** A backup file as read from an import request (optional fields may be missing). */
 export type BackupInput = z.output<typeof backupFileSchema>;
+
+/**
+ * Brings a file of an older format version to the current names: version 1 called the package switch `aptEnabled`,
+ * a repository's own token `hasGithubToken`, the latest version from a watched repository `github` and the
+ * notification setting `notifyAptUpdates`.
+ */
+export function upgradeBackupInput(input: BackupInput): BackupInput {
+  if (input.schemaVersion >= 2) return input;
+  const settings = input.settings
+    ? Object.fromEntries(
+        Object.entries(input.settings).map(([key, value]) => [key === 'notifyAptUpdates' ? 'notifyPackageUpdates' : key, value]),
+      )
+    : input.settings;
+  return {
+    ...input,
+    settings,
+    repositories: input.repositories?.map((r) => ({ ...r, hasAccessToken: r.hasAccessToken ?? r.hasGithubToken })),
+    hosts: input.hosts?.map((h) => ({
+      ...h,
+      targets: h.targets?.map((t) => ({
+        ...t,
+        packagesEnabled: t.packagesEnabled ?? t.aptEnabled,
+        apps: t.apps?.map((a) => ({ ...a, latestSource: a.latestSource === 'github' ? 'repository' : a.latestSource })),
+      })),
+    })),
+  };
+}

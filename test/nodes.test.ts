@@ -124,7 +124,7 @@ describe('several Proxmox nodes', () => {
     assert.equal((await request('GET', `/api/containers/${ct2.id}`)).json().backupStorage, 'pbs2');
 
     shells['pve2.lan']!.on(/apt-get -y/, { output: 'Done.\n' });
-    assert.equal((await request('POST', `/api/containers/${ct2.id}/apt-upgrade`, { backup: true })).status, 202);
+    assert.equal((await request('POST', `/api/containers/${ct2.id}/packages-upgrade`, { backup: true })).status, 202);
     const run = await app.containers.wait(ct2.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.ok(shells['pve2.lan']!.detached.some((d) => d.command.includes('vzdump 100') && d.command.includes("--storage 'pbs2'")));
@@ -133,7 +133,7 @@ describe('several Proxmox nodes', () => {
     // A node without its own storage makes no backups (there is no global storage to fall back to).
     await request('PUT', `/api/hosts/${pve2.id}`, { backupStorage: null });
     assert.equal((await request('GET', `/api/containers/${ct2.id}`)).json().backupStorage, null);
-    assert.equal((await request('POST', `/api/containers/${ct2.id}/apt-upgrade`, { backup: true })).status, 409);
+    assert.equal((await request('POST', `/api/containers/${ct2.id}/packages-upgrade`, { backup: true })).status, 409);
   });
 
   it('restarts one node while another one is busy', async () => {
@@ -148,7 +148,7 @@ describe('several Proxmox nodes', () => {
       await gate;
       return { output: '' };
     });
-    assert.equal((await request('POST', `/api/containers/${node2.id}/apt-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/containers/${node2.id}/packages-upgrade`)).status, 202);
     shells['pve1.lan']!.on(/systemctl reboot$/, { output: '' }).on(/^true$/, { output: '' });
     assert.equal((await request('POST', `/api/containers/${node1.id}/restart`)).status, 202);
     assert.equal((await request('POST', `/api/containers/${node2.id}/restart`)).status, 409);

@@ -40,8 +40,8 @@ export interface WatchedRepository {
   /** True when the latest release is newer than the installed version; null when unknown. */
   updateAvailable: boolean | null;
   /** The repository uses its own token instead of the global one (the token itself is never returned). */
-  hasOwnToken: boolean;
-  githubTokenMasked: string | null;
+  hasAccessToken: boolean;
+  accessTokenMasked: string | null;
   /** OSV.dev package of the app (both set or both null). */
   osvEcosystem: string | null;
   osvPackage: string | null;
@@ -123,7 +123,7 @@ export interface AddRepositoryRequest {
   provider?: RepositoryProvider | null;
   includePrereleases: boolean;
   /** Token of the repository: a private one the global GitHub token cannot read, or one on another host. */
-  githubToken?: string | null;
+  accessToken?: string | null;
 }
 
 export interface UpdateRepositoryRequest {
@@ -138,7 +138,7 @@ export interface UpdateRepositoryRequest {
   /** App on a machine to read the installed version from (it gets linked); omit to keep, null to stop. */
   installedVersionApp?: MachineAppRef | null;
   /** Omit to keep, null to remove the repository's own token. */
-  githubToken?: string | null;
+  accessToken?: string | null;
   /** OSV.dev package; omit to keep, null to remove. */
   osvEcosystem?: string | null;
   osvPackage?: string | null;
@@ -302,7 +302,7 @@ export interface NotificationPreferences {
   releases: boolean;
   vulnerabilities: boolean;
   appUpdates: boolean;
-  aptUpdates: boolean;
+  packageUpdates: boolean;
   updateSucceeded: boolean;
   updateFailed: boolean;
   /** Newer images of the tags Docker containers run. */
@@ -336,7 +336,7 @@ export interface SettingsPatch extends Partial<Record<ChannelSettingKey, string 
   notifyReleases?: boolean | null;
   notifyVulnerabilities?: boolean | null;
   notifyAppUpdates?: boolean | null;
-  notifyAptUpdates?: boolean | null;
+  notifyPackageUpdates?: boolean | null;
   notifyUpdateSucceeded?: boolean | null;
   notifyUpdateFailed?: boolean | null;
   notifyDockerUpdates?: boolean | null;
@@ -433,7 +433,7 @@ export interface AppStatus {
     total: number;
     enabled: number;
     withErrors: number;
-    aptPending: number;
+    packagesPending: number;
     /** Pending Flatpak / Snap updates, one per store and machine. */
     appStorePending?: number;
     appUpdatesAvailable: number;
@@ -465,17 +465,17 @@ export interface AppStoreInfo {
   store: AppStore;
   /** "Flatpak", "Snap". */
   label: string;
-  packages: AptPackage[];
+  packages: PackageUpdate[];
 }
 
-export interface AptPackage {
+export interface PackageUpdate {
   name: string;
   currentVersion: string | null;
   newVersion: string;
 }
 
 /** Where the newest available version of an application comes from. */
-export type LatestSource = 'none' | 'github' | 'command';
+export type LatestSource = 'none' | 'repository' | 'command';
 
 export interface ContainerApp {
   id: number;
@@ -555,7 +555,7 @@ export interface TargetCapabilities {
   /** Can be started and shut down ("Start temporarily when stopped"). */
   power: boolean;
   /** apt can be switched off (false = always on). */
-  aptOptional: boolean;
+  packagesOptional: boolean;
   /** CPU cores and memory can be raised for updates. */
   updateResources: boolean;
   /** Applications can be added and detected. */
@@ -604,7 +604,7 @@ export interface Container {
   vmid: number;
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   /** Back up before updates; null = use the global default. */
   backupBeforeUpdate: boolean | null;
   /** The value in effect for this container (own setting or the global default). */
@@ -623,7 +623,7 @@ export interface Container {
   resourcesRaised: boolean;
   nextCheckAt: string | null;
   status: string | null;
-  aptUpgradable: AptPackage[];
+  packageUpdates: PackageUpdate[];
   /** Package manager found by the last check; null = not checked yet (or none found). */
   packageManager: PackageManager | null;
   /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
@@ -651,7 +651,7 @@ export interface Container {
 export interface UpdateContainerRequest {
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   backupBeforeUpdate: boolean | null;
   startWhenStopped: boolean;
   checkCron: string | null;
@@ -689,7 +689,7 @@ export interface DiscoveredContainer {
   added: boolean;
 }
 
-export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
+export type RunKind = 'check' | 'packages-upgrade' | 'app-update' | 'restart' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {

@@ -68,7 +68,7 @@ export interface Settings {
   /** New security advisories of watched repositories. */
   notifyVulnerabilities: boolean;
   notifyAppUpdates: boolean;
-  notifyAptUpdates: boolean;
+  notifyPackageUpdates: boolean;
   notifyUpdateSucceeded: boolean;
   notifyUpdateFailed: boolean;
   /** Newer images of the tags Docker containers run. */
@@ -93,7 +93,7 @@ const BOOLEAN_SETTINGS: ReadonlySet<SettingKey> = new Set([
   'notifyReleases',
   'notifyVulnerabilities',
   'notifyAppUpdates',
-  'notifyAptUpdates',
+  'notifyPackageUpdates',
   'notifyUpdateSucceeded',
   'notifyUpdateFailed',
   'notifyDockerUpdates',
@@ -184,7 +184,7 @@ export class SettingsService {
       notifyReleases: DEFAULT_NOTIFICATION_PREFERENCES.releases,
       notifyVulnerabilities: DEFAULT_NOTIFICATION_PREFERENCES.vulnerabilities,
       notifyAppUpdates: DEFAULT_NOTIFICATION_PREFERENCES.appUpdates,
-      notifyAptUpdates: DEFAULT_NOTIFICATION_PREFERENCES.aptUpdates,
+      notifyPackageUpdates: DEFAULT_NOTIFICATION_PREFERENCES.packageUpdates,
       notifyUpdateSucceeded: DEFAULT_NOTIFICATION_PREFERENCES.updateSucceeded,
       notifyUpdateFailed: DEFAULT_NOTIFICATION_PREFERENCES.updateFailed,
       notifyDockerUpdates: DEFAULT_NOTIFICATION_PREFERENCES.dockerUpdates,
@@ -295,7 +295,7 @@ export class SettingsService {
       notifyReleases: flag('notifyReleases'),
       notifyVulnerabilities: flag('notifyVulnerabilities'),
       notifyAppUpdates: flag('notifyAppUpdates'),
-      notifyAptUpdates: flag('notifyAptUpdates'),
+      notifyPackageUpdates: flag('notifyPackageUpdates'),
       notifyUpdateSucceeded: flag('notifyUpdateSucceeded'),
       notifyUpdateFailed: flag('notifyUpdateFailed'),
       notifyDockerUpdates: flag('notifyDockerUpdates'),

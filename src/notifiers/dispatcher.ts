@@ -18,7 +18,7 @@ export interface NotificationPreferences {
   /** New security advisories of watched repositories. */
   vulnerabilities: boolean;
   appUpdates: boolean;
-  aptUpdates: boolean;
+  packageUpdates: boolean;
   updateSucceeded: boolean;
   updateFailed: boolean;
   /** Newer images of the tags Docker containers run. */
@@ -30,7 +30,7 @@ export const DEFAULT_NOTIFICATION_PREFERENCES: NotificationPreferences = {
   releases: true,
   vulnerabilities: true,
   appUpdates: true,
-  aptUpdates: true,
+  packageUpdates: true,
   updateSucceeded: false,
   updateFailed: false,
   dockerUpdates: true,
@@ -91,10 +91,10 @@ export class NotificationDispatcher {
     const filtered: ContainerUpdatesNotification = {
       ...notification,
       apps: preferences.appUpdates ? notification.apps : [],
-      aptPackages: preferences.aptUpdates ? notification.aptPackages : [],
-      appStores: preferences.aptUpdates ? (notification.appStores ?? []).filter((s) => s.packages.length > 0) : [],
+      systemPackages: preferences.packageUpdates ? notification.systemPackages : [],
+      appStores: preferences.packageUpdates ? (notification.appStores ?? []).filter((s) => s.packages.length > 0) : [],
     };
-    if (filtered.apps.length === 0 && filtered.aptPackages.length === 0 && filtered.appStores?.length === 0) {
+    if (filtered.apps.length === 0 && filtered.systemPackages.length === 0 && filtered.appStores?.length === 0) {
       return Promise.resolve(skipped());
     }
     return this.send({ type: 'container-updates', updates: filtered });

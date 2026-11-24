@@ -80,7 +80,7 @@ describe('DiscordNotifier', () => {
       vmid: 101,
       targetKind: 'lxc' as const,
       containerName: 'vaultwarden',
-      aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
+      systemPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
       apps: [{ name: 'Vaultwarden', installedVersion: '1.30.0', latestVersion: '1.32.0' }],
     };
     const payload = buildContainerPayload(notification, { ...options, publicUrl: 'https://updater.example.com' });
@@ -103,7 +103,7 @@ describe('DiscordNotifier', () => {
         vmid: 0,
         targetKind: 'server',
         containerName: 'desktop',
-        aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
+        systemPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
         packageManager: 'dnf',
         appStores: [{ name: 'Flatpak', packages: [{ name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' }] }],
         apps: [],
@@ -122,7 +122,7 @@ describe('DiscordNotifier', () => {
       urls.push(url);
       return new Response(null, { status: 204 });
     }) as unknown as typeof globalThis.fetch;
-    const notification = { vmid: 101, targetKind: 'lxc' as const, containerName: 'vaultwarden', aptPackages: [], apps: [] };
+    const notification = { vmid: 101, targetKind: 'lxc' as const, containerName: 'vaultwarden', systemPackages: [], apps: [] };
 
     await new DiscordNotifier({ ...options, fetch, webhookUrl: `${options.webhookUrl}?thread_id=9` }).notifyContainerUpdates(notification);
     await new DiscordNotifier({ ...options, fetch, publicUrl: 'https://updater.example.com' }).notifyContainerUpdates(notification);

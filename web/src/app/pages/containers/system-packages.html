@@ -1,10 +1,10 @@
 @if (showFilter()) {
   <div class="filter">
-    <label class="visually-hidden" [for]="'apt-filter-' + listId()">Filter packages</label>
+    <label class="visually-hidden" [for]="'packages-filter-' + listId()">Filter packages</label>
     <input
       class="input"
       type="search"
-      [id]="'apt-filter-' + listId()"
+      [id]="'packages-filter-' + listId()"
       placeholder="Filter packages…"
       autocomplete="off"
       [value]="query()"

@@ -521,9 +521,9 @@ export class ContainerService {
   }
 
   /** @param backupStorage back up to this storage first (null = no backup; always null for targets without backups) */
-  startAptUpgrade(container: Container, backupStorage: string | null): Run {
+  startPackagesUpgrade(container: Container, backupStorage: string | null): Run {
     if (!guestOf(container)) {
-      return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
+      return this.start(container, null, 'packages-upgrade', 'manual', async (log) => {
         log.note(
           container.kind === 'node'
             ? `apt-get update && apt-get dist-upgrade on ${targetLabel(container)} (no backup)`
@@ -536,7 +536,7 @@ export class ContainerService {
         return this.finishUpdate(container, log, result);
       });
     }
-    return this.start(container, null, 'apt-upgrade', 'manual', (log) =>
+    return this.start(container, null, 'packages-upgrade', 'manual', (log) =>
       this.whileRunning(container, log, async (startedContainer) => {
         await this.backupFirst(container, backupStorage, log, 'package upgrade', startedContainer);
         const result = await this.withUpdateResources(container, log, () => {
@@ -1334,7 +1334,7 @@ export class ContainerService {
 
     // Everything is read with one SSH connection and one `pct exec` / `qm guest exec` (see buildCheckScript).
     const steps: CheckStep[] = [];
-    if (container.aptEnabled) {
+    if (container.packagesEnabled) {
       steps.push({ id: 'apt', script: PACKAGES_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
@@ -1387,12 +1387,12 @@ export class ContainerService {
       log.note(guestAgentError(batch.guestError));
     } else {
       const isHomeAssistant = capabilities(container.kind).homeAssistant && (await this.applyHomeAssistant(container, batch.steps, errors, log));
-      if (container.aptEnabled && !isHomeAssistant) {
+      if (container.packagesEnabled && !isHomeAssistant) {
         const apt = batch.steps.get('apt');
         const packages = apt?.exitCode === 0 ? parsePackageCheck(apt.output) : null;
         if (packages) {
           container.packageManager = packages.manager;
-          container.aptUpgradable = packages.packages;
+          container.packageUpdates = packages.packages;
           log.note(`${packages.manager}: ${packages.packages.length} upgradable package(s)`);
           for (const pkg of packages.packages) {
             log.write(`   ${pkg.name} ${pkg.currentVersion ?? '?'} → ${pkg.newVersion}\n`);
@@ -1404,7 +1404,7 @@ export class ContainerService {
           log.note(`${label} check failed: ${detail}`);
         }
       } else {
-        container.aptUpgradable = [];
+        container.packageUpdates = [];
       }
       if (isHomeAssistant) {
         container.appStores = {};
@@ -1482,9 +1482,9 @@ export class ContainerService {
       container.homeAssistant = null;
       return false;
     }
-    if (!container.homeAssistant && container.aptEnabled) {
-      container.aptEnabled = false;
-      container.aptUpgradable = [];
+    if (!container.homeAssistant && container.packagesEnabled) {
+      container.packagesEnabled = false;
+      container.packageUpdates = [];
       log.note('Home Assistant OS found – package checks switched off (it has no package manager)');
     }
     let problems = [...probe.errors];
@@ -1540,7 +1540,7 @@ export class ContainerService {
     }
 
     switch (app.latestSource) {
-      case 'github': {
+      case 'repository': {
         const repo = app.repositoryId === null ? null : this.deps.repositories.get(app.repositoryId);
         if (!repo) {
           errors.push('the linked GitHub repository is no longer watched');
@@ -1626,7 +1626,7 @@ export class ContainerService {
       vmid: container.vmid,
       targetKind: container.kind,
       containerName: container.name,
-      aptPackages: container.aptUpgradable,
+      systemPackages: container.packageUpdates,
       packageManager: container.packageManager,
       appStores: APP_STORES.flatMap((store) => {
         const packages = container.appStores[store] ?? [];

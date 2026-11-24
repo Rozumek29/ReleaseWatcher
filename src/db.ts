@@ -45,7 +45,7 @@ interface Row {
   is_enabled: number;
   last_seen_tag: string | null;
   last_seen_published_at: string | null;
-  etag: string | null;
+  releases_etag: string | null;
   last_checked_at: string | null;
   last_error: string | null;
   created_at: string;
@@ -57,7 +57,7 @@ interface Row {
   installed_version_error: string | null;
   installed_app_id: number | null;
   installed_docker_id: number | null;
-  github_token: string | null;
+  access_token: string | null;
   advisories_etag: string | null;
   advisories_checked_at: string | null;
   advisories_error: string | null;
@@ -115,7 +115,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   isEnabled: r.is_enabled === 1,
   lastSeenTag: r.last_seen_tag,
   lastSeenPublishedAt: r.last_seen_published_at,
-  etag: r.etag,
+  releasesEtag: r.releases_etag,
   lastCheckedAt: r.last_checked_at,
   lastError: r.last_error,
   createdAt: r.created_at,
@@ -131,7 +131,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
       : r.installed_docker_id !== null
         ? { kind: 'docker', id: r.installed_docker_id }
         : null,
-  githubToken: secrets.decryptNullable(r.github_token),
+  accessToken: secrets.decryptNullable(r.access_token),
   advisoriesEtag: r.advisories_etag,
   advisoriesCheckedAt: r.advisories_checked_at,
   advisoriesError: r.advisories_error,
@@ -736,6 +736,19 @@ export const MIGRATIONS: readonly string[] = [
             installed_version_error = 'The Docker container was removed, so its last version is kept as entered by hand.'
       WHERE installed_docker_id = OLD.id;
    END;`,
+  // Names that outgrew GitHub and apt: a repository's own token is sent to any provider, the package columns hold
+  // updates of every package manager, the latest version of an app comes from any watched repository, and the
+  // releases ETag is named like the advisories one. Stored values follow (run kind, notification setting, the
+  // signature of notified packages), so nothing is reported twice.
+  `ALTER TABLE watched_repositories RENAME COLUMN github_token TO access_token;
+   ALTER TABLE watched_repositories RENAME COLUMN etag TO releases_etag;
+   ALTER TABLE containers RENAME COLUMN apt_enabled TO packages_enabled;
+   ALTER TABLE containers RENAME COLUMN apt_upgradable TO package_updates;
+   UPDATE containers SET notified_signature = substr(replace('|' || notified_signature, '|apt:', '|pkg:'), 2)
+    WHERE notified_signature IS NOT NULL;
+   UPDATE container_apps SET latest_source = 'repository' WHERE latest_source = 'github';
+   UPDATE container_runs SET kind = 'packages-upgrade' WHERE kind = 'apt-upgrade';
+   UPDATE settings SET key = 'notifyPackageUpdates' WHERE key = 'notifyAptUpdates';`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -888,13 +901,13 @@ export class RepositoryStore {
       .query(
         `UPDATE watched_repositories SET
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
-           etag = ?, last_checked_at = ?, last_error = ?,
+           releases_etag = ?, last_checked_at = ?, last_error = ?,
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?,
            -- A version read from an app on a machine is kept up to date by triggers: never overwrite it with a copy
            -- that may have been read before the app's last check.
            installed_version = IIF(${FROM_MACHINE}, installed_version, ?),
            installed_version_checked_at = IIF(${FROM_MACHINE}, installed_version_checked_at, ?),
-           installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), github_token = ?,
+           installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), access_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
            osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?
          WHERE id = ?`,
@@ -904,7 +917,7 @@ export class RepositoryStore {
         repo.isEnabled ? 1 : 0,
         repo.lastSeenTag,
         repo.lastSeenPublishedAt,
-        repo.etag,
+        repo.releasesEtag,
         repo.lastCheckedAt,
         repo.lastError,
         repo.installedVersionUrl,
@@ -913,7 +926,7 @@ export class RepositoryStore {
         repo.installedVersion,
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
-        this.secrets.encryptNullable(repo.githubToken),
+        this.secrets.encryptNullable(repo.accessToken),
         repo.advisoriesEtag,
         repo.advisoriesCheckedAt,
         repo.advisoriesError,
@@ -1277,16 +1290,16 @@ export class RepositoryStore {
     const plain = (value: string | null): value is string => value !== null && !SecretBox.isEncrypted(value);
     this.db.transaction(() => {
       const repos = this.db
-        .query<Pick<Row, 'id' | 'github_token' | 'installed_version_headers'>, []>(
-          'SELECT id, github_token, installed_version_headers FROM watched_repositories',
+        .query<Pick<Row, 'id' | 'access_token' | 'installed_version_headers'>, []>(
+          'SELECT id, access_token, installed_version_headers FROM watched_repositories',
         )
         .all();
       for (const r of repos) {
-        if (plain(r.github_token) || plain(r.installed_version_headers)) {
+        if (plain(r.access_token) || plain(r.installed_version_headers)) {
           this.db
-            .query('UPDATE watched_repositories SET github_token = ?, installed_version_headers = ? WHERE id = ?')
+            .query('UPDATE watched_repositories SET access_token = ?, installed_version_headers = ? WHERE id = ?')
             .run(
-              plain(r.github_token) ? this.secrets.encrypt(r.github_token) : r.github_token,
+              plain(r.access_token) ? this.secrets.encrypt(r.access_token) : r.access_token,
               plain(r.installed_version_headers) ? this.secrets.encrypt(r.installed_version_headers) : r.installed_version_headers,
               r.id,
             );

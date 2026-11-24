@@ -21,8 +21,8 @@ export interface WatchedRepository extends RepositoryRef {
   lastSeenTag: string | null;
   /** ISO date of the newest release already processed. */
   lastSeenPublishedAt: string | null;
-  /** GitHub ETag used for conditional requests (304s don't count against the rate limit). */
-  etag: string | null;
+  /** ETag of the releases request, used for conditional requests (304s don't count against the rate limit). */
+  releasesEtag: string | null;
   /** ISO date of the last successful check. Null means no baseline has been established yet. */
   lastCheckedAt: string | null;
   lastError: string | null;
@@ -46,7 +46,7 @@ export interface WatchedRepository extends RepositoryRef {
    * Token used for this repository: on GitHub instead of the global one (private repository of another account), on
    * Gitea/Forgejo and GitLab the only one sent (the global token is GitHub's). Secret.
    */
-  githubToken: string | null;
+  accessToken: string | null;
   /** GitHub ETag of the security advisories request. */
   advisoriesEtag: string | null;
   /** ISO date of the last successful advisories fetch. Null = none yet (the first fetch only sets the baseline). */

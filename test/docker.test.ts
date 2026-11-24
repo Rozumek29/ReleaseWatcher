@@ -358,7 +358,7 @@ describe('docker API', () => {
     assert.equal(vw.installedVersion, '1.32.0');
     assert.equal(vw.registry.state, 'up-to-date');
 
-    const off = await request('PUT', `/api/containers/${added.id}`, { name: target.name, isEnabled: true, aptEnabled: true, dockerEnabled: false });
+    const off = await request('PUT', `/api/containers/${added.id}`, { name: target.name, isEnabled: true, packagesEnabled: true, dockerEnabled: false });
     assert.equal(off.json().docker.enabled, false);
     assert.deepEqual((await overview()).containers, []);
     // Switched off: the next check does not list containers.

@@ -357,8 +357,8 @@ export const toDto = (
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
   installedVersions: installedVersions(r.installedVersion, linkedVersions),
   // The repository's own token is a secret: only whether it is set and a masked hint.
-  hasOwnToken: r.githubToken !== null,
-  githubTokenMasked: maskSecret(r.githubToken, 4),
+  hasAccessToken: r.accessToken !== null,
+  accessTokenMasked: maskSecret(r.accessToken, 4),
   /** True/false when both versions are known and comparable, otherwise null. */
   updateAvailable: (() => {
     const diff = compareVersions(r.lastSeenTag, r.installedVersion);
@@ -378,7 +378,7 @@ const addRepositorySchema = body({
   /** Provider of a host that is not well known (detected when omitted); ignored for github.com, gitlab.com, codeberg.org … */
   provider: z.enum(PROVIDERS).nullish(),
   includePrereleases: z.boolean().optional(),
-  githubToken: z.string().max(1000).nullish(),
+  accessToken: z.string().max(1000).nullish(),
 });
 
 const updateRepositorySchema = body({
@@ -395,7 +395,7 @@ const updateRepositorySchema = body({
    */
   installedVersionApp: z.object({ kind: z.enum(['app', 'docker']), id: z.int() }).nullish(),
   /** Omit = keep, null/"" = remove (use the global token). */
-  githubToken: z.string().max(1000).nullish(),
+  accessToken: z.string().max(1000).nullish(),
   /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
   osvEcosystem: z.string().max(50).nullish(),
   osvPackage: z.string().max(300).nullish(),
@@ -450,7 +450,7 @@ const settingsSchema = body({
   notifyReleases: z.boolean().nullish(),
   notifyVulnerabilities: z.boolean().nullish(),
   notifyAppUpdates: z.boolean().nullish(),
-  notifyAptUpdates: z.boolean().nullish(),
+  notifyPackageUpdates: z.boolean().nullish(),
   notifyUpdateSucceeded: z.boolean().nullish(),
   notifyUpdateFailed: z.boolean().nullish(),
   notifyDockerUpdates: z.boolean().nullish(),
@@ -477,7 +477,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       releases: current.notifyReleases,
       vulnerabilities: current.notifyVulnerabilities,
       appUpdates: current.notifyAppUpdates,
-      aptUpdates: current.notifyAptUpdates,
+      packageUpdates: current.notifyPackageUpdates,
       updateSucceeded: current.notifyUpdateSucceeded,
       updateFailed: current.notifyUpdateFailed,
       dockerUpdates: current.notifyDockerUpdates,
@@ -751,7 +751,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         releases: current.notifyReleases,
         vulnerabilities: current.notifyVulnerabilities,
         appUpdates: current.notifyAppUpdates,
-        aptUpdates: current.notifyAptUpdates,
+        packageUpdates: current.notifyPackageUpdates,
         updateSucceeded: current.notifyUpdateSucceeded,
         updateFailed: current.notifyUpdateFailed,
         dockerUpdates: current.notifyDockerUpdates,
@@ -858,7 +858,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const addRepository = async (req: Request) => {
     const body = await readBody(req, addRepositorySchema);
-    const githubToken = body.githubToken?.trim() || null;
+    const accessToken = body.accessToken?.trim() || null;
     const parsed = parseRepositoryReference(body.repository);
     if (!parsed) {
       return validationProblem(
@@ -888,7 +888,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     for (const provider of candidates) {
       const ref: RepositoryRef = { provider, host, owner, name };
       try {
-        if (await source.repositoryExists(ref, githubToken)) {
+        if (await source.repositoryExists(ref, accessToken)) {
           found = ref;
           break;
         }
@@ -906,8 +906,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
 
     const repo = store.add(owner, name, body.includePrereleases ?? false, found);
-    if (githubToken) {
-      repo.githubToken = githubToken;
+    if (accessToken) {
+      repo.accessToken = accessToken;
       store.save(repo);
     }
     // Establish the baseline right away so the UI shows the current latest release.
@@ -944,14 +944,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     if (repo.includePrereleases !== body.includePrereleases) {
       // Filter changed: force a full fetch on the next check.
-      repo.etag = null;
+      repo.releasesEtag = null;
     }
-    if (body.githubToken !== undefined) {
-      const token = body.githubToken?.trim() || null;
-      if (token !== repo.githubToken) {
-        repo.githubToken = token;
+    if (body.accessToken !== undefined) {
+      const token = body.accessToken?.trim() || null;
+      if (token !== repo.accessToken) {
+        repo.accessToken = token;
         // Another token may see different data.
-        repo.etag = null;
+        repo.releasesEtag = null;
         repo.advisoriesEtag = null;
       }
     }

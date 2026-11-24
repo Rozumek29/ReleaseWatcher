@@ -194,7 +194,7 @@ describe('HTTP API', () => {
       const linked = containers.addApp(container.id, {
         name,
         versionCommand: 'cat /opt/widget/version',
-        latestSource: 'github',
+        latestSource: 'repository',
         repositoryId: created.id,
         latestCommand: null,
         updateCommand: null,
@@ -309,13 +309,13 @@ describe('HTTP API', () => {
     const response = await inject({
       method: 'POST',
       url: '/api/repositories',
-      payload: { repository: 'other/private-app', githubToken: 'github_pat_other_owner_1234' },
+      payload: { repository: 'other/private-app', accessToken: 'github_pat_other_owner_1234' },
     });
     assert.equal(response.statusCode, 201);
     assert.equal(response.body.includes('github_pat_other_owner_1234'), false);
     const body = response.json();
-    assert.equal(body.hasOwnToken, true);
-    assert.equal(body.githubTokenMasked, 'gith…1234');
+    assert.equal(body.hasAccessToken, true);
+    assert.equal(body.accessTokenMasked, 'gith…1234');
     // The baseline check already used the repository's token.
     assert.equal(source.lastToken, 'github_pat_other_owner_1234');
 
@@ -325,13 +325,13 @@ describe('HTTP API', () => {
       url: `/api/repositories/${body.id}`,
       payload: { includePrereleases: false, isEnabled: true },
     });
-    assert.equal(kept.json().hasOwnToken, true);
+    assert.equal(kept.json().hasAccessToken, true);
     const removed = await inject({
       method: 'PUT',
       url: `/api/repositories/${body.id}`,
-      payload: { includePrereleases: false, isEnabled: true, githubToken: null },
+      payload: { includePrereleases: false, isEnabled: true, accessToken: null },
     });
-    assert.equal(removed.json().hasOwnToken, false);
+    assert.equal(removed.json().hasAccessToken, false);
     await inject({ method: 'POST', url: `/api/repositories/${body.id}/check` });
     assert.equal(source.lastToken, null);
   });
@@ -526,7 +526,7 @@ describe('HTTP API', () => {
       releases: true,
       vulnerabilities: true,
       appUpdates: true,
-      aptUpdates: true,
+      packageUpdates: true,
       updateSucceeded: false,
       updateFailed: false,
       dockerUpdates: true,
@@ -544,7 +544,7 @@ describe('HTTP API', () => {
         emailFrom: 'ReleaseWatcher <alerts@example.com>',
         emailTo: 'me@example.com, you@example.com',
         notificationDigest: true,
-        notifyAptUpdates: false,
+        notifyPackageUpdates: false,
       },
     });
     assert.equal(updated.statusCode, 200);
@@ -554,7 +554,7 @@ describe('HTTP API', () => {
     assert.equal(body.email.smtpPasswordSource, 'ui');
     assert.equal(body.email.to, 'me@example.com, you@example.com');
     assert.equal(body.notifications.digest, true);
-    assert.equal(body.notifications.aptUpdates, false);
+    assert.equal(body.notifications.packageUpdates, false);
     // Encrypted at rest.
     const stored = store.database.query<{ value: string }, []>("SELECT value FROM settings WHERE key = 'smtpPassword'").get();
     assert.ok(stored && !stored.value.includes('smtp-secret-value'));

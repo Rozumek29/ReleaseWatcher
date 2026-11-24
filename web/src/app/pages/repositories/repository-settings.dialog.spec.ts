@@ -34,8 +34,8 @@ const repo: WatchedRepository = {
   installedVersionError: null,
   installedVersions: [],
   updateAvailable: null,
-  hasOwnToken: false,
-  githubTokenMasked: null,
+  hasAccessToken: false,
+  accessTokenMasked: null,
   osvEcosystem: null,
   osvPackage: null,
   advisories: { total: 0, affecting: 0, highestSeverity: null, checkedAt: null, error: null },
@@ -145,7 +145,7 @@ describe('RepositorySettingsDialog', () => {
     expect(request.request.body.installedVersionUrl).toBe('https://vault.lan/api/version');
     expect(request.request.body.installedVersionField).toBeNull();
     expect(request.request.body.installedVersionHeaders).toEqual([]);
-    expect('githubToken' in request.request.body).toBe(false); // untouched token field = keep
+    expect('accessToken' in request.request.body).toBe(false); // untouched token field = keep
     request.flush({ ...repo, installedVersionUrl: 'https://vault.lan/api/version', installedVersion: '1.31.0', updateAvailable: true });
     await settle(fixture);
 
@@ -196,7 +196,7 @@ describe('RepositorySettingsDialog', () => {
     }).compileComponents();
     const http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(RepositorySettingsDialog);
-    fixture.componentRef.setInput('repository', { ...repo, hasOwnToken: true, githubTokenMasked: 'gith…1234' });
+    fixture.componentRef.setInput('repository', { ...repo, hasAccessToken: true, accessTokenMasked: 'gith…1234' });
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;
@@ -208,7 +208,7 @@ describe('RepositorySettingsDialog', () => {
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     const request = http.expectOne('/api/repositories/7');
-    expect(request.request.body.githubToken).toBeNull();
+    expect(request.request.body.accessToken).toBeNull();
     request.flush({ ...repo });
     await settle(fixture);
     http.verify();

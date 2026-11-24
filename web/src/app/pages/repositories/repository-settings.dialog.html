@@ -52,13 +52,13 @@
             type="password"
             name="token"
             [(ngModel)]="token"
-            [placeholder]="repo.hasOwnToken && !removeToken ? (repo.githubTokenMasked ?? 'saved') + ' – type to replace' : tokenPlaceholder(repo)"
+            [placeholder]="repo.hasAccessToken && !removeToken ? (repo.accessTokenMasked ?? 'saved') + ' – type to replace' : tokenPlaceholder(repo)"
             autocomplete="off"
             spellcheck="false"
           />
           <span class="hint">
             @if (repo.provider !== 'github') {
-              @if (repo.hasOwnToken && !removeToken) {
+              @if (repo.hasAccessToken && !removeToken) {
                 This repository uses its own token.
                 <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
                 to read it without one.
@@ -69,7 +69,7 @@
                 ({{ repo.provider === 'gitlab' ? 'User settings → Access tokens, scope read_api' : 'Settings → Applications → Access tokens, repository: Read' }}).
                 The global GitHub token is never sent to other hosts.
               }
-            } @else if (repo.hasOwnToken && !removeToken) {
+            } @else if (repo.hasAccessToken && !removeToken) {
               This repository uses its own token.
               <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
               to use the global token again.

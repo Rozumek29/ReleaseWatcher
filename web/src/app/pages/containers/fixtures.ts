@@ -41,7 +41,7 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
     releases: true,
     vulnerabilities: true,
     appUpdates: true,
-    aptUpdates: true,
+    packageUpdates: true,
     updateSucceeded: false,
     updateFailed: false,
     dockerUpdates: true,
@@ -62,7 +62,7 @@ export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities
   lxc: {
     backup: 'vzdump',
     power: true,
-    aptOptional: true,
+    packagesOptional: true,
     updateResources: true,
     apps: true,
     homeAssistant: false,
@@ -72,7 +72,7 @@ export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities
   vm: {
     backup: 'vzdump',
     power: true,
-    aptOptional: true,
+    packagesOptional: true,
     updateResources: false,
     apps: true,
     homeAssistant: true,
@@ -82,7 +82,7 @@ export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities
   node: {
     backup: null,
     power: false,
-    aptOptional: false,
+    packagesOptional: false,
     updateResources: false,
     apps: false,
     homeAssistant: false,
@@ -92,7 +92,7 @@ export const CAPABILITIES: Readonly<Record<Container['kind'], TargetCapabilities
   server: {
     backup: null,
     power: false,
-    aptOptional: true,
+    packagesOptional: true,
     updateResources: false,
     apps: true,
     homeAssistant: false,
@@ -111,7 +111,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   vmid: 101,
   name: 'vaultwarden',
   isEnabled: true,
-  aptEnabled: true,
+  packagesEnabled: true,
   backupBeforeUpdate: null,
   startWhenStopped: false,
   effectiveBackupBeforeUpdate: true,
@@ -122,7 +122,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
   resourcesRaised: false,
   nextCheckAt: '2030-01-01T06:00:00Z',
   status: 'running',
-  aptUpgradable: [
+  packageUpdates: [
     { name: 'curl', currentVersion: '8.0', newVersion: '8.1' },
     { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
   ],
@@ -142,7 +142,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
       id: 7,
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
-      latestSource: 'github',
+      latestSource: 'repository',
       repositoryId: 3,
       repositoryFullName: 'dani-garcia/vaultwarden',
       iconUrls: [],

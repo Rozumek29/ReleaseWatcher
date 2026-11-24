@@ -183,7 +183,7 @@ export class ReleaseChecker {
     const githubKey = sourceKey('github');
     if (enabled.github && repo.provider === 'github' && this.source.getSecurityAdvisories) {
       try {
-        const fetched = await this.source.getSecurityAdvisories(repo, repo.advisoriesEtag, repo.githubToken);
+        const fetched = await this.source.getSecurityAdvisories(repo, repo.advisoriesEtag, repo.accessToken);
         if (!fetched.notModified) {
           notified += await this.storeAdvisories(repo, 'github', githubKey, fetched.advisories, notified);
           repo.advisoriesEtag = fetched.etag;
@@ -293,7 +293,7 @@ export class ReleaseChecker {
     // The installed version and the releases are read at the same time; both are needed before comparing them.
     const [, releases] = await Promise.all([
       this.refreshInstalledVersion(repo),
-      settle(this.source.getRecentReleases(repo, repo.etag, repo.githubToken)),
+      settle(this.source.getRecentReleases(repo, repo.releasesEtag, repo.accessToken)),
     ]);
     try {
       if (!releases.ok) {
@@ -330,7 +330,7 @@ export class ReleaseChecker {
           repo.lastSeenTag = newest.tag;
           repo.lastSeenPublishedAt = newest.publishedAt;
         }
-        repo.etag = fetched.etag;
+        repo.releasesEtag = fetched.etag;
       }
 
       repo.lastCheckedAt = this.now().toISOString();

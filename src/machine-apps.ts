@@ -108,8 +108,8 @@ export class MachineApps {
   link(ref: MachineAppRef, repositoryId: number): void {
     if (ref.kind === 'app') {
       const app = this.deps.containers.findApp(ref.id);
-      if (app && (app.latestSource !== 'github' || app.repositoryId !== repositoryId)) {
-        app.latestSource = 'github';
+      if (app && (app.latestSource !== 'repository' || app.repositoryId !== repositoryId)) {
+        app.latestSource = 'repository';
         app.repositoryId = repositoryId;
         // The latest version came from elsewhere: the next check reads it from the repository.
         app.latestVersion = null;

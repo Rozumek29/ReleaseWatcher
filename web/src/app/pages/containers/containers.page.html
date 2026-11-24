@@ -473,22 +473,22 @@
           }
 
           <div class="items">
-            @if (c.aptEnabled) {
+            @if (c.packagesEnabled) {
               <div class="item">
                 <div class="item-main">
                   <span class="item-name"><app-icon name="download" [size]="14" /> {{ packagesLabel(c) }}</span>
-                  @if (c.aptUpgradable.length > 0) {
+                  @if (c.packageUpdates.length > 0) {
                     <button type="button" class="link-btn" (click)="toggleExpanded(c.id)" [attr.aria-expanded]="expanded().has(c.id)">
-                      {{ c.aptUpgradable.length }} upgradable package(s)
+                      {{ c.packageUpdates.length }} upgradable package(s)
                     </button>
                   } @else {
                     <span class="muted">{{ c.lastCheckedAt ? 'no pending packages' : 'not checked yet' }}</span>
                   }
                 </div>
-                @if (c.aptUpgradable.length > 0) {
+                @if (c.packageUpdates.length > 0) {
                   <div class="item-actions">
-                    @if (confirming() === 'apt-' + c.id) {
-                      <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
+                    @if (confirming() === 'packages-' + c.id) {
+                      <span class="confirm-text warn">Upgrade {{ c.packageUpdates.length }} package(s)?</span>
                       @if (!c.capabilities.backup) {
                         <span class="muted small mono">{{ upgradeCommand(c) }}</span><span class="muted small">, no backup</span>
                       } @else {
@@ -502,17 +502,17 @@
                       }
                     </label>
                       }
-                    <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
+                    <button type="button" class="btn btn-sm" (click)="upgradePackages(c)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : upgradeCommand(c)">
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('packages-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : upgradeCommand(c)">
                         <app-icon name="arrowUp" [size]="14" /> Upgrade
                       </button>
                     }
                   </div>
                 }
-                @if (expanded().has(c.id) && c.aptUpgradable.length > 0) {
-                  <app-apt-packages [packages]="c.aptUpgradable" [listId]="c.id" />
+                @if (expanded().has(c.id) && c.packageUpdates.length > 0) {
+                  <app-system-packages [packages]="c.packageUpdates" [listId]="c.id" />
                 }
               </div>
             }
@@ -556,7 +556,7 @@
                   </div>
                 }
                 @if (expandedStores().has(key) && s.packages.length > 0) {
-                  <app-apt-packages [packages]="s.packages" [listId]="key" />
+                  <app-system-packages [packages]="s.packages" [listId]="key" />
                 }
               </div>
             }

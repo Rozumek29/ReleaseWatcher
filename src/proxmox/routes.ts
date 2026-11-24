@@ -76,7 +76,7 @@ const addContainerSchema = body({
 const updateContainerSchema = body({
   name: z.string().max(100),
   isEnabled: z.boolean(),
-  aptEnabled: z.boolean(),
+  packagesEnabled: z.boolean(),
   backupBeforeUpdate: z.boolean().nullish(),
   startWhenStopped: z.boolean().optional(),
   checkCron: z.string().max(200).nullish(),
@@ -256,7 +256,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       vmid: c.vmid,
       name: c.name,
       isEnabled: c.isEnabled,
-      aptEnabled: c.aptEnabled,
+      packagesEnabled: c.packagesEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
       effectiveBackupBeforeUpdate:
@@ -271,7 +271,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       resourcesRaised: c.resourcesToRestore !== null,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
-      aptUpgradable: c.aptUpgradable,
+      packageUpdates: c.packageUpdates,
       packageManager: c.packageManager,
       /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
       appStores: APP_STORES.flatMap((store) => {
@@ -295,7 +295,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       apps: appDtos,
       /** System packages count as one pending update, so do Flatpak and Snap; every Home Assistant update as one. */
       updatesAvailable:
-        (c.aptUpgradable.length > 0 ? 1 : 0) +
+        (c.packageUpdates.length > 0 ? 1 : 0) +
         APP_STORES.filter((store) => (c.appStores[store]?.length ?? 0) > 0).length +
         appDtos.filter((a) => a.updateAvailable).length +
         (c.homeAssistant?.updates.length ?? 0),
@@ -331,8 +331,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       return validationProblem('latestSource', `Use one of: ${LATEST_SOURCES.join(', ')}.`);
     }
     const latestSource = body.latestSource as LatestSource;
-    const repositoryId = latestSource === 'github' ? (body.repositoryId ?? null) : null;
-    if (latestSource === 'github' && (repositoryId === null || !repositories.get(repositoryId))) {
+    const repositoryId = latestSource === 'repository' ? (body.repositoryId ?? null) : null;
+    if (latestSource === 'repository' && (repositoryId === null || !repositories.get(repositoryId))) {
       return validationProblem('repositoryId', 'Choose a watched GitHub repository.');
     }
     const latestCommand = latestSource === 'command' ? blankToNull(body.latestCommand) : null;
@@ -613,7 +613,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         Object.assign(container, {
           name,
           isEnabled: body.isEnabled,
-          aptEnabled: !can.aptOptional || body.aptEnabled,
+          packagesEnabled: !can.packagesOptional || body.packagesEnabled,
           backupBeforeUpdate:
             can.backup === null ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
           startWhenStopped: can.power && (body.startWhenStopped ?? container.startWhenStopped),
@@ -624,8 +624,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           homeAssistantToken: can.homeAssistant ? homeAssistantToken : null,
           homeAssistantInstall: can.homeAssistant && (body.homeAssistantInstall ?? container.homeAssistantInstall),
         });
-        if (!container.aptEnabled) {
-          container.aptUpgradable = [];
+        if (!container.packagesEnabled) {
+          container.packageUpdates = [];
         }
         if (body.dockerEnabled !== undefined && body.dockerEnabled !== container.dockerEnabled) {
           container.dockerEnabled = body.dockerEnabled;
@@ -654,19 +654,19 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return container ? accepted(service.startCheck(container, 'manual')) : problem(404, 'Container not found.');
         }),
     },
-    '/api/containers/:id/apt-upgrade': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/apt-upgrade'>) =>
+    '/api/containers/:id/packages-upgrade': {
+      POST: (req: Bun.BunRequest<'/api/containers/:id/packages-upgrade'>) =>
         guard(async () => {
           const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!container.aptEnabled) {
+          if (!container.packagesEnabled) {
             return problem(409, 'System packages are disabled for this container.');
           }
           const backup = resolveBackup(container, options.backup);
-          return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
+          return backup instanceof Response ? backup : accepted(service.startPackagesUpgrade(container, backup));
         }),
     },
     // Updates every Flatpak / Snap application of a machine (`flatpak update` / `snap refresh`).
@@ -941,7 +941,7 @@ export function containerStatus(containers: ContainerStore) {
     total: counts.total,
     enabled: counts.enabled,
     withErrors: counts.withErrors,
-    aptPending: counts.aptPending,
+    packagesPending: counts.packagesPending,
     /** Pending Flatpak / Snap updates, one per store and machine. */
     appStorePending: counts.appStorePending,
     appUpdatesAvailable: containers.listAppVersions().filter((a) => appUpdateAvailable(a)).length,

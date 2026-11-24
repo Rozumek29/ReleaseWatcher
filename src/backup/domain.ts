@@ -8,7 +8,7 @@ import type { SettingKey } from '../settings.ts';
 /** Marks a JSON file as a ReleaseWatcher backup. */
 export const BACKUP_FORMAT = 'releasewatcher-backup';
 /** Version of the file layout; bump it (and keep reading older versions) when the layout changes incompatibly. */
-export const BACKUP_SCHEMA_VERSION = 1;
+export const BACKUP_SCHEMA_VERSION = 2;
 
 /** How an import treats what is already configured. */
 export const IMPORT_MODES = ['merge', 'replace'] as const;
@@ -38,7 +38,7 @@ export interface BackupRepository {
   osvEcosystem: string | null;
   osvPackage: string | null;
   /** The repository has its own token (not exported). */
-  hasGithubToken: boolean;
+  hasAccessToken: boolean;
 }
 
 export interface BackupApp {
@@ -63,7 +63,7 @@ export interface BackupTarget {
   vmid: number;
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   backupBeforeUpdate: boolean | null;
   startWhenStopped: boolean;
   checkCron: string | null;
@@ -140,7 +140,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   'notifyReleases',
   'notifyVulnerabilities',
   'notifyAppUpdates',
-  'notifyAptUpdates',
+  'notifyPackageUpdates',
   'notifyUpdateSucceeded',
   'notifyUpdateFailed',
   'notifyDockerUpdates',

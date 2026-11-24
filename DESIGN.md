@@ -64,8 +64,8 @@ This file does not repeat those; it describes the **shape** of the system, the *
   Servers without systemd (e.g. Alpine with OpenRC) get the same behaviour from a `setsid` supervisor (pid file,
   process-group kill at the timeout), so scripts that run on a server must stay POSIX `sh` and BusyBox compatible.
 - System packages are handled by whichever package manager a check finds (`PACKAGES_CHECK_SCRIPT` /
-  `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); the API keeps the historical `apt*` names
-  (`aptEnabled`, `aptUpgradable`, `apt-upgrade`) and adds `packageManager`. Flatpak and Snap are separate
+  `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); names stay
+  manager-neutral (`packagesEnabled`, `packageUpdates`, run `packages-upgrade`) and `packageManager` says which one. Flatpak and Snap are separate
   *application stores* (`APP_STORES`, `appStores` on the target, runs `flatpak-update` / `snap-update`), checked only
   where they are installed and work.
 - State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
@@ -89,7 +89,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 
-- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/containers/:id/apt-upgrade`.
+- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/containers/:id/packages-upgrade`.
   Actions that do something (check, test, update) are `POST` to a verb sub-path.
 - **JSON in camelCase**, dates as ISO 8601 strings, missing values as `null` (not omitted) in responses.
 - **Status codes:** `200` read/update, `201` create, `202` background run started, `204` delete,
@@ -354,6 +354,6 @@ These exist today; do not copy them into new code:
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own
   `routes.ts` like `proxmox/routes.ts`, and repositories can be moved out the same way.
 - Unsafe requests (`POST`/`PUT`/`DELETE`) have no CSRF protection: with Basic auth enabled the browser re-sends
-  cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/apt-upgrade` accepts an empty
+  cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/packages-upgrade` accepts an empty
   body. Planned fix: reject unsafe requests whose `Sec-Fetch-Site`/`Origin` is cross-site. New endpoints must not
   rely on “nobody can reach it” as protection.

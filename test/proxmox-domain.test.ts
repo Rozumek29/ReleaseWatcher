@@ -74,7 +74,7 @@ describe('target capabilities', () => {
     assert.deepEqual(capabilities('lxc'), {
       backup: 'vzdump',
       power: true,
-      aptOptional: true,
+      packagesOptional: true,
       updateResources: true,
       apps: true,
       homeAssistant: false,
@@ -86,7 +86,7 @@ describe('target capabilities', () => {
     assert.deepEqual(capabilities('node'), {
       backup: null,
       power: false,
-      aptOptional: false,
+      packagesOptional: false,
       updateResources: false,
       apps: false,
       homeAssistant: false,
@@ -96,7 +96,7 @@ describe('target capabilities', () => {
     assert.deepEqual(capabilities('server'), {
       backup: null,
       power: false,
-      aptOptional: true,
+      packagesOptional: true,
       updateResources: false,
       apps: true,
       homeAssistant: false,
@@ -510,9 +510,9 @@ describe('proxmox domain', () => {
 
   it('lists the updates "update all" runs: system packages, Flatpak and Snap, then applications with an update command', () => {
     const container = {
-      id: 1, kind: 'lxc', vmid: 101, name: 'ct', isEnabled: true, aptEnabled: true, backupBeforeUpdate: null,
+      id: 1, kind: 'lxc', vmid: 101, name: 'ct', isEnabled: true, packagesEnabled: true, backupBeforeUpdate: null,
       startWhenStopped: false, checkCron: null, updateCores: null, updateMemoryMb: null, resourcesToRestore: null,
-      status: 'running', aptUpgradable: [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }],
+      status: 'running', packageUpdates: [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }],
       lastCheckedAt: null, lastError: null, notifiedSignature: null, appStores: {},
     } as unknown as Container;
     const app = (id: number, extra: Partial<ContainerApp>) =>
@@ -523,8 +523,8 @@ describe('proxmox domain', () => {
       app(3, { latestVersion: '1.0.0' }),
       app(4, { installedVersion: null }),
     ];
-    assert.deepEqual(pendingUpdates(container, apps), [{ kind: 'apt-upgrade' }, { kind: 'app-update', appId: 1 }]);
-    assert.deepEqual(pendingUpdates({ ...container, aptEnabled: false }, []), []);
+    assert.deepEqual(pendingUpdates(container, apps), [{ kind: 'packages-upgrade' }, { kind: 'app-update', appId: 1 }]);
+    assert.deepEqual(pendingUpdates({ ...container, packagesEnabled: false }, []), []);
     assert.deepEqual(pendingUpdates({ ...container, kind: 'node' }, apps), []);
     assert.deepEqual(pendingUpdates({ ...container, isEnabled: false }, apps), []);
     assert.deepEqual(pendingUpdates({ ...container, status: 'stopped' }, apps), []);
@@ -532,12 +532,12 @@ describe('proxmox domain', () => {
 
     const pkg = { name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' };
     assert.deepEqual(pendingUpdates({ ...container, appStores: { flatpak: [pkg], snap: [] } }, apps), [
-      { kind: 'apt-upgrade' },
+      { kind: 'packages-upgrade' },
       { kind: 'flatpak-update', store: 'flatpak' },
       { kind: 'app-update', appId: 1 },
     ]);
     // Flatpak and Snap do not depend on the system packages switch.
-    assert.deepEqual(pendingUpdates({ ...container, aptEnabled: false, appStores: { snap: [pkg] } }, []), [{ kind: 'snap-update', store: 'snap' }]);
+    assert.deepEqual(pendingUpdates({ ...container, packagesEnabled: false, appStores: { snap: [pkg] } }, []), [{ kind: 'snap-update', store: 'snap' }]);
   });
 
   it('turns the restart check output into readable reasons', () => {

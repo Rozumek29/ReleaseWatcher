@@ -24,7 +24,7 @@ export interface TargetCapabilities {
   /** The target can be started and shut down (status checks, "start when stopped"). */
   power: boolean;
   /** The system packages can be switched off (false = the entry exists for them, so they are always checked). */
-  aptOptional: boolean;
+  packagesOptional: boolean;
   /** CPU cores and memory can be raised for updates (`pct set`). */
   updateResources: boolean;
   /** Applications with version and update commands can be added (and detected). */
@@ -44,7 +44,7 @@ export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities
   lxc: {
     backup: 'vzdump',
     power: true,
-    aptOptional: true,
+    packagesOptional: true,
     updateResources: true,
     apps: true,
     homeAssistant: false,
@@ -54,7 +54,7 @@ export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities
   vm: {
     backup: 'vzdump',
     power: true,
-    aptOptional: true,
+    packagesOptional: true,
     // A virtual machine would need CPU/memory hotplug.
     updateResources: false,
     apps: true,
@@ -66,7 +66,7 @@ export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities
     // vzdump backs up guests only.
     backup: null,
     power: false,
-    aptOptional: false,
+    packagesOptional: false,
     updateResources: false,
     apps: false,
     homeAssistant: false,
@@ -76,7 +76,7 @@ export const TARGET_CAPABILITIES: Readonly<Record<TargetKind, TargetCapabilities
   server: {
     backup: null,
     power: false,
-    aptOptional: true,
+    packagesOptional: true,
     updateResources: false,
     apps: true,
     homeAssistant: false,
@@ -110,7 +110,7 @@ export interface Container {
   /** Disabled containers are skipped by scheduled checks. */
   isEnabled: boolean;
   /** Check (and allow upgrading) the system packages (apt, dnf, zypper, apk, pacman …). */
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   /** Package manager found by the last package check; null = not checked yet (or none found). */
   packageManager: PackageManager | null;
   /** Back up (vzdump) before updates by default; null = use the global setting. */
@@ -127,7 +127,7 @@ export interface Container {
   resourcesToRestore: ResourceChange | null;
   /** Last status reported by `pct status` (running, stopped, …). */
   status: string | null;
-  aptUpgradable: AptPackage[];
+  packageUpdates: PackageUpdate[];
   /** Why the container (or host) should be restarted, from the last check; empty = no restart needed. */
   restartReasons: string[];
   /** Operating system read by the last successful check; null = not read yet. */
@@ -155,13 +155,13 @@ export interface Container {
   createdAt: string;
 }
 
-export interface AptPackage {
+export interface PackageUpdate {
   name: string;
   currentVersion: string | null;
   newVersion: string;
 }
 
-export const LATEST_SOURCES = ['none', 'github', 'command'] as const;
+export const LATEST_SOURCES = ['none', 'repository', 'command'] as const;
 /** Where the newest available version of an application comes from. */
 export type LatestSource = (typeof LATEST_SOURCES)[number];
 
@@ -173,7 +173,7 @@ export interface ContainerApp {
   /** Prints the installed version, e.g. `cat /opt/vaultwarden_version.txt`. */
   versionCommand: string | null;
   latestSource: LatestSource;
-  /** Watched GitHub repository whose newest release is the latest version (latestSource = github). */
+  /** Watched repository whose newest release is the latest version (latestSource = repository). */
   repositoryId: number | null;
   /** Prints the newest available version (latestSource = command). Runs inside the container. */
   latestCommand: string | null;
@@ -189,7 +189,7 @@ export interface ContainerApp {
   createdAt: string;
 }
 
-export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart', 'home-assistant-update', 'flatpak-update', 'snap-update'] as const;
+export const RUN_KINDS = ['check', 'packages-upgrade', 'app-update', 'restart', 'home-assistant-update', 'flatpak-update', 'snap-update'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 export type RunTrigger = 'manual' | 'schedule';
@@ -259,7 +259,7 @@ export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 
 
 /** One update of a container started by "update all". */
 export type PendingUpdate =
-  | { kind: 'apt-upgrade' }
+  | { kind: 'packages-upgrade' }
   | { kind: 'flatpak-update' | 'snap-update'; store: AppStore }
   | { kind: 'app-update'; appId: number }
   | { kind: 'home-assistant-update' };
@@ -286,8 +286,8 @@ export function pendingUpdates(container: Container, apps: readonly ContainerApp
     return [];
   }
   const updates: PendingUpdate[] = [];
-  if (container.aptEnabled && container.aptUpgradable.length > 0) {
-    updates.push({ kind: 'apt-upgrade' });
+  if (container.packagesEnabled && container.packageUpdates.length > 0) {
+    updates.push({ kind: 'packages-upgrade' });
   }
   for (const store of APP_STORES) {
     if ((container.appStores[store]?.length ?? 0) > 0) {
@@ -1072,8 +1072,8 @@ fi`;
 const APT_LINE = /^([^\s/]+)\/\S+\s+(\S+)\s+\S+(?:\s+\[upgradable from:\s*([^\]\s]+)\])?/;
 
 /** Parses `apt list --upgradable` (lines like `curl/stable 8.1 amd64 [upgradable from: 8.0]`). */
-export function parseAptUpgradable(list: string): AptPackage[] {
-  const packages: AptPackage[] = [];
+export function parseAptUpgradable(list: string): PackageUpdate[] {
+  const packages: PackageUpdate[] = [];
   for (const line of list.split('\n')) {
     const match = line.trim().match(APT_LINE);
     if (match) {
@@ -1090,7 +1090,7 @@ const RPM_LIST_END = /^(Obsoleting packages|Security:)/i;
  * Parses `dnf check-update` / `yum check-update` (`name.arch  version  repository`; yum wraps long names onto their
  * own line) with the installed versions printed by `rpm -q` after the `installed` marker (`name.arch version`).
  */
-export function parseRpmUpdates(list: string, installed: string): AptPackage[] {
+export function parseRpmUpdates(list: string, installed: string): PackageUpdate[] {
   const current = new Map<string, string>();
   for (const line of installed.split('\n')) {
     const [nameArch, version, ...rest] = line.trim().split(/\s+/);
@@ -1098,7 +1098,7 @@ export function parseRpmUpdates(list: string, installed: string): AptPackage[] {
       current.set(nameArch, version);
     }
   }
-  const packages: AptPackage[] = [];
+  const packages: PackageUpdate[] = [];
   const lines = list.split('\n').map((l) => l.trim());
   for (let i = 0; i < lines.length; i++) {
     if (RPM_LIST_END.test(lines[i]!)) {
@@ -1126,7 +1126,7 @@ export function parseRpmUpdates(list: string, installed: string): AptPackage[] {
  * Parses the table of `zypper list-updates` (`S | Repository | Name | Current Version | Available Version | Arch`);
  * the columns are found by their (English, `LC_ALL=C`) headings.
  */
-export function parseZypperUpdates(list: string): AptPackage[] {
+export function parseZypperUpdates(list: string): PackageUpdate[] {
   const rows = list.split('\n').map((line) => line.split('|').map((cell) => cell.trim()));
   const header = rows.find((cells) => cells.includes('Name') && cells.includes('Available Version'));
   if (!header) {
@@ -1134,7 +1134,7 @@ export function parseZypperUpdates(list: string): AptPackage[] {
   }
   const column = (name: string) => header.indexOf(name);
   const [name, current, available] = [column('Name'), column('Current Version'), column('Available Version')];
-  const packages: AptPackage[] = [];
+  const packages: PackageUpdate[] = [];
   for (const cells of rows) {
     if (cells === header || cells.length !== header.length) {
       continue;
@@ -1151,8 +1151,8 @@ export function parseZypperUpdates(list: string): AptPackage[] {
 const APK_LINE = /^(\S+?)-(\d[^-\s]*-r\d+)\s+<\s+(\S+)/;
 
 /** Parses `apk version -l '<'` (lines like `busybox-1.36.1-r15   < 1.36.1-r16`). */
-export function parseApkUpdates(list: string): AptPackage[] {
-  const packages: AptPackage[] = [];
+export function parseApkUpdates(list: string): PackageUpdate[] {
+  const packages: PackageUpdate[] = [];
   for (const line of list.split('\n')) {
     const match = line.trim().match(APK_LINE);
     if (match) {
@@ -1165,8 +1165,8 @@ export function parseApkUpdates(list: string): AptPackage[] {
 const PACMAN_LINE = /^(\S+)\s+(\S+)\s+->\s+(\S+)/;
 
 /** Parses `pacman -Qu` (lines like `linux 6.11.1.arch1-1 -> 6.11.2.arch1-1`). */
-export function parsePacmanUpdates(list: string): AptPackage[] {
-  const packages: AptPackage[] = [];
+export function parsePacmanUpdates(list: string): PackageUpdate[] {
+  const packages: PackageUpdate[] = [];
   for (const line of list.split('\n')) {
     const match = line.trim().match(PACMAN_LINE);
     if (match) {
@@ -1179,7 +1179,7 @@ export function parsePacmanUpdates(list: string): AptPackage[] {
 /** Result of {@link PACKAGES_CHECK_SCRIPT}. */
 export interface PackageCheck {
   manager: PackageManager;
-  packages: AptPackage[];
+  packages: PackageUpdate[];
 }
 
 /**
@@ -1217,7 +1217,7 @@ export const isAppStore = (value: unknown): value is AppStore => (APP_STORES as 
 export const APP_STORE_LABELS: Readonly<Record<AppStore, string>> = { flatpak: 'Flatpak', snap: 'Snap' };
 
 /** Pending updates per application store installed on a target; a store that is missing is not installed there. */
-export type AppStoreUpdates = Partial<Record<AppStore, AptPackage[]>>;
+export type AppStoreUpdates = Partial<Record<AppStore, PackageUpdate[]>>;
 
 /** Run kind updating every application of a store. */
 export const appStoreRunKind = (store: AppStore): 'flatpak-update' | 'snap-update' => `${store}-update`;
@@ -1265,7 +1265,7 @@ function withBuild(pkg: { current: string | null; currentBuild: string | null; n
  * `flatpak list --columns=ref,version,active` (tab-separated). Runtimes are named with their branch
  * (`org.gnome.Platform//51`); without a version (most runtimes) the commit stands for it.
  */
-export function parseFlatpakUpdates(list: string, installed: string): AptPackage[] {
+export function parseFlatpakUpdates(list: string, installed: string): PackageUpdate[] {
   const current = new Map<string, { version: string | null; commit: string | null }>();
   for (const line of installed.split('\n')) {
     const [ref, version, commit] = line.split('\t').map((c) => c.trim());
@@ -1273,7 +1273,7 @@ export function parseFlatpakUpdates(list: string, installed: string): AptPackage
       current.set(ref, { version: version || null, commit: commit || null });
     }
   }
-  const packages: AptPackage[] = [];
+  const packages: PackageUpdate[] = [];
   for (const line of list.split('\n')) {
     const [application, version, branch, commit, ref] = line.split('\t').map((c) => c.trim());
     if (!application || !ref || !commit || !ref.includes('/')) {
@@ -1296,7 +1296,7 @@ export function parseFlatpakUpdates(list: string, installed: string): AptPackage
 }
 
 /** Parses `snap refresh --list` (`Name Version Rev Size Publisher Notes`) with the installed versions from `snap list`. */
-export function parseSnapUpdates(list: string, installed: string): AptPackage[] {
+export function parseSnapUpdates(list: string, installed: string): PackageUpdate[] {
   const rows = (text: string) =>
     text
       .split('\n')
@@ -1408,11 +1408,11 @@ export class OutputCleaner {
 
 /** Fingerprint of everything pending in a container; null when nothing is pending. */
 export function pendingSignature(
-  container: Pick<Container, 'aptUpgradable' | 'homeAssistant' | 'appStores'>,
+  container: Pick<Container, 'packageUpdates' | 'homeAssistant' | 'appStores'>,
   apps: readonly ContainerApp[],
 ): string | null {
   const parts = [
-    ...container.aptUpgradable.map((p) => `apt:${p.name}=${p.newVersion}`),
+    ...container.packageUpdates.map((p) => `pkg:${p.name}=${p.newVersion}`),
     ...APP_STORES.flatMap((store) => (container.appStores[store] ?? []).map((p) => `${store}:${p.name}=${p.newVersion}`)),
     ...(container.homeAssistant?.updates ?? []).map((u) => `ha:${u.id}=${u.latestVersion}`),
     ...apps.filter((a) => appUpdateAvailable(a)).map((a) => `app:${a.id}=${a.latestVersion}`),

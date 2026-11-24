@@ -278,7 +278,7 @@ export class RepositorySettingsDialog {
               ? { installedVersionApp: null }
               : {}),
           // The token is never sent back to the UI: empty = keep, "Remove" = null.
-          ...(this.token.trim() ? { githubToken: this.token.trim() } : this.removeToken ? { githubToken: null } : {}),
+          ...(this.token.trim() ? { accessToken: this.token.trim() } : this.removeToken ? { accessToken: null } : {}),
           // Both or neither: an ecosystem without a package removes the OSV.dev package.
           osvEcosystem: hasOsv ? this.osvEcosystem : null,
           osvPackage: hasOsv ? this.osvPackage.trim() : null,

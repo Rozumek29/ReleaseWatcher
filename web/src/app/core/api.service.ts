@@ -354,8 +354,8 @@ export class ApiService {
   }
 
   /** `backup` decides about a backup (vzdump) before this update. */
-  upgradeApt(id: number, backup: boolean): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/apt-upgrade`, { backup });
+  upgradePackages(id: number, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/packages-upgrade`, { backup });
   }
 
   /**

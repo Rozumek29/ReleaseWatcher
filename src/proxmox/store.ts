@@ -3,7 +3,7 @@ import { parseJson, parseStringArray } from '../json.ts';
 import type { SecretBox } from '../secret-box.ts';
 import type { HomeAssistantState } from './home-assistant.ts';
 import {
-  type AptPackage,
+  type PackageUpdate,
   type Container,
   type ContainerApp,
   DEFAULT_RUN_HISTORY,
@@ -31,7 +31,7 @@ interface ContainerRow {
   vmid: number;
   name: string;
   is_enabled: number;
-  apt_enabled: number;
+  packages_enabled: number;
   backup_before_update: number | null;
   start_when_stopped: number;
   check_cron: string | null;
@@ -39,7 +39,7 @@ interface ContainerRow {
   update_memory_mb: number | null;
   resources_to_restore: string | null;
   status: string | null;
-  apt_upgradable: string | null;
+  package_updates: string | null;
   package_manager: string | null;
   app_stores: string | null;
   restart_reasons: string | null;
@@ -89,9 +89,9 @@ interface RunRow {
   output: string | Uint8Array;
 }
 
-function parsePackages(json: string | null): AptPackage[] {
+function parsePackages(json: string | null): PackageUpdate[] {
   const parsed = parseJson<unknown>(json, null);
-  return Array.isArray(parsed) ? parsed.filter((p): p is AptPackage => typeof p?.name === 'string') : [];
+  return Array.isArray(parsed) ? parsed.filter((p): p is PackageUpdate => typeof p?.name === 'string') : [];
 }
 
 function parseAppStores(json: string | null): AppStoreUpdates {
@@ -100,7 +100,7 @@ function parseAppStores(json: string | null): AppStoreUpdates {
   for (const store of APP_STORES) {
     const packages = parsed?.[store];
     if (Array.isArray(packages)) {
-      stores[store] = packages.filter((p): p is AptPackage => typeof p?.name === 'string');
+      stores[store] = packages.filter((p): p is PackageUpdate => typeof p?.name === 'string');
     }
   }
   return stores;
@@ -113,7 +113,7 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   vmid: r.vmid,
   name: r.name,
   isEnabled: r.is_enabled === 1,
-  aptEnabled: r.apt_enabled === 1,
+  packagesEnabled: r.packages_enabled === 1,
   backupBeforeUpdate: r.backup_before_update === null ? null : r.backup_before_update === 1,
   startWhenStopped: r.start_when_stopped === 1,
   checkCron: r.check_cron,
@@ -121,7 +121,7 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   updateMemoryMb: r.update_memory_mb,
   resourcesToRestore: parseJson<ResourceChange | null>(r.resources_to_restore, null),
   status: r.status,
-  aptUpgradable: parsePackages(r.apt_upgradable),
+  packageUpdates: parsePackages(r.package_updates),
   packageManager: isPackageManager(r.package_manager) ? r.package_manager : null,
   appStores: parseAppStores(r.app_stores),
   restartReasons: parseStringArray(r.restart_reasons),
@@ -330,9 +330,9 @@ export class ContainerStore {
     this.db
       .query(
         `UPDATE containers SET
-           name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
+           name = ?, is_enabled = ?, packages_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
-           apt_upgradable = ?, package_manager = ?, app_stores = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
+           package_updates = ?, package_manager = ?, app_stores = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
            home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?,
            docker_enabled = ?, docker_engine = ?, docker_error = ?
          WHERE id = ?`,
@@ -340,14 +340,14 @@ export class ContainerStore {
       .run(
         c.name,
         c.isEnabled ? 1 : 0,
-        c.aptEnabled ? 1 : 0,
+        c.packagesEnabled ? 1 : 0,
         c.backupBeforeUpdate === null ? null : c.backupBeforeUpdate ? 1 : 0,
         c.startWhenStopped ? 1 : 0,
         c.checkCron,
         c.updateCores,
         c.updateMemoryMb,
         c.status,
-        c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
+        c.packageUpdates.length > 0 ? JSON.stringify(c.packageUpdates) : null,
         c.packageManager,
         Object.keys(c.appStores).length > 0 ? JSON.stringify(c.appStores) : null,
         c.restartReasons.length > 0 ? JSON.stringify(c.restartReasons) : null,
@@ -415,7 +415,7 @@ export class ContainerStore {
     const sql = `SELECT DISTINCT c.id FROM containers c
         JOIN container_apps a ON a.container_id = c.id
         JOIN watched_repositories r ON r.id = a.repository_id
-       WHERE c.is_enabled = 1 AND a.latest_source = 'github' AND r.last_seen_tag IS NOT NULL
+       WHERE c.is_enabled = 1 AND a.latest_source = 'repository' AND r.last_seen_tag IS NOT NULL
          AND a.latest_version IS NOT r.last_seen_tag`;
     return repositoryId === undefined
       ? this.db.query<{ id: number }, []>(`${sql} ORDER BY c.vmid`).all().map((r) => r.id)
@@ -426,13 +426,13 @@ export class ContainerStore {
   }
 
   /** Counts for the status summary, computed by SQLite (no rows are read, no secrets decrypted). */
-  statusCounts(): { total: number; enabled: number; withErrors: number; aptPending: number; appStorePending: number; homeAssistantUpdates: number } {
+  statusCounts(): { total: number; enabled: number; withErrors: number; packagesPending: number; appStorePending: number; homeAssistantUpdates: number } {
     return this.db
-      .query<{ total: number; enabled: number; withErrors: number; aptPending: number; appStorePending: number; homeAssistantUpdates: number }, []>(
+      .query<{ total: number; enabled: number; withErrors: number; packagesPending: number; appStorePending: number; homeAssistantUpdates: number }, []>(
         `SELECT count(*) AS total,
                 coalesce(sum(is_enabled = 1), 0) AS enabled,
                 coalesce(sum(last_error IS NOT NULL AND last_error <> ''), 0) AS withErrors,
-                coalesce(sum(CASE WHEN json_valid(apt_upgradable) THEN json_array_length(apt_upgradable) > 0 ELSE 0 END), 0) AS aptPending,
+                coalesce(sum(CASE WHEN json_valid(package_updates) THEN json_array_length(package_updates) > 0 ELSE 0 END), 0) AS packagesPending,
                 coalesce(sum(CASE WHEN json_valid(app_stores)
                                   THEN (coalesce(json_array_length(app_stores, '$.flatpak'), 0) > 0) + (coalesce(json_array_length(app_stores, '$.snap'), 0) > 0)
                                   ELSE 0 END), 0) AS appStorePending,
