@@ -37,6 +37,37 @@ described in `DESIGN.md` – follow it for every UI or API change so new code lo
   bun run typecheck && bun run test && bun run build
   ```
 
+### Large tasks: stacked PRs
+
+A small task stays one PR (above). A large one – several layers or several parts worth reviewing on their own, e.g.
+API contract → server → UI – becomes a chain of small PRs with
+[stacked PRs](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) and the `gh stack` extension
+(`gh extension install github/gh-stack`, needs gh 2.90+):
+
+- Each PR is based on the branch of the PR below it; the bottom one targets `main`. A branch depends only on its own
+  layer or the ones below it, never on a higher one.
+- Every PR in the stack follows the rules above: its own commits, a draft, green CI, no AI attribution.
+
+```bash
+gh stack init feat/x-contract       # new stack on main (or: gh stack init --base main <existing branches…>)
+# …commit…
+gh stack add feat/x-server          # next layer on top of the current one
+# …commit…
+gh stack submit --auto              # push all branches, create/update the PRs (drafts) and link them as a stack
+gh stack rebase                     # after changing a lower branch: cascade-rebase the ones above
+gh stack sync                       # fetch, rebase onto the current main, push and refresh the PRs
+gh stack view --short
+```
+
+- **Merging:** still only when the user says so, after CI passes, and **always squash into `main`** – every PR of the
+  stack becomes its own squashed commit. Merge from the bottom: `gh stack merge --squash` merges atomically everything up
+  to the chosen PR (`gh stack merge --squash <pr>`), the PRs above it are rebased and retargeted. Mark the merged PRs
+  ready first (`gh pr ready <pr>`; drafts cannot be merged) and run `gh stack sync` afterwards. Never merge a stack PR
+  into the branch below it.
+- **Parallel sessions:** each agent works in its own `git worktree` on its own branch; one coordinating session
+  assembles the stack (`gh stack init --base main <branches…>` adopts branches from other worktrees) and does the
+  rebases and submits.
+
 ## Releasing a version
 
 1. Pick the version from the changes since the last tag (`git log $(git describe --tags --abbrev=0)..main`):
