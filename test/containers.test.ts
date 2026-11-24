@@ -336,10 +336,15 @@ describe('containers API', () => {
     });
     await request('PUT', `/api/containers/${other.id}`, { name: 'old', isEnabled: false, aptEnabled: true });
 
+    // An app never checked is behind the repository's baseline: the repository check brings it up to date.
+    const first = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
+    assert.equal(first.containerChecks, 1);
+    await app.scheduler.idle();
+    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion, 'v1.32.0');
+
     // Nothing new → no container check.
     const unchanged = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
     assert.equal(unchanged.containerChecks, 0);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion, null);
 
     source.releases = [release('v1.32.0', 1), release('v1.33.0', 2)];
     const checked = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
@@ -350,6 +355,39 @@ describe('containers API', () => {
     assert.equal(dto.apps[0].latestVersion, 'v1.33.0');
     assert.equal(dto.apps[0].updateAvailable, true);
     assert.equal((await request('GET', `/api/containers/${other.id}`)).json().apps[0].latestVersion, null);
+  });
+
+  it('checks the linked containers after a run of all repositories (scheduled, startup, check all)', async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repo = (await request('GET', '/api/repositories')).json()[0];
+    await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      versionCommand: 'cat /opt/vw_version.txt',
+      latestSource: 'github',
+      repositoryId: repo.id,
+    });
+    const latest = async () => (await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion;
+
+    // The app was never checked, so it is behind the repository's baseline: the run brings it up to date.
+    assert.equal(await latest(), null);
+    await app.releaseJob.runNow();
+    assert.equal(await latest(), 'v1.32.0');
+
+    // Nothing new → no container check.
+    const checks = () => shell.commands.length;
+    let before = checks();
+    await app.releaseJob.runNow();
+    assert.equal(checks(), before);
+
+    source.releases = [release('v1.32.0', 1), release('v1.33.0', 2)];
+    await app.releaseJob.runNow();
+    assert.equal(await latest(), 'v1.33.0');
+
+    // Up to date → the next run leaves the container alone.
+    before = checks();
+    await app.releaseJob.runNow();
+    assert.equal(checks(), before);
   });
 
   it('checks apt and application versions and notifies once', async () => {

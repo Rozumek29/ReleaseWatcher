@@ -503,9 +503,23 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const { store, source, settings } = deps;
   // Scheduled runs due in the same minute run one after another, as one digest: releases → vulnerabilities → containers.
   const sequencer = new RunSequencer({ batch: (task) => dispatcher.batch(task) });
+  /** Reachable enabled containers whose apps show an older latest version than their linked repository (all, or one). */
+  const staleLinkedContainerIds = (repositoryId?: number) =>
+    containerStore.enabledIdsWithStaleLatest(repositoryId).filter((id) => {
+      const container = containerStore.get(id);
+      return container !== null && containers.shellFor(container).isConfigured;
+    });
   const releaseJob = new CronJob({
     name: 'releases',
-    task: (signal) => checker.checkAll(signal),
+    // Releases found by a scheduled, startup or "check all" run update the linked container apps right away (same
+    // digest), instead of waiting for the next container check.
+    task: async (signal) => {
+      await checker.checkAll(signal);
+      const containerIds = signal.aborted ? [] : staleLinkedContainerIds();
+      if (containerIds.length > 0) {
+        await scheduler.checkMany(containerIds);
+      }
+    },
     cron: () => settings.current.releaseCheckCron,
     log,
     sequence: sequencer.slot(1),
@@ -1209,13 +1223,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
             const result = await checker.check(repo, { forceAdvisories: true });
             // A new release changes the latest version of linked container apps: check those containers in the background.
-            const containerIds =
-              result.newReleaseCount > 0
-                ? containerStore.enabledIdsLinkedTo(repo.id).filter((id) => {
-                    const container = containerStore.get(id);
-                    return container !== null && containers.shellFor(container).isConfigured;
-                  })
-                : [];
+            const containerIds = staleLinkedContainerIds(repo.id);
             if (containerIds.length > 0) {
               scheduler.checkMany(containerIds).catch((error: unknown) =>
                 log.error({ err: error, repo: fullName(repo) }, 'Checking linked containers failed'),

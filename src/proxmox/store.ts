@@ -386,15 +386,22 @@ export class ContainerStore {
       .map((r) => r.installed_version);
   }
 
-  /** Ids of the enabled containers with an application linked to a repository. */
-  enabledIdsLinkedTo(repositoryId: number): number[] {
-    return this.db
-      .query<{ id: number }, [number]>(
-        `SELECT DISTINCT c.id FROM containers c JOIN container_apps a ON a.container_id = c.id
-          WHERE a.repository_id = ? AND c.is_enabled = 1 ORDER BY c.vmid`,
-      )
-      .all(repositoryId)
-      .map((r) => r.id);
+  /**
+   * Ids of the enabled containers with an application whose latest version comes from a linked repository and
+   * differs from that repository's newest release – the checks that bring them up to date (all repositories, or one).
+   */
+  enabledIdsWithStaleLatest(repositoryId?: number): number[] {
+    const sql = `SELECT DISTINCT c.id FROM containers c
+        JOIN container_apps a ON a.container_id = c.id
+        JOIN watched_repositories r ON r.id = a.repository_id
+       WHERE c.is_enabled = 1 AND a.latest_source = 'github' AND r.last_seen_tag IS NOT NULL
+         AND a.latest_version IS NOT r.last_seen_tag`;
+    return repositoryId === undefined
+      ? this.db.query<{ id: number }, []>(`${sql} ORDER BY c.vmid`).all().map((r) => r.id)
+      : this.db
+          .query<{ id: number }, [number]>(`${sql} AND r.id = ? ORDER BY c.vmid`)
+          .all(repositoryId)
+          .map((r) => r.id);
   }
 
   /** Counts for the status summary, computed by SQLite (no rows are read, no secrets decrypted). */
