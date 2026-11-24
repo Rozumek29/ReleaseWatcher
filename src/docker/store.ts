@@ -1,4 +1,5 @@
 import type { Database } from 'bun:sqlite';
+import { splitOwner } from '../db.ts';
 import type { WatchedRepository } from '../domain.ts';
 import { parseJson } from '../json.ts';
 import type {
@@ -95,7 +96,7 @@ const sourceColumns = (source: DockerSource): [number | null, number | null] =>
 const sourceColumn = (source: DockerSource): 'target_id' | 'endpoint_id' => (source.kind === 'target' ? 'target_id' : 'endpoint_id');
 
 /** A watched repository as containers see it. */
-export type RepositoryLink = Pick<WatchedRepository, 'id' | 'owner' | 'name' | 'lastSeenTag' | 'icon'>;
+export type RepositoryLink = Pick<WatchedRepository, 'id' | 'provider' | 'host' | 'owner' | 'name' | 'lastSeenTag' | 'icon'>;
 
 /** Fields of a listed container written by {@link DockerStore.replaceListing}. */
 export interface ListedContainer extends EngineContainer {
@@ -256,11 +257,11 @@ export class DockerStore {
   /** Watched repositories with only the fields containers are matched and compared with (no secrets decrypted). */
   listRepositoryLinks(): RepositoryLink[] {
     return this.db
-      .query<{ id: number; owner: string; name: string; last_seen_tag: string | null; icon: string | null }, []>(
-        'SELECT id, owner, name, last_seen_tag, icon FROM watched_repositories',
+      .query<{ id: number; provider: string; owner: string; name: string; last_seen_tag: string | null; icon: string | null }, []>(
+        'SELECT id, provider, owner, name, last_seen_tag, icon FROM watched_repositories',
       )
       .all()
-      .map((r) => ({ id: r.id, owner: r.owner, name: r.name, lastSeenTag: r.last_seen_tag, icon: r.icon }));
+      .map((r) => ({ id: r.id, ...splitOwner(r.provider, r.owner), name: r.name, lastSeenTag: r.last_seen_tag, icon: r.icon }));
   }
 
   // --- Registry data ---

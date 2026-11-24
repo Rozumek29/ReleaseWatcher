@@ -162,6 +162,8 @@ describe('backup', () => {
     });
     const widget = file.repositories.find((r) => r.name === 'widget')!;
     assert.deepEqual(widget, {
+      provider: 'github',
+      host: null,
       owner: 'acme',
       name: 'widget',
       includePrereleases: true,
@@ -280,6 +282,37 @@ describe('backup', () => {
     for (const s of preview.sections) {
       assert.deepEqual([s.key, s.added, s.updated, s.removed], [s.key, [], [], []]);
     }
+  });
+
+  it('restores repositories of Gitea/Forgejo and GitLab instances', async () => {
+    const source = await instance();
+    source.store.add('forgejo', 'forgejo', false, { provider: 'gitea', host: 'codeberg.org' });
+    source.store.add('group/sub', 'project', true, { provider: 'gitlab', host: 'gitlab.com' });
+    source.store.add('forgejo', 'forgejo', false);
+    const file = await exportFrom(source);
+    assert.deepEqual(
+      file.repositories.map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+      [
+        ['gitea', 'codeberg.org', 'forgejo', 'forgejo'],
+        ['github', null, 'forgejo', 'forgejo'],
+        ['gitlab', 'gitlab.com', 'group/sub', 'project'],
+      ],
+    );
+
+    const target = await instance();
+    assert.equal((await importInto(target, file, 'merge')).status, 200);
+    assert.deepEqual(
+      target.store.list().map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+      file.repositories.map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+    );
+
+    // A file of an older version (no provider) means GitHub; a repository of a host needs a valid host.
+    const invalid = await importInto(
+      await instance(),
+      { ...file, repositories: [{ ...file.repositories[0]!, provider: 'gitea', host: 'not a host' }] },
+      'merge',
+    );
+    assert.equal(invalid.status, 400);
   });
 
   it('keeps the app a repository reads its installed version from', async () => {

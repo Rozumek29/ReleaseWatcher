@@ -1,8 +1,20 @@
-/** A GitHub repository the user wants to be notified about. */
-export interface WatchedRepository {
-  id: number;
+/** Where releases of a repository are read from: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
+export const PROVIDERS = ['github', 'gitea', 'gitlab'] as const;
+export type RepositoryProvider = (typeof PROVIDERS)[number];
+
+/** A repository on one of the {@link PROVIDERS}. */
+export interface RepositoryRef {
+  provider: RepositoryProvider;
+  /** Host name (with an optional port) of a Gitea/Forgejo or GitLab instance; null for GitHub. */
+  host: string | null;
+  /** User, organization or (GitLab) group path, e.g. `gitlab-org/charts`. */
   owner: string;
   name: string;
+}
+
+/** A repository the user wants to be notified about. */
+export interface WatchedRepository extends RepositoryRef {
+  id: number;
   includePrereleases: boolean;
   isEnabled: boolean;
   /** Tag of the newest release already processed. */
@@ -30,7 +42,10 @@ export interface WatchedRepository {
    * `RepositoryStore.setInstalledVersionApp()`.
    */
   installedVersionApp: MachineAppRef | null;
-  /** Token used for this repository instead of the global one (private repository of another account). Secret. */
+  /**
+   * Token used for this repository: on GitHub instead of the global one (private repository of another account), on
+   * Gitea/Forgejo and GitLab the only one sent (the global token is GitHub's). Secret.
+   */
   githubToken: string | null;
   /** GitHub ETag of the security advisories request. */
   advisoriesEtag: string | null;
@@ -142,7 +157,51 @@ export function rasterIconUrl(icon: string | null): string | null {
   return url && !/\.svg$/i.test(new URL(url).pathname) ? url : null;
 }
 
-export const fullName = (repo: Pick<WatchedRepository, 'owner' | 'name'>): string => `${repo.owner}/${repo.name}`;
+/**
+ * Name shown for a repository and used to match it (case-insensitive): `owner/name` on GitHub,
+ * `host/owner/name` elsewhere (e.g. `codeberg.org/forgejo/forgejo`).
+ */
+export const fullName = (repo: { host?: string | null; owner: string; name: string }): string =>
+  repo.host ? `${repo.host}/${repo.owner}/${repo.name}` : `${repo.owner}/${repo.name}`;
+
+/** Label of a provider in messages ("GitHub", "Gitea/Forgejo", "GitLab"). */
+export const PROVIDER_LABELS: Readonly<Record<RepositoryProvider, string>> = {
+  github: 'GitHub',
+  gitea: 'Gitea/Forgejo',
+  gitlab: 'GitLab',
+};
+
+/** Web page of a repository. */
+export const repositoryUrl = (repo: { host?: string | null; owner: string; name: string }): string =>
+  `https://${repo.host ?? 'github.com'}/${repo.owner}/${repo.name}`;
+
+/**
+ * Avatar of the repository owner without an API call: GitHub's avatar service, the `/user/avatar/<name>/<size>` route
+ * of Gitea/Forgejo; null for GitLab (no such URL – the UI shows a letter).
+ */
+export function repositoryAvatarUrl(repo: Pick<RepositoryRef, 'provider' | 'host' | 'owner'>, size = 64): string | null {
+  switch (repo.provider) {
+    case 'github':
+      return ownerAvatarUrl(repo.owner, size);
+    case 'gitea':
+      return repo.host ? `https://${repo.host}/user/avatar/${encodeURIComponent(repo.owner)}/${size}` : null;
+    case 'gitlab':
+      return null;
+  }
+}
+
+/** Hosts whose provider is known, so a URL of them needs no provider choice. */
+const KNOWN_HOSTS: Readonly<Record<string, RepositoryProvider>> = {
+  'github.com': 'github',
+  'gitlab.com': 'gitlab',
+  'codeberg.org': 'gitea',
+  'gitea.com': 'gitea',
+  'code.forgejo.org': 'gitea',
+};
+
+/** Provider of a well-known host (github.com, gitlab.com, codeberg.org …); null when it has to be chosen or detected. */
+export const knownProvider = (host: string | null): RepositoryProvider | null =>
+  host === null ? 'github' : (KNOWN_HOSTS[host.toLowerCase()] ?? null);
 
 const REPOSITORY_PATTERN =
   /^(?:(?:https?:\/\/)?(?:www\.)?github\.com\/)?(?<owner>[A-Za-z0-9][A-Za-z0-9-]{0,38})\/(?<name>[A-Za-z0-9._-]{1,100}?)(?:\.git)?\/?$/;
@@ -156,6 +215,68 @@ export function parseRepositoryName(input: string | null | undefined): { owner: 
     return null;
   }
   return { owner, name };
+}
+
+/** Host name with an optional port, e.g. `codeberg.org` or `git.example.com:3000`. */
+const HOST_PATTERN = /^(?=.{1,253}(?::|$))[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?)*(?::\d{1,5})?$/;
+const SEGMENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
+/** GitLab groups nest; deeper paths are not supported. */
+const MAX_PATH_SEGMENTS = 10;
+
+/** A repository named by the user or a label: host (null = GitHub), owner and name; the provider when the host tells it. */
+export interface ParsedRepository {
+  host: string | null;
+  owner: string;
+  name: string;
+  /** Provider known from the host; null for another host (to be chosen or detected). */
+  provider: RepositoryProvider | null;
+}
+
+/**
+ * Parses a repository of any provider: `owner/repo` or a github.com URL (GitHub), or `[https://]host/owner/repo` of a
+ * Gitea/Forgejo or GitLab instance (GitLab groups may nest: `gitlab.com/group/subgroup/project`). Page paths after the
+ * repository (`/-/releases` on GitLab; `/releases`, `/src/…` on known Gitea hosts) are ignored. Only HTTPS URLs are
+ * accepted. Returns null for invalid input.
+ */
+export function parseRepositoryReference(input: string | null | undefined): ParsedRepository | null {
+  const value = input?.trim().replace(/^git\+/, '').replace(/[#?].*$/, '');
+  if (!value) {
+    return null;
+  }
+  const github = parseRepositoryName(value);
+  if (github) {
+    return { host: null, ...github, provider: 'github' };
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^https:\/\//i.test(value)) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(/^https:\/\//i.test(value) ? value : `https://${value}`);
+  } catch {
+    return null;
+  }
+  const host = url.host.toLowerCase().replace(/^www\./, '');
+  if (url.username || url.password || !HOST_PATTERN.test(host) || host === 'github.com') {
+    return null;
+  }
+  const provider = knownProvider(host);
+  let segments = url.pathname.split('/').filter(Boolean);
+  const dash = segments.indexOf('-');
+  if (dash >= 0) {
+    segments = segments.slice(0, dash);
+  } else if (provider === 'gitea') {
+    segments = segments.slice(0, 2);
+  }
+  const last = segments.at(-1)?.replace(/\.git$/i, '');
+  if (!last || segments.length < 2 || segments.length > MAX_PATH_SEGMENTS) {
+    return null;
+  }
+  segments[segments.length - 1] = last;
+  if (!segments.every((s) => SEGMENT_PATTERN.test(s) && s !== '.' && s !== '..')) {
+    return null;
+  }
+  return { host, owner: segments.slice(0, -1).join('/'), name: last, provider };
 }
 
 /** Upper bound of notifications sent for one repository in a single check (protects against spam). */

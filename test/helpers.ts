@@ -2,8 +2,8 @@ import type { EngineContainer, EngineListing, ImageRef } from '../src/docker/dom
 import type { DockerEngine } from '../src/docker/engine.ts';
 import type { RegistryClient } from '../src/docker/registry.ts';
 import type { SecurityAdvisory } from '../src/advisories.ts';
-import type { ReleaseInfo } from '../src/domain.ts';
-import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/github.ts';
+import { fullName, type ReleaseInfo, type RepositoryProvider, type RepositoryRef } from '../src/domain.ts';
+import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/release-source.ts';
 import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
 import type { RepositoryStore } from '../src/db.ts';
@@ -69,16 +69,26 @@ export class FakeSource implements ReleaseSource {
   /** Token passed with the last call (null/undefined = global token). */
   lastToken: string | null | undefined;
 
-  async repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean> {
+  /** Repositories on Gitea/Forgejo or GitLab instances (`host/owner/name` → provider). */
+  instances = new Map<string, RepositoryProvider>();
+  /** Every repository asked about, in order. */
+  readonly asked: RepositoryRef[] = [];
+
+  async repositoryExists(repo: RepositoryRef, token?: string | null): Promise<boolean> {
     this.lastToken = token;
-    const fullName = `${owner}/${name}`.toLowerCase();
-    const required = this.privateRepos.get(fullName);
-    return required !== undefined ? token === required : this.existing.has(fullName);
+    this.asked.push(repo);
+    const key = fullName(repo).toLowerCase();
+    if (repo.host) {
+      return this.instances.get(key) === repo.provider;
+    }
+    const required = this.privateRepos.get(key);
+    return required !== undefined ? token === required : this.existing.has(key);
   }
 
-  async getRecentReleases(_owner: string, _name: string, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
+  async getRecentReleases(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
     this.calls++;
     this.lastToken = token;
+    this.asked.push(repo);
     if (this.error) {
       throw this.error;
     }
@@ -87,7 +97,7 @@ export class FakeSource implements ReleaseSource {
       : { releases: this.releases, etag: '"etag"', notModified: false };
   }
 
-  async getSecurityAdvisories(_owner: string, _name: string, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {
+  async getSecurityAdvisories(_repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {
     this.advisoryCalls++;
     this.lastToken = token;
     if (this.advisoryError) {

@@ -12,7 +12,7 @@ import { type CronSchedule, parseCron } from './cron.ts';
 import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
 import { fullName, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, type WatchedRepository } from './domain.ts';
-import type { ReleaseSource } from './github.ts';
+import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import type { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { OsvClient } from './osv.ts';
@@ -181,9 +181,9 @@ export class ReleaseChecker {
       enabled.osv && osv && osvPackage ? settle(osv.queryPackage(osvPackage.ecosystem, osvPackage.name)) : null;
 
     const githubKey = sourceKey('github');
-    if (enabled.github && this.source.getSecurityAdvisories) {
+    if (enabled.github && repo.provider === 'github' && this.source.getSecurityAdvisories) {
       try {
-        const fetched = await this.source.getSecurityAdvisories(repo.owner, repo.name, repo.advisoriesEtag, repo.githubToken);
+        const fetched = await this.source.getSecurityAdvisories(repo, repo.advisoriesEtag, repo.githubToken);
         if (!fetched.notModified) {
           notified += await this.storeAdvisories(repo, 'github', githubKey, fetched.advisories, notified);
           repo.advisoriesEtag = fetched.etag;
@@ -269,6 +269,8 @@ export class ReleaseChecker {
     for (const { advisory, impact } of news) {
       const shownVersions = impact.affects === true ? impact.affectedVersions : versions;
       await this.dispatcher.dispatchVulnerability({
+        provider: repo.provider,
+        host: repo.host,
         owner: repo.owner,
         repository: repo.name,
         advisory,
@@ -291,7 +293,7 @@ export class ReleaseChecker {
     // The installed version and the releases are read at the same time; both are needed before comparing them.
     const [, releases] = await Promise.all([
       this.refreshInstalledVersion(repo),
-      settle(this.source.getRecentReleases(repo.owner, repo.name, repo.etag, repo.githubToken)),
+      settle(this.source.getRecentReleases(repo, repo.etag, repo.githubToken)),
     ]);
     try {
       if (!releases.ok) {
@@ -308,6 +310,8 @@ export class ReleaseChecker {
           const alreadyInstalled = repo.installedVersion !== null && (compareVersions(release.tag, repo.installedVersion) ?? 1) <= 0;
           if (!alreadyInstalled) {
             await this.dispatcher.dispatch({
+              provider: repo.provider,
+              host: repo.host,
               owner: repo.owner,
               repository: repo.name,
               release,

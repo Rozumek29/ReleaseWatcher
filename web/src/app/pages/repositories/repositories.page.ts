@@ -12,13 +12,14 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/api.service';
-import { Notifier, WatchedRepository } from '../../core/models';
+import { Notifier, RepositoryProvider, WatchedRepository } from '../../core/models';
 import { PreferencesService } from '../../core/preferences.service';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
+import { unknownRepositoryHost } from '../../shared/repository-host';
 import { Switch } from '../../shared/switch';
 import { AdvisoriesDialog } from './advisories.dialog';
 import { RepositorySettingsDialog } from './repository-settings.dialog';
@@ -52,7 +53,10 @@ export class RepositoriesPage {
   protected readonly query = signal('');
   protected readonly filter = signal<Filter>('all');
 
-  protected newRepository = '';
+  protected readonly newRepository = signal('');
+  /** Host of the entered URL when its provider is not known (then Gitea/Forgejo or GitLab can be chosen). */
+  protected readonly newHost = computed(() => unknownRepositoryHost(this.newRepository()));
+  protected newProvider: '' | RepositoryProvider = '';
   protected newIncludePrereleases = false;
   /** Optional token of a private repository the global token cannot read. */
   protected newToken = '';
@@ -120,7 +124,7 @@ export class RepositoriesPage {
   }
 
   protected async add(): Promise<void> {
-    const repository = this.newRepository.trim();
+    const repository = this.newRepository().trim();
     if (!repository || this.adding()) {
       return;
     }
@@ -131,11 +135,13 @@ export class RepositoriesPage {
         this.api.addRepository({
           repository,
           includePrereleases: this.newIncludePrereleases,
+          ...(this.newHost() && this.newProvider ? { provider: this.newProvider } : {}),
           ...(this.newToken.trim() ? { githubToken: this.newToken.trim() } : {}),
         }),
       );
       this.repositories.update((list) => [...list, created].sort(byName));
-      this.newRepository = '';
+      this.newRepository.set('');
+      this.newProvider = '';
       this.newIncludePrereleases = false;
       this.newToken = '';
       this.showNewToken.set(false);

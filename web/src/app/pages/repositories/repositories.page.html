@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
     <h1>Repositories</h1>
-    <p>GitHub repositories watched for new releases.</p>
+    <p>Repositories on GitHub, Gitea/Forgejo and GitLab watched for new releases.</p>
   </div>
 </header>
 
@@ -18,19 +18,29 @@
 
 <form class="card add-card" (ngSubmit)="add()">
   <div class="add-input">
-    <app-icon name="github" class="add-icon" />
+    <app-icon name="repo" class="add-icon" />
     <label for="new-repo" class="visually-hidden">Repository</label>
     <input
       id="new-repo"
       class="input"
       name="repository"
       [(ngModel)]="newRepository"
-      placeholder="owner/repo or https://github.com/owner/repo"
+      placeholder="owner/repo or a GitHub, Codeberg, Gitea, Forgejo or GitLab URL"
       autocomplete="off"
       spellcheck="false"
       required
     />
   </div>
+  @if (newHost(); as host) {
+    <div class="add-provider">
+      <label for="new-provider" class="visually-hidden">Software on {{ host }}</label>
+      <select id="new-provider" class="input" name="provider" [(ngModel)]="newProvider" [title]="'Software that runs ' + host">
+        <option value="">Detect Gitea/Forgejo or GitLab</option>
+        <option value="gitea">Gitea / Forgejo</option>
+        <option value="gitlab">GitLab</option>
+      </select>
+    </div>
+  }
   <app-switch
     label="Include pre-releases"
     [checked]="newIncludePrereleases"
@@ -45,17 +55,17 @@
         type="password"
         name="githubToken"
         [(ngModel)]="newToken"
-        placeholder="github_pat_… (only for this repository)"
+        placeholder="Access token (only for this repository)"
         autocomplete="off"
         spellcheck="false"
       />
     </div>
   } @else {
-    <button type="button" class="link-btn" (click)="showNewToken.set(true)" title="For a private repository the global token cannot read, e.g. one owned by another account">
+    <button type="button" class="link-btn" (click)="showNewToken.set(true)" title="For a private repository: one the global GitHub token cannot read, or one on another host">
       Private repository? Add a token
     </button>
   }
-  <button type="submit" class="btn" [disabled]="adding() || !newRepository.trim()">
+  <button type="submit" class="btn" [disabled]="adding() || !newRepository().trim()">
     <app-icon name="plus" [size]="16" />
     {{ adding() ? 'Adding…' : 'Watch' }}
   </button>
@@ -123,7 +133,7 @@
         <div class="main">
           <div class="title-line">
             <a [href]="repo.url" target="_blank" rel="noopener" class="name">
-              <span class="owner">{{ repo.owner }}/</span>{{ repo.name }}
+              <span class="owner">{{ repo.host ? repo.host + '/' : '' }}{{ repo.owner }}/</span>{{ repo.name }}
             </a>
             @if (!repo.isEnabled) {
               <span class="badge">Paused</span>

@@ -10,7 +10,7 @@ import {
   type AdvisoryVulnerability,
   type SecurityAdvisory,
 } from './advisories.ts';
-import type { MachineAppRef, WatchedRepository } from './domain.ts';
+import { PROVIDERS, type MachineAppRef, type RepositoryProvider, type RepositoryRef, type WatchedRepository } from './domain.ts';
 import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -37,6 +37,8 @@ const KEY_CHECK_VALUE = 'releasewatcher';
 
 interface Row {
   id: number;
+  provider: string;
+  /** `host/owner` for a repository not on GitHub (see {@link dbOwner}). */
   owner: string;
   name: string;
   include_prereleases: number;
@@ -99,9 +101,24 @@ function parseVulnerabilities(json: string): AdvisoryVulnerability[] {
   return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
 }
 
+/**
+ * The `owner` column holds `host/owner` for a repository on a Gitea/Forgejo or GitLab instance, so the unique
+ * `(owner, name)` and the `lower(owner || '/' || name)` match of Docker labels (index, triggers) use `fullName()`.
+ */
+export const dbOwner = (repo: Pick<RepositoryRef, 'host' | 'owner'>): string => (repo.host ? `${repo.host}/${repo.owner}` : repo.owner);
+
+/** Provider, host and owner of a row (the reverse of {@link dbOwner}). */
+export function splitOwner(provider: string, owner: string): Pick<RepositoryRef, 'provider' | 'host' | 'owner'> {
+  const known = (PROVIDERS as readonly string[]).includes(provider) ? (provider as RepositoryProvider) : 'github';
+  const slash = owner.indexOf('/');
+  return known === 'github' || slash < 0
+    ? { provider: 'github', host: null, owner }
+    : { provider: known, host: owner.slice(0, slash), owner: owner.slice(slash + 1) };
+}
+
 const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   id: r.id,
-  owner: r.owner,
+  ...splitOwner(r.provider, r.owner),
   name: r.name,
   includePrereleases: r.include_prereleases === 1,
   isEnabled: r.is_enabled === 1,
@@ -144,6 +161,7 @@ interface PageRow extends AdvisoryRow {
   impact: number | null;
   severity_rank: number;
   affected_versions: string;
+  provider: string;
   owner: string;
   name: string;
   installed_version: string | null;
@@ -171,7 +189,7 @@ export interface AdvisoryCursor {
 
 export interface AdvisoryPageRow {
   advisory: SecurityAdvisory;
-  repository: { id: number; owner: string; name: string; installedVersion: string | null; icon: string | null };
+  repository: RepositoryRef & { id: number; installedVersion: string | null; icon: string | null };
   affects: boolean | null;
   affectedVersions: string[];
   cursor: AdvisoryCursor;
@@ -621,6 +639,9 @@ export const MIGRATIONS: readonly string[] = [
    UPDATE watched_repositories
       SET installed_version = d.installed_version, installed_version_checked_at = d.last_seen_at, installed_version_error = NULL
      FROM docker_containers d WHERE d.id = watched_repositories.installed_docker_id;`,
+  // Repositories on Gitea/Forgejo and GitLab instances: `provider` says which API to ask, and `owner` holds `host/owner`
+  // (see dbOwner()), so the unique (owner, name) and the Docker label match by `owner || '/' || name` cover the host.
+  `ALTER TABLE watched_repositories ADD COLUMN provider TEXT NOT NULL DEFAULT 'github';`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -742,17 +763,29 @@ export class RepositoryStore {
     return row ? toEntity(row, this.secrets) : null;
   }
 
-  /** Case-insensitive lookup (columns use NOCASE collation). */
-  exists(owner: string, name: string): boolean {
-    return this.db.query('SELECT 1 FROM watched_repositories WHERE owner = ? AND name = ?').get(owner, name) !== null;
+  /** Case-insensitive lookup (columns use NOCASE collation); `host` null = GitHub. */
+  exists(owner: string, name: string, host: string | null = null): boolean {
+    return (
+      this.db.query('SELECT 1 FROM watched_repositories WHERE owner = ? AND name = ?').get(dbOwner({ host, owner }), name) !== null
+    );
   }
 
-  add(owner: string, name: string, includePrereleases: boolean): WatchedRepository {
+  /** Adds a repository; `origin` is where it lives (default GitHub). */
+  add(
+    owner: string,
+    name: string,
+    includePrereleases: boolean,
+    origin: Pick<RepositoryRef, 'provider' | 'host'> = { provider: 'github', host: null },
+  ): WatchedRepository {
+    const host = origin.provider === 'github' ? null : origin.host;
+    if (origin.provider !== 'github' && !host) {
+      throw new Error(`A ${origin.provider} repository needs a host.`);
+    }
     const row = this.db
-      .query<Row, [string, string, number, string]>(
-        'INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?) RETURNING *',
+      .query<Row, [string, string, string, number, string]>(
+        'INSERT INTO watched_repositories (provider, owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *',
       )
-      .get(owner, name, includePrereleases ? 1 : 0, new Date().toISOString())!;
+      .get(origin.provider, dbOwner({ host, owner }), name, includePrereleases ? 1 : 0, new Date().toISOString())!;
     return toEntity(row, this.secrets);
   }
 
@@ -1042,7 +1075,7 @@ export class RepositoryStore {
     params.push(limit + 1);
     const rows = this.db
       .query<PageRow, SQLQueryBindings[]>(
-        `SELECT a.*, r.owner, r.name, r.installed_version, r.icon
+        `SELECT a.*, r.provider, r.owner, r.name, r.installed_version, r.icon
          FROM repository_advisories a JOIN watched_repositories r ON r.id = a.repository_id
          ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY a.impact DESC, a.severity_rank DESC, a.published_at DESC, a.repository_id DESC, a.advisory_id DESC
@@ -1053,7 +1086,13 @@ export class RepositoryStore {
       hasMore: rows.length > limit,
       rows: rows.slice(0, limit).map((r) => ({
         advisory: toAdvisory(r),
-        repository: { id: r.repository_id, owner: r.owner, name: r.name, installedVersion: r.installed_version, icon: r.icon },
+        repository: {
+          id: r.repository_id,
+          ...splitOwner(r.provider, r.owner),
+          name: r.name,
+          installedVersion: r.installed_version,
+          icon: r.icon,
+        },
         affects: impactOfRank(r.impact ?? 1),
         affectedVersions: parseStringArray(r.affected_versions),
         cursor: {

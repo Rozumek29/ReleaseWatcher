@@ -8,6 +8,8 @@ import { RepositorySettingsDialog } from './repository-settings.dialog';
 
 const repo: WatchedRepository = {
   id: 7,
+  provider: 'github',
+  host: null,
   owner: 'dani-garcia',
   name: 'vaultwarden',
   fullName: 'dani-garcia/vaultwarden',

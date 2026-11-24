@@ -81,7 +81,7 @@ describe('DockerPage', () => {
     const refresh = http.expectOne('/api/docker/containers/1');
     expect(refresh.request.body).toEqual({});
     refresh.flush(
-      dockerContainer({ suggestedRepository: null, repository: { id: 5, fullName: 'searxng/searxng', latestVersion: null, iconUrls: [] } }),
+      dockerContainer({ suggestedRepository: null, repository: { id: 5, fullName: 'searxng/searxng', url: 'https://github.com/searxng/searxng', latestVersion: null, iconUrls: [] } }),
     );
     await settle(fixture);
     expect(el.querySelector('.row .repo')?.textContent).toContain('searxng/searxng');
@@ -97,7 +97,7 @@ describe('DockerPage', () => {
     select.dispatchEvent(new Event('change'));
     const request = http.expectOne('/api/docker/containers/2');
     expect(request.request.body).toEqual({ linkAuto: false, repositoryId: 4 });
-    request.flush(dockerContainer({ id: 2, name: 'redis', linkAuto: false, repository: { id: 4, fullName: 'redis/redis', latestVersion: '7.4.2', iconUrls: [] } }));
+    request.flush(dockerContainer({ id: 2, name: 'redis', linkAuto: false, repository: { id: 4, fullName: 'redis/redis', url: 'https://github.com/redis/redis', latestVersion: '7.4.2', iconUrls: [] } }));
     await settle(fixture);
   });
 

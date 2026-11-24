@@ -21,7 +21,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  │   ├─ proxmox/routes.ts  /api/containers…, /api/proxmox…, /api/runs/:id         │
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
-                 │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub   │
+                 │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (per provider) ─▶ GitHub/Gitea/GitLab │
                  │                            ├─▶ OsvClient (osv.ts) ─▶ OSV.dev (vulnerabilities)           │
                  │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord/SMTP│
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
@@ -30,8 +30,13 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, OSV.dev, Discord, the
-  user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub (and the Gitea/Forgejo or
+  GitLab instances of watched repositories), OSV.dev, Discord, the user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+- **Release sources:** `ReleaseSource` (`src/release-source.ts`) takes a `RepositoryRef` (`provider`, `host`, `owner`,
+  `name`); `ProviderReleaseSource` hands each repository to `github.ts`, `gitea.ts` (Gitea and Forgejo) or `gitlab.ts`.
+  Only GitHub has security advisories and a global token – a repository on another host is read with its own token
+  only. In the database `owner` holds `host/owner` for those (`dbOwner()` / `splitOwner()` in `db.ts`), so the unique
+  `(owner, name)` and the Docker label match by `lower(owner || '/' || name)` equal `fullName()`.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client). A feature folder owns its

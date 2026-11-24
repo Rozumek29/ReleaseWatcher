@@ -6,11 +6,14 @@ import { AuthStore } from './auth/store.ts';
 import { loadConfig } from './config.ts';
 import { RepositoryStore } from './db.ts';
 import { embeddedUi } from './embedded-ui.ts';
+import { GiteaReleaseSource } from './gitea.ts';
 import { GitHubReleaseSource } from './github.ts';
+import { GitLabReleaseSource } from './gitlab.ts';
 import { serviceCommand, setUpService } from './install.ts';
 import { createLogger } from './log.ts';
 import { createNotifiers } from './notifiers/index.ts';
 import { OsvApiClient } from './osv.ts';
+import { ProviderReleaseSource } from './release-source.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 import { localVersionUrl } from './version.ts';
@@ -74,7 +77,11 @@ const notifiers = createNotifiers(config, settings);
 const app = await buildApp({
   store,
   settings,
-  source: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
+  source: new ProviderReleaseSource({
+    github: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
+    gitea: new GiteaReleaseSource({ releasesPerPage: config.github.releasesPerPage }),
+    gitlab: new GitLabReleaseSource({ releasesPerPage: config.github.releasesPerPage }),
+  }),
   osv: new OsvApiClient(),
   notifiers,
   knownHostsFile: config.proxmox.knownHostsFile,

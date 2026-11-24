@@ -373,6 +373,62 @@ describe('HTTP API', () => {
     assert.match(missing.json().errors.repository[0], /not found/);
   });
 
+  it('adds repositories of Gitea/Forgejo and GitLab instances', async () => {
+    source.instances.set('codeberg.org/forgejo/forgejo', 'gitea');
+    source.instances.set('code.example.com/me/app', 'gitlab');
+    source.instances.set('git.example.com/me/app', 'gitea');
+    source.existing.add('forgejo/forgejo');
+
+    const codeberg = await add('https://codeberg.org/forgejo/forgejo');
+    assert.equal(codeberg.statusCode, 201);
+    const body = codeberg.json();
+    assert.deepEqual([body.provider, body.host, body.owner, body.name, body.fullName], ['gitea', 'codeberg.org', 'forgejo', 'forgejo', 'codeberg.org/forgejo/forgejo']);
+    assert.equal(body.url, 'https://codeberg.org/forgejo/forgejo');
+    assert.equal(body.avatarUrl, 'https://codeberg.org/user/avatar/forgejo/64');
+    assert.equal(body.lastSeenTag, 'v1');
+    // The same owner/name on GitHub is another repository.
+    assert.equal((await add('forgejo/forgejo')).statusCode, 201);
+    assert.equal((await add('codeberg.org/Forgejo/forgejo')).statusCode, 409);
+
+    // Another host: each provider is tried (Gitea/Forgejo first) unless one is chosen.
+    source.asked.length = 0;
+    const detected = await add('https://code.example.com/me/app');
+    assert.equal(detected.statusCode, 201);
+    assert.equal(detected.json().provider, 'gitlab');
+    assert.equal(detected.json().avatarUrl, null);
+    assert.deepEqual(source.asked.slice(0, 2).map((r) => r.provider), ['gitea', 'gitlab']);
+    const chosen = await inject({
+      method: 'POST',
+      url: '/api/repositories',
+      payload: { repository: 'git.example.com/me/app', provider: 'gitea' },
+    });
+    assert.equal(chosen.statusCode, 201);
+    assert.equal(chosen.json().provider, 'gitea');
+
+    const missing = await add('https://git.example.com/me/missing');
+    assert.equal(missing.statusCode, 400);
+    assert.match(missing.json().errors.repository[0], /not found on Gitea\/Forgejo or GitLab \(git\.example\.com\)/);
+    const notGithub = await inject({ method: 'POST', url: '/api/repositories', payload: { repository: 'git.lan/me/x', provider: 'github' } });
+    assert.equal(notGithub.statusCode, 400);
+
+    const list = (await inject('/api/repositories')).json();
+    assert.deepEqual(list.map((r: { fullName: string }) => r.fullName).toSorted(), [
+      'code.example.com/me/app',
+      'codeberg.org/forgejo/forgejo',
+      'forgejo/forgejo',
+      'git.example.com/me/app',
+    ]);
+  });
+
+  it('reads no GitHub advisories for repositories on other hosts', async () => {
+    source.instances.set('codeberg.org/forgejo/forgejo', 'gitea');
+    source.advisories = [advisory('GHSA-new1-0000-0000', 2, '< 1.0.0')];
+    const id = (await add('codeberg.org/forgejo/forgejo')).json().id;
+    await inject({ method: 'POST', url: `/api/repositories/${id}/check` });
+    assert.equal(source.advisoryCalls, 0);
+    assert.equal(store.get(id)!.advisoriesError, null);
+  });
+
   it('updates, checks and deletes a repository', async () => {
     const { id } = (await add('acme/widget')).json();
 

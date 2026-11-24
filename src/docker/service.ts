@@ -1,4 +1,4 @@
-import { fullName, iconUrls } from '../domain.ts';
+import { fullName, iconUrls, repositoryUrl } from '../domain.ts';
 import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import type { DockerImageUpdate, DockerUpdatesNotification } from '../notifiers/notifier.ts';
@@ -80,7 +80,7 @@ export interface DockerContainerView {
   installedVersionSource: VersionSource | null;
   /** Linked through the labels (true) or chosen by the user (false). */
   linkAuto: boolean;
-  repository: { id: number; fullName: string; latestVersion: string | null; iconUrls: string[] } | null;
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
   /** Repository the labels name that is not watched yet (offered as "Watch"); null = none or already watched. */
   suggestedRepository: string | null;
   /** Release-based: the linked repository has a newer release than the installed version; null = unknown. */
@@ -480,7 +480,7 @@ export class DockerService {
         installedVersionSource: installed?.source ?? null,
         linkAuto: c.linkAuto,
         repository: repo
-          ? { id: repo.id, fullName: fullName(repo), latestVersion: repo.lastSeenTag, iconUrls: iconUrls(repo.icon) }
+          ? { id: repo.id, fullName: fullName(repo), url: repositoryUrl(repo), latestVersion: repo.lastSeenTag, iconUrls: iconUrls(repo.icon) }
           : null,
         suggestedRepository: c.labelRepository && !byName.has(c.labelRepository) ? c.labelRepository : null,
         updateAvailable: repo ? appUpdateAvailable({ installedVersion: installed?.version ?? null, latestVersion: repo.lastSeenTag }) : null,

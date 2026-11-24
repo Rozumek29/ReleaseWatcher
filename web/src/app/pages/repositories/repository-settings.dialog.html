@@ -45,19 +45,31 @@
         </div>
 
         <div class="field">
-          <label for="repo-token">GitHub token <span class="optional">optional</span></label>
+          <label for="repo-token">{{ repo.provider === 'github' ? 'GitHub token' : 'Access token' }} <span class="optional">optional</span></label>
           <input
             id="repo-token"
             class="input mono"
             type="password"
             name="token"
             [(ngModel)]="token"
-            [placeholder]="repo.hasOwnToken && !removeToken ? (repo.githubTokenMasked ?? 'saved') + ' – type to replace' : 'github_pat_…'"
+            [placeholder]="repo.hasOwnToken && !removeToken ? (repo.githubTokenMasked ?? 'saved') + ' – type to replace' : tokenPlaceholder(repo)"
             autocomplete="off"
             spellcheck="false"
           />
           <span class="hint">
-            @if (repo.hasOwnToken && !removeToken) {
+            @if (repo.provider !== 'github') {
+              @if (repo.hasOwnToken && !removeToken) {
+                This repository uses its own token.
+                <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
+                to read it without one.
+              } @else if (removeToken) {
+                The token will be removed on save – the repository is read without one.
+              } @else {
+                Only needed for a private repository: a token of {{ repo.host }}
+                ({{ repo.provider === 'gitlab' ? 'User settings → Access tokens, scope read_api' : 'Settings → Applications → Access tokens, repository: Read' }}).
+                The global GitHub token is never sent to other hosts.
+              }
+            } @else if (repo.hasOwnToken && !removeToken) {
               This repository uses its own token.
               <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
               to use the global token again.
@@ -244,7 +256,12 @@
             Vulnerabilities from OSV.dev
           </legend>
           <p class="group-hint">
-            GitHub security advisories of this repository are read automatically. For more sources (Go, PyPI and npm
+            @if (repo.provider === 'github') {
+              GitHub security advisories of this repository are read automatically.
+            } @else {
+              Gitea/Forgejo and GitLab publish no security advisories, so OSV.dev is the only source for this repository.
+            }
+            For more sources (Go, PyPI and npm
             advisories, CVEs) name the package the app is published as – find it on
             <a href="https://osv.dev/list" target="_blank" rel="noopener">osv.dev</a>, e.g. <code>npm</code> /
             <code>n8n</code> or <code>Go</code> / <code>github.com/gitea/gitea</code>.

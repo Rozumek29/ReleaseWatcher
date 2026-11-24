@@ -3,6 +3,7 @@
  * defaults, unknown properties are dropped, so files of older and newer versions still parse; the values themselves
  * are checked by `BackupService` with the same rules as the regular endpoints.
  */
+import { PROVIDERS } from '../domain.ts';
 import { z } from '../validation.ts';
 
 const text = (maxLength: number) => z.string().max(maxLength).nullish();
@@ -50,7 +51,9 @@ const hostSchema = z.object({
 });
 
 const repositorySchema = z.object({
-  owner: z.string().max(100),
+  provider: z.enum(PROVIDERS).nullish(),
+  host: text(260),
+  owner: z.string().max(1000),
   name: z.string().max(100),
   includePrereleases: z.boolean().nullish(),
   isEnabled: z.boolean().nullish(),

@@ -4,7 +4,15 @@ import { validateCron } from '../cron.ts';
 import type { RepositoryStore } from '../db.ts';
 import { parseEndpointUrl, type DockerEndpoint } from '../docker/domain.ts';
 import type { DockerStore } from '../docker/store.ts';
-import { fullName, parseRepositoryName, validateIcon, type WatchedRepository } from '../domain.ts';
+import {
+  fullName,
+  parseRepositoryName,
+  parseRepositoryReference,
+  PROVIDER_LABELS,
+  type RepositoryRef,
+  validateIcon,
+  type WatchedRepository,
+} from '../domain.ts';
 import { DEFAULT_SSH_PORT, DEFAULT_SSH_USER, HOST_TYPES, type Host, type HostType, validateHost } from '../hosts/domain.ts';
 import type { HostStore } from '../hosts/store.ts';
 import { normalizeHomeAssistantUrl } from '../proxmox/home-assistant.ts';
@@ -124,7 +132,7 @@ export class BackupService {
       if (settings.sourceOf(key) === 'ui') secretsOmitted.push(label);
     }
     for (const r of repositories) {
-      if (r.githubToken) secretsOmitted.push(`GitHub token of ${fullName(r)}`);
+      if (r.githubToken) secretsOmitted.push(`${PROVIDER_LABELS[r.provider]} token of ${fullName(r)}`);
       if (r.installedVersionHeaders.length > 0) {
         secretsOmitted.push(`Version URL headers of ${fullName(r)} (${r.installedVersionHeaders.map((h) => h.name).join(', ')})`);
       }
@@ -181,6 +189,8 @@ export class BackupService {
 
 function exportRepository(r: WatchedRepository): BackupRepository {
   return {
+    provider: r.provider,
+    host: r.host,
     owner: r.owner,
     name: r.name,
     includePrereleases: r.includePrereleases,
@@ -394,20 +404,21 @@ class ImportPlanner {
 
     (this.input.repositories ?? []).forEach((raw, index) => {
       const path = `repositories[${index}]`;
-      const parsed = parseRepositoryName(`${raw.owner.trim()}/${raw.name.trim()}`);
+      const parsed = backupRepositoryRef(raw);
       if (!parsed) {
-        this.error(`${path}.name`, `"${raw.owner}/${raw.name}" is not a valid GitHub repository name.`);
+        const name = fullName({ host: blank(raw.host), owner: raw.owner, name: raw.name });
+        this.error(`${path}.name`, `"${name}" is not a valid ${PROVIDER_LABELS[raw.provider ?? 'github']} repository.`);
         return;
       }
       const key = repositoryKey(parsed);
       if (seen.has(key)) {
-        this.error(`${path}.name`, `${parsed.owner}/${parsed.name} is listed twice.`);
+        this.error(`${path}.name`, `${fullName(parsed)} is listed twice.`);
         return;
       }
       seen.add(key);
       const item = this.normalizeRepository(raw, parsed, path);
       if (!item) return;
-      const label = `${item.owner}/${item.name}`;
+      const label = fullName(item);
       const current = existing.get(key);
 
       if (current) {
@@ -415,11 +426,12 @@ class ImportPlanner {
         const missingHeaders = item.installedVersionHeaderNames.filter(
           (name) => !current.installedVersionHeaders.some((h) => h.name.toLowerCase() === name.toLowerCase()),
         );
-        if (item.hasGithubToken && !current.githubToken) this.secrets.push(`GitHub token of ${label}`);
+        if (item.hasGithubToken && !current.githubToken) this.secrets.push(`${PROVIDER_LABELS[current.provider]} token of ${label}`);
         if (missingHeaders.length > 0) this.secrets.push(`Version URL headers of ${label} (${missingHeaders.join(', ')})`);
         // Secrets of an existing repository are kept, so they are not part of the comparison.
         const before = { ...exportRepository(current), installedVersionHeaderNames: [], hasGithubToken: false };
-        const after = { ...item, installedVersionHeaderNames: [], hasGithubToken: false };
+        // The provider of a host is found when the repository is added and is not changed by an import.
+        const after = { ...item, provider: current.provider, installedVersionHeaderNames: [], hasGithubToken: false };
         if (sameItem(before, after)) {
           section.unchanged++;
           return;
@@ -433,13 +445,13 @@ class ImportPlanner {
         return;
       }
 
-      if (item.hasGithubToken) this.secrets.push(`GitHub token of ${label}`);
+      if (item.hasGithubToken) this.secrets.push(`${PROVIDER_LABELS[item.provider]} token of ${label}`);
       if (item.installedVersionHeaderNames.length > 0) {
         this.secrets.push(`Version URL headers of ${label} (${item.installedVersionHeaderNames.join(', ')})`);
       }
       section.added.push(label);
       this.writes.push(() => {
-        const repo = store.add(item.owner, item.name, item.includePrereleases);
+        const repo = store.add(item.owner, item.name, item.includePrereleases, item);
         applyRepository(repo, item);
         store.save(repo);
         this.repoIds.set(key, repo.id);
@@ -459,7 +471,7 @@ class ImportPlanner {
 
   private normalizeRepository(
     raw: NonNullable<BackupInput['repositories']>[number],
-    parsed: { owner: string; name: string },
+    parsed: RepositoryRef,
     path: string,
   ): BackupRepository | null {
     let ok = true;
@@ -487,6 +499,8 @@ class ImportPlanner {
     }
     if (!ok) return null;
     return {
+      provider: parsed.provider,
+      host: parsed.host,
       owner: parsed.owner,
       name: parsed.name,
       includePrereleases: raw.includePrereleases ?? false,
@@ -736,7 +750,9 @@ class ImportPlanner {
       ok = false;
     };
     // Repositories the imported apps may link to: the file's, plus the existing ones when merging.
-    const knownRepos = new Set((this.input.repositories ?? []).map((r) => repositoryKey({ owner: r.owner.trim(), name: r.name.trim() })));
+    const knownRepos = new Set(
+      (this.input.repositories ?? []).map((r) => repositoryKey({ host: blank(r.host), owner: r.owner.trim(), name: r.name.trim() })),
+    );
     if (this.mode === 'merge') {
       for (const r of this.deps.store.list()) knownRepos.add(repositoryKey(r));
     }
@@ -915,6 +931,23 @@ class ImportPlanner {
     }
     return section;
   }
+}
+
+/** Repository of a backup entry: GitHub (no host) or a Gitea/Forgejo or GitLab instance; null when invalid. */
+function backupRepositoryRef(raw: NonNullable<BackupInput['repositories']>[number]): RepositoryRef | null {
+  const provider = raw.provider ?? 'github';
+  const host = blank(raw.host);
+  const owner = raw.owner.trim();
+  const name = raw.name.trim();
+  if (provider === 'github') {
+    const parsed = host === null ? parseRepositoryName(`${owner}/${name}`) : null;
+    return parsed ? { provider, host: null, ...parsed } : null;
+  }
+  const parsed = host === null ? null : parseRepositoryReference(`https://${host}/${owner}/${name}`);
+  if (!parsed?.host || parsed.owner !== owner || parsed.name !== name || (provider === 'gitea' && owner.includes('/'))) {
+    return null;
+  }
+  return { provider, host: parsed.host, owner, name };
 }
 
 function applyRepository(repo: WatchedRepository, item: BackupRepository): void {

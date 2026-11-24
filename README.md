@@ -5,7 +5,7 @@
 # ReleaseWatcher
 
 **Self-hosted release tracker for your homelab.**<br>
-Get notified about new GitHub releases and keep your Proxmox LXC containers up to date – from one small app.
+Get notified about new releases on GitHub, Gitea/Forgejo and GitLab and keep your Proxmox LXC containers up to date – from one small app.
 
 [![Version](https://img.shields.io/badge/version-1.7.0-5865f2)](https://github.com/Rozumek29/ReleaseWatcher/releases)
 [![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
@@ -30,9 +30,10 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 
 ## Features
 
-**GitHub releases**
+**Releases**
 
-- Watch any public or private repository; notifications on **Discord**, by **e-mail**, to **ntfy**, **Gotify**,
+- Watch any public or private repository on **GitHub**, **Gitea/Forgejo** (Codeberg, self-hosted) or **GitLab**
+  (gitlab.com, self-managed); notifications on **Discord**, by **e-mail**, to **ntfy**, **Gotify**,
   **Telegram**, **Slack**, **Pushover** or any **webhook** – one message per release or one summary per check run.
 - **Installed version** of your instance (read from a URL like `/api/version`, or entered by hand): see
   *Update available 1.34.1 → 1.34.3* at a glance and skip releases you already run.

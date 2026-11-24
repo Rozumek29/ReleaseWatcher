@@ -1,11 +1,18 @@
+/** Where a repository lives: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
+export type RepositoryProvider = 'github' | 'gitea' | 'gitlab';
+
 export interface WatchedRepository {
   id: number;
+  provider: RepositoryProvider;
+  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  host: string | null;
   owner: string;
   name: string;
+  /** `owner/name` on GitHub, `host/owner/name` elsewhere. */
   fullName: string;
   url: string;
-  /** Avatar of the owner (user or organization). */
-  avatarUrl: string;
+  /** Avatar of the owner (user or organization); null when the provider has none (GitLab). */
+  avatarUrl: string | null;
   /** Custom icon as entered: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = owner avatar. */
   icon: string | null;
   /** Image URLs of the custom icon, best first; empty without one. Shown before `avatarUrl`. */
@@ -110,9 +117,12 @@ export interface SecurityAdvisory {
 }
 
 export interface AddRepositoryRequest {
+  /** `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository. */
   repository: string;
+  /** Provider of a host that is not well known; omitted = detected. */
+  provider?: RepositoryProvider | null;
   includePrereleases: boolean;
-  /** Token for a private repository the global token cannot read. */
+  /** Token of the repository: a private one the global GitHub token cannot read, or one on another host. */
   githubToken?: string | null;
 }
 
@@ -387,7 +397,7 @@ export interface RepositoryAdvisory extends SecurityAdvisory {
     fullName: string;
     owner: string;
     url: string;
-    avatarUrl: string;
+    avatarUrl: string | null;
     /** Custom icon of the repository, best first; empty without one. */
     iconUrls: string[];
     installedVersion: string | null;
@@ -911,8 +921,8 @@ export interface DockerContainer {
   installedVersionSource: 'tag' | 'label' | 'digest' | null;
   /** Linked through its labels (true) or chosen by hand (false). */
   linkAuto: boolean;
-  repository: { id: number; fullName: string; latestVersion: string | null; iconUrls: string[] } | null;
-  /** Repository named by the labels that is not watched yet (`owner/name`). */
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository named by the labels that is not watched yet (`owner/name`, `host/owner/name` outside GitHub). */
   suggestedRepository: string | null;
   /** The linked repository has a newer release than the installed version; null = unknown. */
   updateAvailable: boolean | null;

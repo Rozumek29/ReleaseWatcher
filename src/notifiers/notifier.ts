@@ -1,9 +1,13 @@
 import type { SecurityAdvisory } from '../advisories.ts';
-import type { ReleaseInfo } from '../domain.ts';
+import { fullName, repositoryUrl, type ReleaseInfo, type RepositoryProvider } from '../domain.ts';
 import type { TargetKind } from '../proxmox/domain.ts';
 
 /** Payload passed to every notifier when a new release is detected. */
 export interface ReleaseNotification {
+  /** Where the repository lives; omitted = GitHub. */
+  provider?: RepositoryProvider;
+  /** Host of a Gitea/Forgejo or GitLab instance; omitted/null = GitHub. */
+  host?: string | null;
   owner: string;
   repository: string;
   release: ReleaseInfo;
@@ -15,6 +19,8 @@ export interface ReleaseNotification {
 
 /** A new security advisory was published for a watched repository. */
 export interface VulnerabilityNotification {
+  provider?: RepositoryProvider;
+  host?: string | null;
   owner: string;
   repository: string;
   advisory: SecurityAdvisory;
@@ -81,9 +87,13 @@ export type NotificationEvent =
   | { type: 'update-result'; result: UpdateResultNotification }
   | { type: 'docker-updates'; docker: DockerUpdatesNotification };
 
-export const notificationFullName = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string => `${n.owner}/${n.repository}`;
-export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string =>
-  `https://github.com/${n.owner}/${n.repository}`;
+type NotificationRepository = Pick<ReleaseNotification, 'host' | 'owner' | 'repository'>;
+
+/** `owner/repo` on GitHub, `host/owner/repo` elsewhere. */
+export const notificationFullName = (n: NotificationRepository): string =>
+  fullName({ host: n.host ?? null, owner: n.owner, name: n.repository });
+export const notificationRepoUrl = (n: NotificationRepository): string =>
+  repositoryUrl({ host: n.host ?? null, owner: n.owner, name: n.repository });
 
 /** "CT 105 (nextcloud)", "VM 137 (debian)", "Proxmox host (pve)" or a server's own name. */
 export const targetName = (n: { vmid: number; targetKind: TargetKind; containerName: string }): string =>

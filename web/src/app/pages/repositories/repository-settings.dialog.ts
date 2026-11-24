@@ -60,6 +60,11 @@ export class RepositorySettingsDialog {
   readonly saved = output<WatchedRepository>();
   readonly closed = output<void>();
 
+  /** Example of a token of the repository's provider. */
+  protected tokenPlaceholder(repo: WatchedRepository): string {
+    return repo.provider === 'github' ? 'github_pat_…' : repo.provider === 'gitlab' ? 'glpat-…' : 'Access token';
+  }
+
   private readonly dialog = viewChild.required<ElementRef<HTMLDialogElement>>('dialog');
 
   /** Where the installed version comes from. */

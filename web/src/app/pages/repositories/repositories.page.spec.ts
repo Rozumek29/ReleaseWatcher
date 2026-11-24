@@ -10,6 +10,8 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
   const [owner, name] = fullName.split('/') as [string, string];
   return {
     id,
+    provider: 'github',
+    host: null,
     owner,
     name,
     fullName,
@@ -150,6 +152,36 @@ describe('RepositoriesPage', () => {
       'middle',
       'widget',
     ]);
+  });
+
+  it('offers a provider choice only for a host it does not know', async () => {
+    const { el, fixture } = await render([]);
+    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
+    const type = async (value: string) => {
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      await settle(fixture);
+    };
+
+    await type('https://codeberg.org/forgejo/forgejo');
+    expect(el.querySelector('#new-provider')).toBeNull();
+    await type('https://git.example.com/me/app');
+    const select = el.querySelector<HTMLSelectElement>('#new-provider')!;
+    expect(select).not.toBeNull();
+    select.value = 'gitlab';
+    select.dispatchEvent(new Event('change'));
+    await settle(fixture);
+
+    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
+    await settle(fixture);
+    const request = http.expectOne({ method: 'POST', url: '/api/repositories' });
+    expect(request.request.body).toEqual({ repository: 'https://git.example.com/me/app', includePrereleases: false, provider: 'gitlab' });
+    request.flush(repo(3, 'me/app', { provider: 'gitlab', host: 'git.example.com', fullName: 'git.example.com/me/app', avatarUrl: null }));
+    await settle(fixture);
+    http.match('/api/status').forEach((r) => r.flush({}));
+
+    expect(el.querySelector('.row')?.textContent).toContain('git.example.com/me/app');
+    expect(el.querySelector('#new-provider')).toBeNull();
   });
 
   it('switches to the grid layout', async () => {

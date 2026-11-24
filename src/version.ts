@@ -25,6 +25,9 @@ export function parseVersion(input: string | null | undefined): ParsedVersion | 
   };
 }
 
+/** True when a tag names a pre-release ("v2.0.0-rc.1", "1.4-beta"), for providers without a pre-release flag. */
+export const isPrereleaseTag = (tag: string): boolean => (parseVersion(tag)?.prerelease ?? '') !== '';
+
 /** Returns a negative number if a < b, 0 if equal, positive if a > b. Null if either can't be parsed. */
 export function compareVersions(a: string | null | undefined, b: string | null | undefined): number | null {
   const left = parseVersion(a);
