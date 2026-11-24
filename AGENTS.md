@@ -66,7 +66,7 @@ described in `DESIGN.md` – follow it for every UI or API change so new code lo
 | `bun run test:api`   | server tests (`bun test`, limited to `test/` by `bunfig.toml`) |
 | `bun run test:web`   | UI tests (Vitest via `ng test`)                            |
 | `bun run build`      | production UI build into `public/`                         |
-| `bun run compile`    | single-file server executable into `dist/` (`scripts/compile.ts`) |
+| `bun run build:executable` | single-file server executable into `dist/` (`scripts/build-executable.ts`) |
 | `bun run deploy`     | build + install/update in a Proxmox LXC (`scripts/deploy-lxc.ts`, `deploy/install.sh`) |
 
 A single server test file: `bun test test/checker.test.ts`. Use `bun run test` (not `bun test`) for
@@ -83,8 +83,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - The server's only runtime dependencies are `@simplewebauthn/server` (passkeys) and `jose` (OIDC ID tokens). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
-- The release executable and the Docker image run the server as a `bun build --compile` binary (ESM +
-  bytecode, `scripts/compile.ts`) with the UI embedded: a generated entry point imports every `public/` file
+- The release executable and the Docker image run the server as a `Bun.build({ compile })` binary (ESM +
+  bytecode, `scripts/build-executable.ts`) with the UI embedded: a generated entry point imports every `public/` file
   `with { type: 'file' }`, fills `embeddedUi` (`src/embedded-ui.ts`) and then imports `main.ts`. Code must work
   there too: `import.meta.dir` points into Bun's virtual FS (`/$bunfs/…`), so don't read files relative to
   the sources at runtime, and avoid `import()` of paths the bundler cannot see.

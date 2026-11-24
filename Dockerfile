@@ -33,7 +33,7 @@ RUN case "${TARGET:-$TARGETARCH}" in \
       bun-*) ;; \
       *) echo "Unsupported platform: $TARGETARCH (supported: amd64, arm64)" >&2; exit 1 ;; \
     esac \
- && bun scripts/compile.ts --target=$TARGET --outfile=dist/releasewatcher ${VERSION:+--version=$VERSION} \
+ && bun scripts/build-executable.ts --target=$TARGET --outfile=dist/releasewatcher ${VERSION:+--version=$VERSION} \
  && mkdir -p /data
 
 # --- Runtime: the executable + OpenSSH client (used to reach the Proxmox node) ---

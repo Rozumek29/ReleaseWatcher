@@ -6,7 +6,6 @@ public
 .env
 release
 dist
-.compile
 encryption.key
 setup-code
 known_hosts

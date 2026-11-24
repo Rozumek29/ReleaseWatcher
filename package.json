@@ -19,7 +19,7 @@
     "test:api": "bun test",
     "test:web": "bun run --cwd web test --watch=false",
     "typecheck": "tsc --noEmit",
-    "compile": "bun scripts/compile.ts",
+    "build:executable": "bun scripts/build-executable.ts",
     "package": "bun scripts/package.ts",
     "deploy": "bun scripts/deploy-lxc.ts"
   },

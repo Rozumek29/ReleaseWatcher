@@ -24,9 +24,8 @@ known_hosts
 !.vscode/extensions.json
 .DS_Store
 
-# Compiled server executable (bun run compile)
+# Compiled server executable (bun run build:executable)
 /dist/
-/.compile/
 
 # Bun cache created by some local setups
 .bun-cache/

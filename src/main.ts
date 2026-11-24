@@ -84,7 +84,7 @@ const app = await buildApp({
     dataDir,
     bootstrap: config.basicAuth,
   },
-  // A compiled executable carries the UI inside (see scripts/compile.ts); from source it is read from disk.
+  // A compiled executable carries the UI inside (see scripts/build-executable.ts); from source it is read from disk.
   ...(embeddedUi.size > 0 ? { embeddedUi } : { publicDir: join(import.meta.dir, '..', 'public') }),
   log,
 });

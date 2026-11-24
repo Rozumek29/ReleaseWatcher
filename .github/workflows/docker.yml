@@ -7,7 +7,7 @@ on:
     paths:
       - Dockerfile
       - .dockerignore
-      - scripts/compile.ts
+      - scripts/build-executable.ts
       - package.json
       - bun.lock
       - .github/workflows/docker.yml

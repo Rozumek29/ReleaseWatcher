@@ -22,7 +22,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
-import { compile } from './compile.ts';
+import { buildExecutable } from './build-executable.ts';
 
 const root = resolve(import.meta.dir, '..');
 const { values } = parseArgs({
@@ -104,7 +104,7 @@ try {
     });
     if (build.exitCode !== 0) fail('UI build failed.');
     step('Compiling the Linux executable');
-    await compile({ outfile: binary, target: buildTarget });
+    await buildExecutable({ outfile: binary, target: buildTarget });
   } else if (!existsSync(binary)) {
     fail(`${binary} does not exist – run without --skip-build.`);
   }

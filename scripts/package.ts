@@ -11,7 +11,7 @@
 import { cpSync, mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import pkg from '../package.json';
-import { compile } from './compile.ts';
+import { buildExecutable } from './build-executable.ts';
 
 /**
  * `bun build --compile` targets of the executables; their file names use them without the `bun-` prefix. The
@@ -61,7 +61,7 @@ if (install.exitCode !== 0) process.exit(install.exitCode ?? 1);
 for (const target of TARGETS) {
   const binary = join(root, 'release', binaryName(target));
   rmSync(binary, { force: true });
-  await compile({ outfile: binary, target, version });
+  await buildExecutable({ outfile: binary, target, version });
 }
 
 console.log(`\nRelease ready in release/:`);
