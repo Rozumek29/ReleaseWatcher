@@ -33,6 +33,7 @@
   "dependencies": {
     "@simplewebauthn/server": "^14.1.0",
     "jose": "^6.2.18",
+    "nodemailer": "^10.6.1",
     "reflect-metadata": "^0.2.2"
   }
 }

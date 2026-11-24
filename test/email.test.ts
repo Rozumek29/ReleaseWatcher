@@ -2,9 +2,9 @@ import assert from 'node:assert/strict';
 import { createServer, type Server, type Socket } from 'node:net';
 import { createSecureContext, TLSSocket } from 'node:tls';
 import { afterEach, describe, it } from 'bun:test';
-import { buildEmail, buildMessage, EmailNotifier, parseAddress, parseRecipients } from '../src/notifiers/email.ts';
+import { buildEmail, EmailNotifier, parseAddress, parseRecipients } from '../src/notifiers/email.ts';
 import type { NotificationEvent } from '../src/notifiers/notifier.ts';
-import { sendMail, SmtpError, type SmtpServer } from '../src/notifiers/smtp.ts';
+import { type MailMessage, sendMail, SmtpError, type SmtpServer } from '../src/notifiers/smtp.ts';
 import { release } from './helpers.ts';
 
 // Self-signed certificate for "localhost" / 127.0.0.1, only for the local fake SMTP server below.
@@ -84,6 +84,9 @@ async function fakeSmtp(options: FakeSmtpOptions = {}): Promise<{ server: Server
         case 'EHLO':
           return ehlo();
         case 'STARTTLS': {
+          if (!options.starttls || received.tls) {
+            return reply('502 5.5.1 not offered');
+          }
           reply('220 go ahead');
           const secure = new TLSSocket(socket, { isServer: true, secureContext: createSecureContext({ cert: TEST_CERT, key: TEST_KEY }) });
           socket.removeAllListeners('data');
@@ -147,39 +150,61 @@ const smtp = (port: number, extra: Partial<SmtpServer> = {}): SmtpServer => ({
   ...extra,
 });
 
-const sampleMessage = buildMessage({
+const sampleMessage = (extra: Partial<MailMessage> = {}): MailMessage => ({
   from: 'ReleaseWatcher <rw@example.com>',
   to: ['me@example.com'],
-  content: { subject: 'Hello', text: '.leading dot\nline', html: '<p>hi</p>' },
+  subject: 'Hello',
+  text: 'first\n.\nafter a lone dot',
+  html: '<p>hi</p>',
   date: new Date('2026-01-02T03:04:05Z'),
-  domain: 'example.com',
+  ...extra,
 });
+
+/** Header block of a received message, with folded lines joined. */
+const headersOf = (data: string): string => data.split('\r\n\r\n')[0]!.replace(/\r\n[ \t]+/g, ' ');
 
 describe('sendMail', () => {
   it('delivers a message with AUTH PLAIN', async () => {
     const { port, received } = await fakeSmtp({ auth: 'PLAIN LOGIN' });
-    await sendMail(smtp(port, { username: 'user', password: 'secret' }), { from: 'rw@example.com', to: ['a@example.com', 'b@example.com'] }, sampleMessage);
+    await sendMail(smtp(port, { username: 'user', password: 'secret' }), sampleMessage({ to: ['a@example.com', 'b@example.com'] }));
 
     assert.equal(received.commands[0]?.startsWith('EHLO '), true);
     assert.equal(received.commands[1], `AUTH PLAIN ${Buffer.from('\0user\0secret').toString('base64')}`);
     assert.deepEqual(received.commands.slice(2, 6), ['MAIL FROM:<rw@example.com>', 'RCPT TO:<a@example.com>', 'RCPT TO:<b@example.com>', 'DATA']);
-    assert.equal(received.commands.at(-1), 'QUIT');
-    assert.equal(received.data, sampleMessage.replace(/\r\n$/, ''));
+    assert.ok(received.data);
+    const head = headersOf(received.data);
+    assert.match(head, /^From: ReleaseWatcher <rw@example\.com>$/m);
+    assert.match(head, /^To: a@example\.com, b@example\.com$/m);
+    assert.match(head, /^Subject: Hello$/m);
+    assert.match(head, /^Date: Fri, 02 Jan 2026 03:04:05 \+0000$/m);
+    assert.match(head, /^Message-ID: <.+@example\.com>$/m);
+    assert.match(head, /^Auto-Submitted: auto-generated$/m);
+    assert.match(head, /^Content-Type: multipart\/alternative;/m);
+    // The lone dot is escaped, so the message did not end early.
+    assert.match(received.data, /after a lone dot/);
+  });
+
+  it('encodes non-ASCII headers and keeps lines short', async () => {
+    const { port, received } = await fakeSmtp();
+    await sendMail(
+      smtp(port),
+      sampleMessage({ from: 'Wächter <rw@example.com>', subject: 'Neue Version – ok', text: 'Grüße '.repeat(400), html: `<p>${'Grüße '.repeat(400)}</p>` }),
+    );
+    const head = headersOf(received.data!);
+    assert.match(head, /^From: =\?UTF-8\?[BQ]\?.+\?= <rw@example\.com>$/m);
+    assert.match(head, /^Subject: =\?UTF-8\?[BQ]\?/m);
+    assert.ok(received.data!.split('\r\n').every((line) => line.length <= 998));
   });
 
   it('falls back to AUTH LOGIN', async () => {
     const { port, received } = await fakeSmtp({ auth: 'LOGIN' });
-    await sendMail(smtp(port, { username: 'user', password: 'secret' }), { from: 'rw@example.com', to: ['a@example.com'] }, sampleMessage);
+    await sendMail(smtp(port, { username: 'user', password: 'secret' }), sampleMessage());
     assert.deepEqual(received.commands.slice(1, 4), ['AUTH LOGIN', Buffer.from('user').toString('base64'), Buffer.from('secret').toString('base64')]);
   });
 
   it('upgrades the connection with STARTTLS and verifies the certificate', async () => {
     const { port, received } = await fakeSmtp({ starttls: true, auth: 'PLAIN' });
-    await sendMail(
-      smtp(port, { host: 'localhost', security: 'starttls', username: 'user', password: 'secret', tls: { ca: TEST_CERT } }),
-      { from: 'rw@example.com', to: ['a@example.com'] },
-      sampleMessage,
-    );
+    await sendMail(smtp(port, { host: 'localhost', security: 'starttls', username: 'user', password: 'secret', tls: { ca: TEST_CERT } }), sampleMessage());
     assert.equal(received.tls, true);
     assert.equal(received.commands[1], 'STARTTLS');
     assert.equal(received.commands[2]?.startsWith('EHLO '), true);
@@ -188,25 +213,31 @@ describe('sendMail', () => {
 
   it('refuses an untrusted certificate', async () => {
     const { port } = await fakeSmtp({ starttls: true });
-    await assert.rejects(
-      sendMail(smtp(port, { host: 'localhost', security: 'starttls' }), { from: 'rw@example.com', to: ['a@example.com'] }, sampleMessage),
-      SmtpError,
-    );
+    const error = await sendMail(smtp(port, { host: 'localhost', security: 'starttls' }), sampleMessage()).catch((e: unknown) => e);
+    assert.ok(error instanceof SmtpError);
+    assert.match(error.message, /self.signed certificate/i);
+    assert.doesNotMatch(error.message, /does not offer STARTTLS/);
+  });
+
+  it('does not use STARTTLS without encryption', async () => {
+    const { port, received } = await fakeSmtp({ starttls: true });
+    await sendMail(smtp(port), sampleMessage());
+    assert.equal(received.tls, false);
+    assert.equal(received.commands.includes('STARTTLS'), false);
   });
 
   it('fails when STARTTLS is required but not offered', async () => {
-    const { port } = await fakeSmtp();
-    await assert.rejects(
-      sendMail(smtp(port, { security: 'starttls' }), { from: 'rw@example.com', to: ['a@example.com'] }, sampleMessage),
-      /does not offer STARTTLS/,
-    );
+    const { port, received } = await fakeSmtp();
+    await assert.rejects(sendMail(smtp(port, { security: 'starttls' }), sampleMessage()), /does not offer STARTTLS/);
+    assert.equal(received.data, null);
   });
 
   it('reports a rejected login without the credentials', async () => {
     const { port } = await fakeSmtp({ auth: 'PLAIN', authReply: '535 5.7.8 bad credentials' });
-    const error = await sendMail(smtp(port, { username: 'user', password: 'hunter2' }), { from: 'rw@example.com', to: ['a@example.com'] }, sampleMessage).catch((e: unknown) => e);
+    const error = await sendMail(smtp(port, { username: 'user', password: 'hunter2' }), sampleMessage()).catch((e: unknown) => e);
     assert.ok(error instanceof SmtpError);
-    assert.match(error.message, /rejected the login \(AUTH PLAIN\): 535/);
+    assert.match(error.message, /rejected the login: 535 5\.7\.8 bad credentials/);
+    assert.equal(error.message.includes('hunter2'), false);
     assert.equal(error.message.includes(Buffer.from('\0user\0hunter2').toString('base64')), false);
   });
 
@@ -214,34 +245,7 @@ describe('sendMail', () => {
     const { server, port } = await fakeSmtp();
     server.close();
     await new Promise((resolve) => setTimeout(resolve, 20));
-    await assert.rejects(sendMail(smtp(port), { from: 'rw@example.com', to: ['a@example.com'] }, sampleMessage), SmtpError);
-  });
-});
-
-describe('buildMessage', () => {
-  it('builds a multipart message with encoded headers', () => {
-    const message = buildMessage({
-      from: 'Wächter <rw@example.com>',
-      to: ['a@example.com', 'b@example.com'],
-      content: { subject: 'Neue Version – ok', text: 'Grüße', html: '<p>Grüße</p>' },
-      date: new Date('2026-01-02T03:04:05Z'),
-      domain: 'example.com',
-    });
-    const [head = '', ...rest] = message.split('\r\n\r\n');
-    assert.match(head, /^From: =\?UTF-8\?B\?.+\?= <rw@example\.com>$/m);
-    assert.match(head, /^To: a@example\.com, b@example\.com$/m);
-    assert.match(head, /^Subject: =\?UTF-8\?B\?/m);
-    assert.match(head, /^Date: Fri, 02 Jan 2026 03:04:05 GMT$/m);
-    assert.match(head, /^Message-ID: <[0-9a-f-]+@example\.com>$/m);
-    const subject = /^Subject: (.*(?:\r\n .*)*)$/m.exec(head)![1]!;
-    const decoded = subject
-      .split('\r\n ')
-      .map((word) => Buffer.from(/=\?UTF-8\?B\?(.*)\?=/.exec(word)![1]!, 'base64').toString('utf8'))
-      .join('');
-    assert.equal(decoded, 'Neue Version – ok');
-    const textPart = rest.join('\r\n\r\n').split('Content-Transfer-Encoding: base64\r\n\r\n')[1]!.split('\r\n--')[0]!;
-    assert.equal(Buffer.from(textPart.replace(/\s/g, ''), 'base64').toString('utf8'), 'Grüße');
-    assert.ok(message.split('\r\n').every((line) => line.length <= 998));
+    await assert.rejects(sendMail(smtp(port), sampleMessage()), SmtpError);
   });
 });
 
@@ -296,20 +300,29 @@ describe('EmailNotifier', () => {
     assert.equal(new EmailNotifier({ server, from: 'rw@example.com', to: [], maxBodyLength: 100 }).isEnabled, false);
   });
 
-  it('sends through the SMTP client with the bare sender address as envelope', async () => {
-    const calls: { envelope: { from: string; to: readonly string[] }; message: string }[] = [];
+  it('sends the built mail through the SMTP client', async () => {
+    const calls: MailMessage[] = [];
     const notifier = new EmailNotifier({
       server: smtp(25),
       from: 'ReleaseWatcher <rw@example.com>',
       to: ['a@example.com'],
       maxBodyLength: 100,
-      send: async (_server, envelope, message) => {
-        calls.push({ envelope, message });
+      now: () => new Date('2026-01-02T03:04:05Z'),
+      send: async (_server, message) => {
+        calls.push(message);
       },
     });
     await notifier.notify({ owner: 'acme', repository: 'widget', release: release('v1', 1) });
-    assert.deepEqual(calls[0]?.envelope, { from: 'rw@example.com', to: ['a@example.com'] });
-    assert.match(calls[0]!.message, /^Subject: acme\/widget v1 released$/m);
+    assert.equal(calls[0]?.from, 'ReleaseWatcher <rw@example.com>');
+    assert.deepEqual(calls[0]?.to, ['a@example.com']);
+    assert.equal(calls[0]?.subject, 'acme/widget v1 released');
+    assert.equal(calls[0]?.date.toISOString(), '2026-01-02T03:04:05.000Z');
+    assert.match(calls[0]!.html, /acme\/widget v1/);
+  });
+
+  it('refuses an invalid sender address', async () => {
+    const notifier = new EmailNotifier({ server: smtp(25), from: 'nope', to: ['a@example.com'], maxBodyLength: 100, send: async () => undefined });
+    await assert.rejects(notifier.notify({ owner: 'acme', repository: 'widget', release: release('v1', 1) }), /Invalid sender address "nope"/);
   });
 
   it('builds a mail about new Docker images', () => {

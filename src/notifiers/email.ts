@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   advisoryIds,
   affectedVersions,
@@ -82,18 +81,15 @@ export class EmailNotifier implements Notifier {
     if (!options.server || !options.from) {
       throw new Error('E-mail is not configured.');
     }
-    const from = parseAddress(options.from);
-    if (!from) {
+    if (!parseAddress(options.from)) {
       throw new Error(`Invalid sender address "${options.from}".`);
     }
-    const message = buildMessage({
+    await (options.send ?? sendMail)(options.server, {
       from: options.from,
       to: options.to,
-      content,
+      ...content,
       date: (options.now ?? (() => new Date()))(),
-      domain: from.address.split('@')[1] ?? 'releasewatcher',
     });
-    await (options.send ?? sendMail)(options.server, { from: from.address, to: options.to }, message);
   }
 }
 
@@ -272,24 +268,6 @@ function dockerSection(notification: DockerUpdatesNotification): Section {
   };
 }
 
-/** Builds a complete RFC 5322 message (multipart/alternative, UTF-8, base64) with CRLF line endings. */
-export function buildMessage(input: { from: string; to: readonly string[]; content: EmailContent; date: Date; domain: string }): string {
-  const boundary = `rw-${randomUUID()}`;
-  const headers = [
-    `From: ${encodeAddress(input.from)}`,
-    `To: ${input.to.join(', ')}`,
-    `Subject: ${encodeHeader(input.content.subject)}`,
-    `Date: ${input.date.toUTCString()}`,
-    `Message-ID: <${randomUUID()}@${input.domain}>`,
-    'MIME-Version: 1.0',
-    'Auto-Submitted: auto-generated',
-    `Content-Type: multipart/alternative; boundary="${boundary}"`,
-  ];
-  const part = (type: string, body: string) =>
-    [`--${boundary}`, `Content-Type: ${type}; charset=utf-8`, 'Content-Transfer-Encoding: base64', '', wrapBase64(body)].join('\r\n');
-  return [...headers, '', part('text/plain', input.content.text), part('text/html', input.content.html), `--${boundary}--`, ''].join('\r\n');
-}
-
 /** Splits "Name <a@example.com>" or "a@example.com"; null when it is not a single plausible address. */
 export function parseAddress(value: string): { name: string | null; address: string } | null {
   const match = /^\s*(?:(.*?)\s*<([^<>\s]+)>|([^<>\s]+))\s*$/.exec(value);
@@ -315,35 +293,6 @@ export function parseRecipients(value: string): string[] {
     return parsed.address;
   });
 }
-
-function encodeAddress(value: string): string {
-  const parsed = parseAddress(value);
-  if (!parsed?.name) {
-    return parsed?.address ?? value;
-  }
-  const name = /^[\x20-\x7e]*$/.test(parsed.name) ? `"${parsed.name.replace(/["\\]/g, '\\$&')}"` : encodeHeader(parsed.name);
-  return `${name} <${parsed.address}>`;
-}
-
-/** RFC 2047 encoded-word for non-ASCII header text (split so encoded lines stay short). */
-function encodeHeader(value: string): string {
-  if (/^[\x20-\x7e]*$/.test(value)) {
-    return value;
-  }
-  const words: string[] = [];
-  let chunk = '';
-  for (const char of value) {
-    if (Buffer.byteLength(chunk + char) > 45) {
-      words.push(chunk);
-      chunk = '';
-    }
-    chunk += char;
-  }
-  words.push(chunk);
-  return words.map((w) => `=?UTF-8?B?${Buffer.from(w, 'utf8').toString('base64')}?=`).join('\r\n ');
-}
-
-const wrapBase64 = (text: string): string => Buffer.from(text, 'utf8').toString('base64').replace(/.{76}/g, '$&\r\n');
 
 
 const formatDate = (iso: string): string => `${iso.slice(0, 16).replace('T', ' ')} UTC`;

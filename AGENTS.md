@@ -80,7 +80,8 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Type-only imports must use `import type` / `type` specifiers (`verbatimModuleSyntax`).
 - Prefer union types / `as const` objects over `enum`/`namespace`.
 - `noUncheckedIndexedAccess` is on – indexed access returns `T | undefined`.
-- The server's only runtime dependencies are `@simplewebauthn/server` (passkeys) and `jose` (OIDC ID tokens). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
+- The server's only runtime dependencies are `@simplewebauthn/server` (passkeys), `jose` (OIDC ID tokens) and
+  `nodemailer` (SMTP and MIME messages, behind `sendMail()` in `src/notifiers/smtp.ts`). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
 - The release executable and the Docker image run the server as a `Bun.build({ compile })` binary (ESM +
