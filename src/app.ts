@@ -56,7 +56,7 @@ import {
   type SettingsService,
 } from './settings.ts';
 import { scanDirectory, StaticUi } from './static-ui.ts';
-import { parseId, readBody, RequestValidationError, validate, type ObjectSchema, type Schema } from './validation.ts';
+import { body, parseId, readBody, readOptionalBody, RequestValidationError, z } from './validation.ts';
 import {
   compareVersions,
   fetchInstalledVersion,
@@ -73,16 +73,10 @@ interface HeaderInput {
   value?: string | null;
 }
 
-const headersSchema: Schema = {
-  type: 'array',
-  nullable: true,
-  maxItems: MAX_CUSTOM_HEADERS,
-  items: {
-    type: 'object',
-    properties: { name: { type: 'string', maxLength: 100 }, value: { type: 'string', nullable: true, maxLength: 4000 } },
-    required: ['name'],
-  },
-};
+const headersSchema = z
+  .array(z.object({ name: z.string().max(100), value: z.string().max(4000).nullish() }))
+  .max(MAX_CUSTOM_HEADERS)
+  .nullish();
 
 /** Merges submitted headers with saved ones so secrets don't have to be sent back to the UI. */
 function resolveHeaders(input: readonly HeaderInput[], saved: readonly HttpHeader[]): HttpHeader[] | { error: string } {
@@ -351,96 +345,85 @@ export const toDto = (
   },
 });
 
-const addRepositorySchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    repository: { type: 'string' },
-    includePrereleases: { type: 'boolean' },
-    githubToken: { type: 'string', nullable: true, maxLength: 1000 },
-  },
-  required: ['repository'],
-};
+const addRepositorySchema = body({
+  repository: z.string(),
+  includePrereleases: z.boolean().optional(),
+  githubToken: z.string().max(1000).nullish(),
+});
 
-const updateRepositorySchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    includePrereleases: { type: 'boolean' },
-    isEnabled: { type: 'boolean' },
-    installedVersionUrl: { type: 'string', nullable: true, maxLength: 2000 },
-    installedVersionField: { type: 'string', nullable: true, maxLength: 200 },
-    installedVersionHeaders: headersSchema,
-    installedVersion: { type: 'string', nullable: true, maxLength: MANUAL_VERSION_MAX_LENGTH },
-    githubToken: { type: 'string', nullable: true, maxLength: 1000 },
-    osvEcosystem: { type: 'string', nullable: true, maxLength: 50 },
-    osvPackage: { type: 'string', nullable: true, maxLength: 300 },
-    icon: { type: 'string', nullable: true, maxLength: ICON_MAX_LENGTH },
-  },
-  required: ['includePrereleases', 'isEnabled'],
-};
+const updateRepositorySchema = body({
+  includePrereleases: z.boolean(),
+  isEnabled: z.boolean(),
+  installedVersionUrl: z.string().max(2000).nullish(),
+  installedVersionField: z.string().max(200).nullish(),
+  installedVersionHeaders: headersSchema,
+  /** Installed version entered by hand (only without a version URL); omit = keep, null/"" = none. */
+  installedVersion: z.string().max(MANUAL_VERSION_MAX_LENGTH).nullish(),
+  /** Omit = keep, null/"" = remove (use the global token). */
+  githubToken: z.string().max(1000).nullish(),
+  /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
+  osvEcosystem: z.string().max(50).nullish(),
+  osvPackage: z.string().max(300).nullish(),
+  /** Image URL or `sh:<slug>`; omit = keep, null/"" = owner avatar. */
+  icon: z.string().max(ICON_MAX_LENGTH).nullish(),
+});
 
-const testInstalledVersionSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    url: { type: 'string', maxLength: 2000 },
-    field: { type: 'string', nullable: true, maxLength: 200 },
-    headers: headersSchema,
-    repositoryId: { type: 'integer', nullable: true },
-  },
-  required: ['url'],
-};
+const testInstalledVersionSchema = body({
+  url: z.string().max(2000),
+  field: z.string().max(200).nullish(),
+  headers: headersSchema,
+  repositoryId: z.int().nullish(),
+});
 
-const settingsSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    discordWebhookUrl: { type: 'string', nullable: true },
-    discordMention: { type: 'string', nullable: true },
-    discordUsername: { type: 'string', nullable: true },
-    githubToken: { type: 'string', nullable: true },
-    releaseCheckCron: { type: 'string', nullable: true, maxLength: 200 },
-    advisoryCheckCron: { type: 'string', nullable: true, maxLength: 200 },
-    containerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
-    dockerCheckCron: { type: 'string', nullable: true, maxLength: 200 },
-    containerCheckConcurrency: { type: 'integer', nullable: true },
-    backupBeforeUpdate: { type: 'boolean', nullable: true },
-    runHistoryChecks: { type: 'integer', nullable: true },
-    runHistoryUpdates: { type: 'integer', nullable: true },
-    smtpHost: { type: 'string', nullable: true, maxLength: 253 },
-    smtpPort: { type: 'integer', nullable: true },
-    smtpSecurity: { type: 'string', nullable: true, maxLength: 20 },
-    smtpUsername: { type: 'string', nullable: true, maxLength: 500 },
-    smtpPassword: { type: 'string', nullable: true, maxLength: 500 },
-    emailFrom: { type: 'string', nullable: true, maxLength: 500 },
-    emailTo: { type: 'string', nullable: true, maxLength: 5000 },
-    ntfyUrl: { type: 'string', nullable: true, maxLength: 2000 },
-    ntfyTopic: { type: 'string', nullable: true, maxLength: 64 },
-    ntfyToken: { type: 'string', nullable: true, maxLength: 500 },
-    gotifyUrl: { type: 'string', nullable: true, maxLength: 2000 },
-    gotifyToken: { type: 'string', nullable: true, maxLength: 500 },
-    telegramBotToken: { type: 'string', nullable: true, maxLength: 200 },
-    telegramChatId: { type: 'string', nullable: true, maxLength: 64 },
-    slackWebhookUrl: { type: 'string', nullable: true, maxLength: 2000 },
-    pushoverUserKey: { type: 'string', nullable: true, maxLength: 64 },
-    pushoverAppToken: { type: 'string', nullable: true, maxLength: 64 },
-    webhookUrl: { type: 'string', nullable: true, maxLength: 2000 },
-    webhookMethod: { type: 'string', nullable: true, maxLength: 10 },
-    webhookHeaders: headersSchema,
-    notificationDigest: { type: 'boolean', nullable: true },
-    notifyReleases: { type: 'boolean', nullable: true },
-    notifyVulnerabilities: { type: 'boolean', nullable: true },
-    notifyAppUpdates: { type: 'boolean', nullable: true },
-    notifyAptUpdates: { type: 'boolean', nullable: true },
-    notifyUpdateSucceeded: { type: 'boolean', nullable: true },
-    notifyUpdateFailed: { type: 'boolean', nullable: true },
-    notifyDockerUpdates: { type: 'boolean', nullable: true },
-    advisoriesGithub: { type: 'boolean', nullable: true },
-    advisoriesOsv: { type: 'boolean', nullable: true },
-  },
-};
+/** Nullable setting: omitted = keep, null = reset to the env value. */
+const nullableString = (maxLength?: number) => (maxLength === undefined ? z.string() : z.string().max(maxLength)).nullish();
 
-const testNotificationSchema: ObjectSchema = {
-  type: 'object',
-  properties: { notifier: { type: 'string', nullable: true, maxLength: 50 } },
-};
+const settingsSchema = body({
+  discordWebhookUrl: nullableString(),
+  discordMention: nullableString(),
+  discordUsername: nullableString(),
+  githubToken: nullableString(),
+  releaseCheckCron: nullableString(200),
+  advisoryCheckCron: nullableString(200),
+  containerCheckCron: nullableString(200),
+  dockerCheckCron: nullableString(200),
+  containerCheckConcurrency: z.int().nullish(),
+  backupBeforeUpdate: z.boolean().nullish(),
+  runHistoryChecks: z.int().nullish(),
+  runHistoryUpdates: z.int().nullish(),
+  smtpHost: nullableString(253),
+  smtpPort: z.int().nullish(),
+  smtpSecurity: nullableString(20),
+  smtpUsername: nullableString(500),
+  smtpPassword: nullableString(500),
+  emailFrom: nullableString(500),
+  emailTo: nullableString(5000),
+  ntfyUrl: nullableString(2000),
+  ntfyTopic: nullableString(64),
+  ntfyToken: nullableString(500),
+  gotifyUrl: nullableString(2000),
+  gotifyToken: nullableString(500),
+  telegramBotToken: nullableString(200),
+  telegramChatId: nullableString(64),
+  slackWebhookUrl: nullableString(2000),
+  pushoverUserKey: nullableString(64),
+  pushoverAppToken: nullableString(64),
+  webhookUrl: nullableString(2000),
+  webhookMethod: nullableString(10),
+  webhookHeaders: headersSchema,
+  notificationDigest: z.boolean().nullish(),
+  notifyReleases: z.boolean().nullish(),
+  notifyVulnerabilities: z.boolean().nullish(),
+  notifyAppUpdates: z.boolean().nullish(),
+  notifyAptUpdates: z.boolean().nullish(),
+  notifyUpdateSucceeded: z.boolean().nullish(),
+  notifyUpdateFailed: z.boolean().nullish(),
+  notifyDockerUpdates: z.boolean().nullish(),
+  advisoriesGithub: z.boolean().nullish(),
+  advisoriesOsv: z.boolean().nullish(),
+});
+
+const testNotificationSchema = body({ notifier: z.string().max(50).nullish() });
 
 /** The UI files to serve: the ones embedded into a compiled executable, else the files of `publicDir`. */
 async function loadUi(deps: Pick<AppDeps, 'publicDir' | 'embeddedUi'>): Promise<StaticUi | null> {
@@ -822,10 +805,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const jsonBody = (body: string) => new Response(body, { headers: { 'content-type': 'application/json;charset=utf-8' } });
 
   const addRepository = async (req: Request) => {
-    const body = await readBody<{ repository: string; includePrereleases?: boolean; githubToken?: string | null }>(
-      req,
-      addRepositorySchema,
-    );
+    const body = await readBody(req, addRepositorySchema);
     const githubToken = body.githubToken?.trim() || null;
     const parsed = parseRepositoryName(body.repository);
     if (!parsed) {
@@ -861,22 +841,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const updateRepository = async (req: Request, rawId: string) => {
     const repo = findRepository(rawId);
-    const body = await readBody<{
-      includePrereleases: boolean;
-      isEnabled: boolean;
-      installedVersionUrl?: string | null;
-      installedVersionField?: string | null;
-      installedVersionHeaders?: HeaderInput[] | null;
-      /** Installed version entered by hand (only without a version URL); omit = keep, null/"" = none. */
-      installedVersion?: string | null;
-      /** Omit = keep, null/"" = remove (use the global token). */
-      githubToken?: string | null;
-      /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
-      osvEcosystem?: string | null;
-      osvPackage?: string | null;
-      /** Image URL or `sh:<slug>`; omit = keep, null/"" = owner avatar. */
-      icon?: string | null;
-    }>(req, updateRepositorySchema);
+    const body = await readBody(req, updateRepositorySchema);
     if (!repo) {
       return problem(404, 'Repository not found.');
     }
@@ -989,10 +954,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   // Tries an installed-version URL without saving it (used by the "Test" button in the UI).
   // `repositoryId` lets headers without a value reuse the secret saved for that repository.
   const testInstalledVersion = async (req: Request) => {
-    const body = await readBody<{ url: string; field?: string | null; headers?: HeaderInput[] | null; repositoryId?: number | null }>(
-      req,
-      testInstalledVersionSchema,
-    );
+    const body = await readBody(req, testInstalledVersionSchema);
     const urlError = validateVersionUrl(body.url.trim());
     if (urlError) {
       return validationProblem('installedVersionUrl', urlError);
@@ -1016,11 +978,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const updateSettings = async (req: Request) => {
-    const { webhookHeaders, ...body } = await readBody<Omit<SettingsPatch, 'webhookHeaders'> & { webhookHeaders?: HeaderInput[] | null }>(
-      req,
-      settingsSchema,
-    );
-    const patch: SettingsPatch = body;
+    const { webhookHeaders, ...body } = await readBody(req, settingsSchema);
+    // Values of enum settings (`smtpSecurity`, `webhookMethod`…) are checked by `settings.update()`.
+    const patch = body as SettingsPatch;
     if (webhookHeaders !== undefined) {
       // Headers sent without a value keep the saved one (values are never sent to the UI).
       const resolved = resolveHeaders(webhookHeaders ?? [], parseWebhookHeaders(settings.current.webhookHeaders));
@@ -1268,8 +1228,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         '/api/notifiers/test': {
           POST: async (req) => {
             // The body is optional: without it every enabled channel is tested.
-            const text = await req.text();
-            const body = text.trim() ? (validate(parseJson(text), testNotificationSchema, 'body') as { notifier?: string | null }) : {};
+            const body = await readOptionalBody(req, testNotificationSchema);
             const name = body.notifier ?? undefined;
             if (name !== undefined && !deps.notifiers.some((n) => n.name === name && n.isEnabled)) {
               return problem(409, 'Channel not configured', { detail: `The ${name} channel is not configured.` });
@@ -1343,12 +1302,4 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   return { checker, releaseJob, advisoryJob, dockerJob, docker, scheduler, updater, containers, auth, log, listen, close };
-}
-
-function parseJson(text: string): unknown {
-  try {
-    return JSON.parse(text);
-  } catch {
-    throw new RequestValidationError('body must be valid JSON');
-  }
 }

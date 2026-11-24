@@ -1,89 +1,90 @@
 /**
- * Tiny request validator replacing the JSON-schema validation Fastify used to do. It supports only what the
- * API needs; unknown object properties are dropped (like Fastify's default `removeAdditional`).
+ * Request validation with Zod. Every body schema is compiled ahead of use (`z.compile()`, https://zod.dev/compile):
+ * valid input is checked by generated code, invalid input falls back to the standard parser for the issues.
+ * Unknown object properties are dropped.
  */
+import * as z from 'zod';
 
-export type Schema =
-  | { type: 'string'; nullable?: boolean; maxLength?: number }
-  | { type: 'boolean'; nullable?: boolean }
-  | { type: 'number' | 'integer'; nullable?: boolean; minimum?: number }
-  | { type: 'array'; nullable?: boolean; maxItems?: number; items: Schema }
-  /** Any JSON object, passed through unchanged (e.g. WebAuthn responses validated by their own library). */
-  | { type: 'json'; nullable?: boolean }
-  | ObjectSchema;
-
-export interface ObjectSchema {
-  type: 'object';
-  nullable?: boolean;
-  properties: Readonly<Record<string, Schema>>;
-  required?: readonly string[];
-}
+export { z };
 
 /** Thrown for malformed requests; turned into a 400 problem response by the server. */
 export class RequestValidationError extends Error {
   override name = 'RequestValidationError';
 }
 
-const isPlainObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
+/**
+ * Compiles a request schema. `strict` throws when the schema cannot be compiled at all (e.g. something async or
+ * recursive), so it fails at startup – and in the tests – instead of silently running on the standard parser.
+ * Unsupported children of an object (`z.coerce.*`, async checks) only run on the standard parser – avoid them.
+ */
+export function compile<T extends z.ZodType>(schema: T): T {
+  return z.compile(schema, { strict: true });
+}
 
-/** Validates `value` against `schema` and returns a copy without unknown properties. Throws on failure. */
-export function validate(value: unknown, schema: Schema, path: string): unknown {
-  if (value === null && schema.nullable) {
-    return null;
+/** A body schema: an object, compiled, unknown properties dropped. */
+export const body = <Shape extends z.ZodRawShape>(shape: Shape) => compile(z.object(shape));
+
+/** Any JSON object, passed through unchanged (e.g. WebAuthn responses validated by their own library). */
+export const jsonObject = <T extends object>() =>
+  z.custom<T>((value) => typeof value === 'object' && value !== null && !Array.isArray(value), 'must be object');
+
+/** Message of an issue in the style of the former JSON-schema validator, e.g. `body/name must be string`. */
+function describeIssue(issue: z.core.$ZodIssue, root: string): string {
+  const segments = [root, ...issue.path.map(String)];
+  const path = segments.join('/');
+  switch (issue.code) {
+    case 'invalid_type':
+      if (issue.input === undefined && segments.length > 1) {
+        return `${segments.slice(0, -1).join('/')} must have required property '${segments.at(-1)}'`;
+      }
+      return `${path} must be ${issue.expected === 'int' ? 'integer' : issue.expected}`;
+    case 'too_big':
+      if (issue.origin === 'string') return `${path} must NOT have more than ${issue.maximum} characters`;
+      if (issue.origin === 'array') return `${path} must NOT have more than ${issue.maximum} items`;
+      return `${path} must be <= ${issue.maximum}`;
+    case 'too_small':
+      return `${path} must be >= ${issue.minimum}`;
+    default:
+      return `${path} ${issue.message}`;
   }
-  const fail = (message: string): never => {
-    throw new RequestValidationError(`${path} ${message}`);
-  };
+}
 
-  switch (schema.type) {
-    case 'string':
-      if (typeof value !== 'string') return fail('must be string');
-      if (schema.maxLength !== undefined && value.length > schema.maxLength) {
-        return fail(`must NOT have more than ${schema.maxLength} characters`);
-      }
-      return value;
-    case 'boolean':
-      return typeof value === 'boolean' ? value : fail('must be boolean');
-    case 'number':
-    case 'integer':
-      if (typeof value !== 'number' || !Number.isFinite(value)) return fail('must be number');
-      if (schema.type === 'integer' && !Number.isInteger(value)) return fail('must be integer');
-      if (schema.minimum !== undefined && value < schema.minimum) return fail(`must be >= ${schema.minimum}`);
-      return value;
-    case 'array':
-      if (!Array.isArray(value)) return fail('must be array');
-      if (schema.maxItems !== undefined && value.length > schema.maxItems) {
-        return fail(`must NOT have more than ${schema.maxItems} items`);
-      }
-      return value.map((item, i) => validate(item, schema.items, `${path}/${i}`));
-    case 'json':
-      return isPlainObject(value) ? value : fail('must be object');
-    case 'object': {
-      if (!isPlainObject(value)) return fail('must be object');
-      for (const key of schema.required ?? []) {
-        if (value[key] === undefined) fail(`must have required property '${key}'`);
-      }
-      const result: Record<string, unknown> = {};
-      for (const [key, propertySchema] of Object.entries(schema.properties)) {
-        if (value[key] !== undefined) {
-          result[key] = validate(value[key], propertySchema, `${path}/${key}`);
-        }
-      }
-      return result;
-    }
+/** Validates `value` and returns the parsed copy (unknown properties dropped). Throws on failure. */
+export function validate<T extends z.ZodType>(value: unknown, schema: T, root = 'body'): z.output<T> {
+  const result = schema.safeParse(value, { reportInput: true });
+  if (!result.success) {
+    const [issue] = result.error.issues;
+    throw new RequestValidationError(issue ? describeIssue(issue, root) : `${root} is not valid`);
+  }
+  return result.data;
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new RequestValidationError('body must be valid JSON');
   }
 }
 
 /** Parses and validates a JSON request body. */
-export async function readBody<T>(request: Request, schema: ObjectSchema): Promise<T> {
-  let body: unknown;
+export async function readBody<T extends z.ZodType>(request: Request, schema: T): Promise<z.output<T>> {
+  let json: unknown;
   try {
-    body = await request.json();
+    json = await request.json();
   } catch {
     throw new RequestValidationError('body must be valid JSON');
   }
-  return validate(body, schema, 'body') as T;
+  return validate(json, schema);
+}
+
+/**
+ * Like `readBody()`, for endpoints whose body may be left out: an empty body counts as `{}`. Reads the text first
+ * because `request.json()` rejects an empty body.
+ */
+export async function readOptionalBody<T extends z.ZodType>(request: Request, schema: T): Promise<z.output<T>> {
+  const text = await request.text();
+  return validate(text.trim() ? parseJson(text) : {}, schema);
 }
 
 /** Parses a positive integer route parameter. */

@@ -80,8 +80,9 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Type-only imports must use `import type` / `type` specifiers (`verbatimModuleSyntax`).
 - Prefer union types / `as const` objects over `enum`/`namespace`.
 - `noUncheckedIndexedAccess` is on – indexed access returns `T | undefined`.
-- The server's only runtime dependencies are `@simplewebauthn/server` (passkeys), `jose` (OIDC ID tokens) and
-  `nodemailer` (SMTP and MIME messages, behind `sendMail()` in `src/notifiers/smtp.ts`). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
+- The server's only runtime dependencies are `@simplewebauthn/server` (passkeys), `jose` (OIDC ID tokens),
+  `nodemailer` (SMTP and MIME messages, behind `sendMail()` in `src/notifiers/smtp.ts`) and `zod` (request bodies,
+  behind `src/validation.ts`). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
 - The release executable and the Docker image run the server as a `Bun.build({ compile })` binary (ESM +
@@ -98,7 +99,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   notifiers, logger and optional fakes (`fetchInstalledVersion`, clock). Keep new I/O behind such seams so it
   can be faked in tests. `app.listen()` starts `Bun.serve`; `app.close()` stops the server and the scheduled jobs.
 - Pure logic lives in `domain.ts` / `version.ts`; `checker.ts` orchestrates; `app.ts` only handles HTTP
-  (routes via `Bun.serve({ routes })`, body validation via the small schemas in `validation.ts`, errors via
+  (routes via `Bun.serve({ routes })`, body validation via Zod schemas compiled with `body()` from `validation.ts`, errors via
   the `problem()` helper). A thrown `RequestValidationError` becomes a 400 problem response.
 - Logging goes through the `Logger` from `log.ts` (`log.info({ fields }, 'message')`, JSON lines).
 - `checker.ts` advances the baseline (`lastSeenTag`/`lastSeenPublishedAt`) after **each** dispatched release

@@ -93,7 +93,11 @@ Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 - **Errors** are always problem details via `problem()` / `validationProblem()` (`src/http.ts`):
   `{ status, title, detail?, errors?: { field: [message] } }`. Messages are full English sentences meant for the
   user – the UI shows them as they are (`describeError()` in `api.service.ts`).
-- **Validation** uses the schemas in `validation.ts` (`readBody(req, schema)`, `parseId()`); throw
+- **Validation** uses Zod schemas built with `body({ … })` from `validation.ts`, which compiles them with
+  `z.compile(…, { strict: true })` ([AOT compilation](https://zod.dev/compile)) – define them once at module level, never
+  per request, and keep them compilable (no `z.coerce`, async checks or recursion). Read bodies with
+  `readBody(req, schema)` (or `readOptionalBody()` when the body may be empty) – the type comes from the schema, no
+  casts – and ids with `parseId()`; throw
   `RequestValidationError` instead of building 400s by hand.
 - **DTOs** are explicit mapper functions (`toDto`, `settingsDto`, `runDto` …) – never return a DB row or entity
   directly. Internal fields (ETags, raw secrets) never leave the server.

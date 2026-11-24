@@ -2,7 +2,7 @@ import type { CronJob } from '../cron-job.ts';
 import type { RepositoryStore } from '../db.ts';
 import { errorMessage } from '../errors.ts';
 import { problem, validationProblem } from '../http.ts';
-import { type ObjectSchema, parseId, readBody } from '../validation.ts';
+import { body, parseId, readBody, z } from '../validation.ts';
 import { type DockerEndpoint, engineLabel, parseEndpointUrl } from './domain.ts';
 import { type DockerService, EndpointBusyError } from './service.ts';
 import type { DockerStore } from './store.ts';
@@ -18,31 +18,20 @@ export interface DockerRoutesDeps {
 const MAX_NAME_LENGTH = 100;
 const MAX_URL_LENGTH = 500;
 
-const endpointSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', maxLength: MAX_NAME_LENGTH },
-    url: { type: 'string', maxLength: MAX_URL_LENGTH },
-    isEnabled: { type: 'boolean' },
-  },
-  required: ['name', 'url'],
-};
+const endpointSchema = body({
+  name: z.string().max(MAX_NAME_LENGTH),
+  url: z.string().max(MAX_URL_LENGTH),
+  isEnabled: z.boolean().optional(),
+});
 
-const testSchema: ObjectSchema = {
-  type: 'object',
-  properties: { url: { type: 'string', maxLength: MAX_URL_LENGTH } },
-  required: ['url'],
-};
+const testSchema = body({ url: z.string().max(MAX_URL_LENGTH) });
 
-const containerSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    ignored: { type: 'boolean' },
-    /** true = link through the labels; false = `repositoryId` (null = no repository). */
-    linkAuto: { type: 'boolean' },
-    repositoryId: { type: 'integer', nullable: true, minimum: 1 },
-  },
-};
+const containerSchema = body({
+  ignored: z.boolean().optional(),
+  /** true = link through the labels; false = `repositoryId` (null = no repository). */
+  linkAuto: z.boolean().optional(),
+  repositoryId: z.int().min(1).nullish(),
+});
 
 /** Validates name and URL of an endpoint; returns the normalized values or a problem response. */
 function readEndpoint(body: { name: string; url: string }): { name: string; url: string } | Response {
@@ -97,7 +86,7 @@ export function dockerRoutes(deps: DockerRoutesDeps) {
     '/api/docker/endpoints': {
       GET: () => Response.json(store.listEndpoints().map(endpointDto)),
       POST: async (req: Request) => {
-        const body = await readBody<{ name: string; url: string }>(req, endpointSchema);
+        const body = await readBody(req, endpointSchema);
         const input = readEndpoint(body);
         if (input instanceof Response) return input;
         const endpoint = store.addEndpoint(input.name, input.url);
@@ -107,7 +96,7 @@ export function dockerRoutes(deps: DockerRoutesDeps) {
     },
     '/api/docker/endpoints/test': {
       POST: async (req: Request) => {
-        const body = await readBody<{ url: string }>(req, testSchema);
+        const body = await readBody(req, testSchema);
         const parsed = parseEndpointUrl(body.url);
         if ('error' in parsed) {
           return validationProblem('url', parsed.error);
@@ -123,7 +112,7 @@ export function dockerRoutes(deps: DockerRoutesDeps) {
     '/api/docker/endpoints/:id': {
       PUT: async (req: Bun.BunRequest<'/api/docker/endpoints/:id'>) => {
         const endpoint = findEndpoint(req.params.id);
-        const body = await readBody<{ name: string; url: string; isEnabled?: boolean }>(req, endpointSchema);
+        const body = await readBody(req, endpointSchema);
         if (!endpoint) return problem(404, 'Docker endpoint not found.');
         const input = readEndpoint(body);
         if (input instanceof Response) return input;
@@ -163,7 +152,7 @@ export function dockerRoutes(deps: DockerRoutesDeps) {
     '/api/docker/containers/:id': {
       PUT: async (req: Bun.BunRequest<'/api/docker/containers/:id'>) => {
         const container = store.getContainer(parseId(req.params.id));
-        const body = await readBody<{ ignored?: boolean; linkAuto?: boolean; repositoryId?: number | null }>(req, containerSchema);
+        const body = await readBody(req, containerSchema);
         if (!container) return problem(404, 'Docker container not found.');
         const linkAuto = body.linkAuto ?? (body.repositoryId !== undefined ? false : container.linkAuto);
         const repositoryId = linkAuto ? null : body.repositoryId === undefined ? container.repositoryId : body.repositoryId;

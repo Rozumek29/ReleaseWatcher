@@ -2,7 +2,7 @@ import { errorMessage } from '../errors.ts';
 import { problem, validationProblem } from '../http.ts';
 import type { Logger } from '../log.ts';
 import { describeSshFailure, ShellNotConfiguredError } from '../proxmox/ssh.ts';
-import { type ObjectSchema, parseId, readBody } from '../validation.ts';
+import { body, parseId, readBody, z } from '../validation.ts';
 import {
   DEFAULT_SSH_PORT,
   DEFAULT_SSH_USER,
@@ -41,43 +41,24 @@ export interface HostRoutesDeps {
 
 const TEST_TIMEOUT_MS = 30_000;
 
-const addKeySchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', maxLength: MAX_NAME_LENGTH },
-    privateKey: { type: 'string', maxLength: MAX_PRIVATE_KEY_LENGTH },
-  },
-  required: ['name', 'privateKey'],
-};
+const addKeySchema = body({
+  name: z.string().max(MAX_NAME_LENGTH),
+  privateKey: z.string().max(MAX_PRIVATE_KEY_LENGTH),
+});
 
-const generateKeySchema: ObjectSchema = {
-  type: 'object',
-  properties: { name: { type: 'string', maxLength: MAX_NAME_LENGTH } },
-  required: ['name'],
-};
+const generateKeySchema = body({ name: z.string().max(MAX_NAME_LENGTH) });
 
-const hostSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    type: { type: 'string', maxLength: 20 },
-    name: { type: 'string', maxLength: MAX_NAME_LENGTH },
-    address: { type: 'string', maxLength: 253 },
-    port: { type: 'integer', nullable: true },
-    user: { type: 'string', nullable: true, maxLength: 32 },
-    sshKeyId: { type: 'integer', nullable: true },
-    backupStorage: { type: 'string', nullable: true, maxLength: 100 },
-  },
-};
+const hostSchema = body({
+  type: z.string().max(20).optional(),
+  name: z.string().max(MAX_NAME_LENGTH).optional(),
+  address: z.string().max(253).optional(),
+  port: z.int().nullish(),
+  user: z.string().max(32).nullish(),
+  sshKeyId: z.int().nullish(),
+  backupStorage: z.string().max(100).nullish(),
+});
 
-interface HostBody {
-  type?: string;
-  name?: string;
-  address?: string;
-  port?: number | null;
-  user?: string | null;
-  sshKeyId?: number | null;
-  backupStorage?: string | null;
-}
+type HostBody = z.output<typeof hostSchema>;
 
 const fieldProblem = (errors: FieldErrors): Response =>
   problem(400, 'One or more validation errors occurred.', {
@@ -154,7 +135,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
     '/api/ssh-keys': {
       GET: () => Response.json(hosts.listKeys().map(keyDto)),
       POST: async (req: Request) => {
-        const body = await readBody<{ name: string; privateKey: string }>(req, addKeySchema);
+        const body = await readBody(req, addKeySchema);
         const shapeError = validatePrivateKey(body.privateKey);
         if (shapeError) return validationProblem('privateKey', shapeError);
         return saveKey(body.name, normalizePrivateKey(body.privateKey), 201);
@@ -163,7 +144,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
     // Creates a new Ed25519 key pair here – only the public key leaves the server.
     '/api/ssh-keys/generate': {
       POST: async (req: Request) => {
-        const body = await readBody<{ name: string }>(req, generateKeySchema);
+        const body = await readBody(req, generateKeySchema);
         const nameError = validateName(body.name, 'key');
         if (nameError) return validationProblem('name', nameError);
         if (hosts.keyNameExists(body.name)) return validationProblem('name', `A key named "${body.name.trim()}" already exists.`);
@@ -179,7 +160,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
     '/api/ssh-keys/:id': {
       PUT: async (req: Bun.BunRequest<'/api/ssh-keys/:id'>) => {
         const id = parseId(req.params.id);
-        const body = await readBody<{ name: string }>(req, generateKeySchema);
+        const body = await readBody(req, generateKeySchema);
         if (!hosts.keySummary(id)) return problem(404, 'SSH key not found.');
         const nameError = validateName(body.name, 'key');
         if (nameError) return validationProblem('name', nameError);
@@ -205,7 +186,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
         return Response.json(hosts.listHosts().map((h) => hostDto(h, context)));
       },
       POST: async (req: Request) => {
-        const body = await readBody<HostBody>(req, hostSchema);
+        const body = await readBody(req, hostSchema);
         if (!HOST_TYPES.includes(body.type as HostType)) {
           return validationProblem('type', `Choose one of: ${HOST_TYPES.join(', ')}.`);
         }
@@ -234,7 +215,7 @@ export function hostRoutes(deps: HostRoutesDeps) {
       // Omitted = keep, value = set; `sshKeyId: null` removes the key.
       PUT: async (req: Bun.BunRequest<'/api/hosts/:id'>) => {
         const id = parseId(req.params.id);
-        const body = await readBody<HostBody>(req, hostSchema);
+        const body = await readBody(req, hostSchema);
         const host = hosts.getHost(id);
         if (!host) return problem(404, 'Host not found.');
         if (body.type !== undefined && body.type !== host.type) {

@@ -4,7 +4,7 @@ import { errorMessage } from '../errors.ts';
 import { problem, validationProblem } from '../http.ts';
 import { maskSecret } from '../settings.ts';
 import { validateCron } from '../cron.ts';
-import { type ObjectSchema, parseId, readBody, RequestValidationError, validate } from '../validation.ts';
+import { body, parseId, readBody, readOptionalBody, RequestValidationError, z } from '../validation.ts';
 import {
   appUpdateAvailable,
   type Container,
@@ -64,105 +64,60 @@ export interface ContainerRoutesDeps {
 
 const COMMAND_MAX_LENGTH = 4000;
 
-const addContainerSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    vmid: { type: 'integer', minimum: 1 },
-    name: { type: 'string', nullable: true, maxLength: 100 },
-    /** Proxmox node to add the guest from; omitted = the default (first) node. */
-    hostId: { type: 'integer', nullable: true, minimum: 1 },
-  },
-  required: ['vmid'],
-};
+const addContainerSchema = body({
+  vmid: z.int().min(1),
+  name: z.string().max(100).nullish(),
+  /** Proxmox node to add the guest from; omitted = the default (first) node. */
+  hostId: z.int().min(1).nullish(),
+});
 
-const updateContainerSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', maxLength: 100 },
-    isEnabled: { type: 'boolean' },
-    aptEnabled: { type: 'boolean' },
-    backupBeforeUpdate: { type: 'boolean', nullable: true },
-    startWhenStopped: { type: 'boolean' },
-    checkCron: { type: 'string', nullable: true, maxLength: 200 },
-    updateCores: { type: 'integer', nullable: true },
-    updateMemoryMb: { type: 'integer', nullable: true },
-    homeAssistantUrl: { type: 'string', nullable: true, maxLength: 500 },
-    homeAssistantToken: { type: 'string', nullable: true, maxLength: 1000 },
-    homeAssistantInstall: { type: 'boolean' },
-    dockerEnabled: { type: 'boolean' },
-  },
-  required: ['name', 'isEnabled', 'aptEnabled'],
-};
+const updateContainerSchema = body({
+  name: z.string().max(100),
+  isEnabled: z.boolean(),
+  aptEnabled: z.boolean(),
+  backupBeforeUpdate: z.boolean().nullish(),
+  startWhenStopped: z.boolean().optional(),
+  checkCron: z.string().max(200).nullish(),
+  updateCores: z.int().nullish(),
+  updateMemoryMb: z.int().nullish(),
+  homeAssistantUrl: z.string().max(500).nullish(),
+  homeAssistantToken: z.string().max(1000).nullish(),
+  homeAssistantInstall: z.boolean().optional(),
+  dockerEnabled: z.boolean().optional(),
+});
 
 /** Body of `POST /api/containers/:id/home-assistant-update`: `ids` selects updates (omitted = all installable). */
-const homeAssistantUpdateSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    backup: { type: 'boolean', nullable: true },
-    ids: { type: 'array', nullable: true, maxItems: 100, items: { type: 'string', maxLength: 300 } },
-  },
-};
+const homeAssistantUpdateSchema = body({
+  backup: z.boolean().nullish(),
+  ids: z.array(z.string().max(300)).max(100).nullish(),
+});
 
 /** Body of `POST /api/containers/update-all`: `ids` selects containers (omitted = every container with updates). */
-const updateAllSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    backup: { type: 'boolean', nullable: true },
-    ids: { type: 'array', nullable: true, maxItems: 1000, items: { type: 'integer', minimum: 1 } },
-  },
-};
+const updateAllSchema = body({
+  backup: z.boolean().nullish(),
+  ids: z.array(z.int().min(1)).max(1000).nullish(),
+});
 
 /** Optional body of the update endpoints: `backup` overrides the container/global default for this update. */
-const updateOptionsSchema: ObjectSchema = {
-  type: 'object',
-  properties: { backup: { type: 'boolean', nullable: true } },
-};
-
-async function readUpdateOptions<T = { backup?: boolean | null }>(req: Request, schema = updateOptionsSchema): Promise<Partial<T>> {
-  const text = await req.text();
-  if (!text.trim()) {
-    return {};
-  }
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    throw new RequestValidationError('body must be valid JSON');
-  }
-  return validate(json, schema, 'body') as Partial<T>;
-}
+const updateOptionsSchema = body({ backup: z.boolean().nullish() });
 
 /** Longest installed version that can be entered by hand. */
 const MANUAL_VERSION_MAX_LENGTH = 100;
 
-const appSchema: ObjectSchema = {
-  type: 'object',
-  properties: {
-    name: { type: 'string', maxLength: 100 },
-    versionCommand: { type: 'string', nullable: true, maxLength: COMMAND_MAX_LENGTH },
-    latestSource: { type: 'string' },
-    repositoryId: { type: 'integer', nullable: true },
-    latestCommand: { type: 'string', nullable: true, maxLength: COMMAND_MAX_LENGTH },
-    updateCommand: { type: 'string', nullable: true, maxLength: COMMAND_MAX_LENGTH },
-    useTty: { type: 'boolean' },
-    timeoutSeconds: { type: 'integer', nullable: true },
-    installedVersion: { type: 'string', nullable: true, maxLength: MANUAL_VERSION_MAX_LENGTH },
-  },
-  required: ['name', 'latestSource'],
-};
-
-interface AppBody {
-  name: string;
-  versionCommand?: string | null;
-  latestSource: string;
-  repositoryId?: number | null;
-  latestCommand?: string | null;
-  updateCommand?: string | null;
-  useTty?: boolean;
-  timeoutSeconds?: number | null;
+const appSchema = body({
+  name: z.string().max(100),
+  versionCommand: z.string().max(COMMAND_MAX_LENGTH).nullish(),
+  latestSource: z.string(),
+  repositoryId: z.int().nullish(),
+  latestCommand: z.string().max(COMMAND_MAX_LENGTH).nullish(),
+  updateCommand: z.string().max(COMMAND_MAX_LENGTH).nullish(),
+  useTty: z.boolean().optional(),
+  timeoutSeconds: z.int().nullish(),
   /** Installed version entered by hand (only without a version command); omit = keep, null/"" = none. */
-  installedVersion?: string | null;
-}
+  installedVersion: z.string().max(MANUAL_VERSION_MAX_LENGTH).nullish(),
+});
+
+type AppBody = z.output<typeof appSchema>;
 
 const blankToNull = (value: string | null | undefined): string | null => value?.trim() || null;
 
@@ -504,7 +459,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       GET: () => Response.json(listDtos()),
       POST: (req: Request) =>
         guard(async () => {
-          const body = await readBody<{ vmid: number; name?: string | null; hostId?: number | null }>(req, addContainerSchema);
+          const body = await readBody(req, addContainerSchema);
           const hostId = requireNode(body.hostId);
           if (containers.existsVmid(hostId, body.vmid)) {
             return problem(409, `Guest ${body.vmid} has already been added.`);
@@ -589,7 +544,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/update-all': {
       POST: (req: Request) =>
         guard(async () => {
-          const options = await readUpdateOptions<{ backup: boolean | null; ids: number[] | null }>(req, updateAllSchema);
+          const options = await readOptionalBody(req, updateAllSchema);
           const ids = options.ids ? new Set(options.ids) : null;
           const plan = updater
             .plan()
@@ -613,20 +568,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       },
       PUT: async (req: Bun.BunRequest<'/api/containers/:id'>) => {
         const container = findContainer(req.params.id);
-        const body = await readBody<{
-          name: string;
-          isEnabled: boolean;
-          aptEnabled: boolean;
-          backupBeforeUpdate?: boolean | null;
-          startWhenStopped?: boolean;
-          checkCron?: string | null;
-          updateCores?: number | null;
-          updateMemoryMb?: number | null;
-          homeAssistantUrl?: string | null;
-          homeAssistantToken?: string | null;
-          homeAssistantInstall?: boolean;
-          dockerEnabled?: boolean;
-        }>(req, updateContainerSchema);
+        const body = await readBody(req, updateContainerSchema);
         if (!container) {
           return problem(404, 'Container not found.');
         }
@@ -713,7 +655,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/:id/apt-upgrade': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/apt-upgrade'>) =>
         guard(async () => {
-          const options = await readUpdateOptions(req);
+          const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
@@ -732,7 +674,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         {
           POST: (req: Bun.BunRequest<'/api/containers/:id'>) =>
             guard(async () => {
-              const options = await readUpdateOptions(req);
+              const options = await readOptionalBody(req, updateOptionsSchema);
               const container = findContainer(req.params.id);
               if (!container) {
                 return problem(404, 'Container not found.');
@@ -750,10 +692,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/:id/home-assistant-update': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/home-assistant-update'>) =>
         guard(async () => {
-          const options = await readUpdateOptions<{ backup: boolean | null; ids: string[] | null }>(
-            req,
-            homeAssistantUpdateSchema,
-          );
+          const options = await readOptionalBody(req, homeAssistantUpdateSchema);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
@@ -800,7 +739,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/:id/update-all': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/update-all'>) =>
         guard(async () => {
-          const options = await readUpdateOptions(req);
+          const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
@@ -874,7 +813,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/:id/apps': {
       POST: async (req: Bun.BunRequest<'/api/containers/:id/apps'>) => {
         const container = findContainer(req.params.id);
-        const body = await readBody<AppBody>(req, appSchema);
+        const body = await readBody(req, appSchema);
         if (!container) {
           return problem(404, 'Container not found.');
         }
@@ -904,7 +843,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       PUT: async (req: Bun.BunRequest<'/api/containers/:id/apps/:appId'>) => {
         const containerId = parseId(req.params.id);
         const app = containers.getApp(containerId, parseId(req.params.appId, 'params/appId'));
-        const body = await readBody<AppBody>(req, appSchema);
+        const body = await readBody(req, appSchema);
         if (!app) {
           return problem(404, 'Application not found.');
         }
@@ -955,7 +894,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     '/api/containers/:id/apps/:appId/update': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/update'>) =>
         guard(async () => {
-          const options = await readUpdateOptions(req);
+          const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
           const app = container ? containers.getApp(container.id, parseId(req.params.appId, 'params/appId')) : null;
           if (!container || !app) {
