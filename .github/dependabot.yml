@@ -28,3 +28,18 @@ updates:
         patterns: ['*']
         exclude-patterns: ['@angular/*']
         update-types: [minor, patch]
+
+  # GitHub Actions used in .github/workflows
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: daily
+    groups:
+      actions:
+        patterns: ['*']
+
+  # Base images in the Dockerfile
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: daily
