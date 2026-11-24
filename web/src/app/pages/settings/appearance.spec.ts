@@ -1,4 +1,5 @@
 import { TestBed } from '@angular/core/testing';
+import { NavigationService } from '../../core/navigation';
 import { PreferencesService } from '../../core/preferences.service';
 import { settle } from '../../testing';
 import { AppearancePanel } from './appearance';
@@ -63,5 +64,32 @@ describe('AppearancePanel', () => {
 
     expect(preferences.theme()).toBe('light');
     expect(preferences.accent()).toBe('indigo');
+  });
+
+  it('shows the sidebar order, starts rearranging and resets the order', async () => {
+    const { fixture, el } = await render();
+    const navigation = TestBed.inject(NavigationService);
+    const button = (label: string) =>
+      [...el.querySelectorAll<HTMLButtonElement>('.order-actions button')].find((b) =>
+        b.textContent?.includes(label),
+      )!;
+
+    expect(el.querySelector('.page-order li')?.textContent).toContain('Repositories');
+    expect(el.querySelector('.page-order li')?.textContent).toContain('Start page');
+    expect(button('Reset order').disabled).toBe(true);
+
+    button('Rearrange sidebar').click();
+    await settle(fixture);
+    expect(navigation.editing()).toBe(true);
+    expect(button('Done').getAttribute('aria-pressed')).toBe('true');
+
+    navigation.move(3, 0);
+    await settle(fixture);
+    expect(el.querySelector('.page-order li')?.textContent).toContain('Vulnerabilities');
+
+    button('Reset order').click();
+    await settle(fixture);
+    expect(el.querySelector('.page-order li')?.textContent).toContain('Repositories');
+    expect(button('Reset order').disabled).toBe(true);
   });
 });

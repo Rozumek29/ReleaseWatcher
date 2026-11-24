@@ -966,6 +966,8 @@ export interface BackupAppearance {
   accent: string;
   repositoryLayout: string;
   containerSort: string;
+  /** Order of the sidebar pages (missing in files from older versions). */
+  navOrder?: string[];
 }
 
 /** A backup file (`GET /api/backup/export`); secrets are never part of it. */

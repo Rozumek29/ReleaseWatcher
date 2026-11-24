@@ -26,6 +26,7 @@ import {
   THEME_MODES,
   ThemeMode,
 } from '../../core/preferences.service';
+import { NavPageId, normalizeNavOrder } from '../../core/nav-pages';
 import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
@@ -145,6 +146,7 @@ export class BackupPanel implements OnInit {
           accent: this.preferences.accent(),
           repositoryLayout: this.preferences.repositoryLayout(),
           containerSort: this.preferences.containerSort(),
+          navOrder: this.preferences.navOrder(),
         };
       }
       saveFile(
@@ -219,6 +221,9 @@ export class BackupPanel implements OnInit {
         this.preferences.accent.set(appearance.accent);
         this.preferences.repositoryLayout.set(appearance.repositoryLayout);
         this.preferences.containerSort.set(appearance.containerSort);
+        if (appearance.navOrder) {
+          this.preferences.navOrder.set(appearance.navOrder);
+        }
       }
       this.result.set(response.preview);
       this.fileData.set(null);
@@ -265,6 +270,8 @@ function readAppearance(value: unknown): {
   accent: AccentColor;
   repositoryLayout: RepositoryLayout;
   containerSort: ContainerSort;
+  /** null in files from older versions: the current order stays. */
+  navOrder: NavPageId[] | null;
 } | null {
   if (!value || typeof value !== 'object') return null;
   const a = value as Partial<BackupAppearance>;
@@ -277,6 +284,7 @@ function readAppearance(value: unknown): {
     repositoryLayout: a.repositoryLayout === 'grid' ? 'grid' : 'list',
     containerSort:
       (['attention', 'vmid', 'name'] as const).find((s) => s === a.containerSort) ?? 'attention',
+    navOrder: Array.isArray(a.navOrder) ? normalizeNavOrder(a.navOrder) : null,
   };
 }
 

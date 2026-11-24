@@ -25,6 +25,11 @@
     background: var(--accent-soft);
     color: var(--accent-strong);
   }
+
+  &.sidebar {
+    background: var(--surface-2);
+    color: var(--text-muted);
+  }
 }
 
 /* ---------- Theme ---------- */
@@ -211,4 +216,45 @@
   font-weight: 550;
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+/* ---------- Sidebar order ---------- */
+
+.page-order {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: page;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 6px 4px;
+    font-size: 0.88rem;
+    counter-increment: page;
+
+    &::before {
+      content: counter(page);
+      min-width: 1.2em;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      text-align: right;
+    }
+  }
+
+  .badge {
+    margin-left: auto;
+  }
+}
+
+.order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
 }

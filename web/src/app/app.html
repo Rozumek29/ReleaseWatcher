@@ -11,45 +11,86 @@
     <span class="brand-name">ReleaseWatcher</span>
   </header>
 
-  <div class="backdrop" (click)="sidebarOpen.set(false)"></div>
+  <div class="backdrop" (click)="closeSidebar()"></div>
 
   <aside class="sidebar" aria-label="Main navigation">
     <div class="brand">
       <span class="logo"><app-icon name="bell" [size]="18" /></span>
       <span class="brand-name">ReleaseWatcher</span>
-      <button type="button" class="icon-btn close" (click)="sidebarOpen.set(false)" aria-label="Close navigation">
+      <button type="button" class="icon-btn close" (click)="closeSidebar()" aria-label="Close navigation">
         <app-icon name="close" />
       </button>
     </div>
 
-    <nav>
-      @for (item of nav; track item.path) {
-        <a [routerLink]="item.path" routerLinkActive="active" #rla="routerLinkActive" [attr.aria-current]="rla.isActive ? 'page' : null">
-          <app-icon [name]="item.icon" />
-          <span>{{ item.label }}</span>
-          @if (item.path === '/repositories' && statusService.status(); as s) {
-            <span class="count">{{ s.repositories.total }}</span>
+    <nav [class.editing]="navigation.editing()" (keydown.escape)="navigation.editing.set(false)">
+      @if (navigation.editing()) {
+        <div class="edit-bar">
+          <span>Drag to reorder</span>
+          <button type="button" class="btn btn-sm" (click)="navigation.editing.set(false)">Done</button>
+        </div>
+        <!-- The list (not the item, which moves in the DOM) holds the pointer while dragging. -->
+        <ol
+          #editList
+          class="edit-list"
+          aria-label="Page order"
+          (pointermove)="moveDrag($event)"
+          (pointerup)="endDrag()"
+          (pointercancel)="endDrag()"
+          (lostpointercapture)="endDrag()"
+        >
+          @for (item of navigation.pages(); track item.id; let i = $index) {
+            <li>
+              <button
+                type="button"
+                class="nav-item"
+                [attr.data-page]="item.id"
+                [class.dragging]="draggingId() === item.id"
+                [style.--i]="i"
+                [style.translate]="draggingId() === item.id ? '0 ' + dragOffset() + 'px' : null"
+                [attr.aria-label]="item.label + ', position ' + (i + 1) + ' of ' + navigation.pages().length + (i === 0 ? ', start page' : '') + '. Move with the arrow keys.'"
+                (pointerdown)="startDrag($event, item.id)"
+                (keydown)="moveByKey($event, i)"
+              >
+                <app-icon [name]="item.icon" />
+                <span>{{ item.label }}</span>
+                @if (i === 0) {
+                  <span class="home-mark" title="Start page"><app-icon name="home" [size]="14" /></span>
+                }
+                <app-icon class="grip" name="grip" [size]="16" />
+              </button>
+            </li>
           }
-          @if (item.path === '/vulnerabilities' && statusService.status()?.advisories; as a) {
-            @if (a.affecting > 0) {
-              <span class="count danger" [title]="a.affecting + ' affect installed versions'">{{ a.affecting }}</span>
-            } @else if (a.total > 0) {
-              <span class="count">{{ a.total }}</span>
+        </ol>
+        <span class="visually-hidden" aria-live="polite">{{ moveAnnouncement() }}</span>
+      } @else {
+        @for (item of navigation.pages(); track item.id) {
+          <a [routerLink]="'/' + item.id" routerLinkActive="active" #rla="routerLinkActive" [attr.aria-current]="rla.isActive ? 'page' : null">
+            <app-icon [name]="item.icon" />
+            <span>{{ item.label }}</span>
+            @if (item.id === 'repositories' && statusService.status(); as s) {
+              <span class="count">{{ s.repositories.total }}</span>
             }
-          }
-          @if (item.path === '/docker' && statusService.status()?.docker; as d) {
-            @if (d.updatesAvailable > 0) {
-              <span class="count warning" [title]="d.updatesAvailable + ' with a newer image or release'">{{ d.updatesAvailable }}</span>
-            } @else if (d.total > 0) {
-              <span class="count">{{ d.total }}</span>
+            @if (item.id === 'vulnerabilities' && statusService.status()?.advisories; as a) {
+              @if (a.affecting > 0) {
+                <span class="count danger" [title]="a.affecting + ' affect installed versions'">{{ a.affecting }}</span>
+              } @else if (a.total > 0) {
+                <span class="count">{{ a.total }}</span>
+              }
             }
-          }
-          @if (item.path === '/machines' && statusService.status()?.targets; as c) {
-            @if (c.total > 0) {
-              <span class="count">{{ c.total }}</span>
+            @if (item.id === 'docker' && statusService.status()?.docker; as d) {
+              @if (d.updatesAvailable > 0) {
+                <span class="count warning" [title]="d.updatesAvailable + ' with a newer image or release'">{{ d.updatesAvailable }}</span>
+              } @else if (d.total > 0) {
+                <span class="count">{{ d.total }}</span>
+              }
             }
-          }
-        </a>
+            @if (item.id === 'machines' && statusService.status()?.targets; as c) {
+              @if (c.total > 0) {
+                <span class="count">{{ c.total }}</span>
+              }
+            }
+          </a>
+        }
       }
     </nav>
 

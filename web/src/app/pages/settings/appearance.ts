@@ -5,6 +5,7 @@ import {
   PreferencesService,
   ThemeMode,
 } from '../../core/preferences.service';
+import { NavigationService } from '../../core/navigation';
 import { Icon, IconName } from '../../shared/icon';
 
 const THEME_OPTIONS: { mode: ThemeMode; label: string; hint: string; icon: IconName }[] = [
@@ -23,7 +24,10 @@ const ACCENT_LABELS: Record<AccentColor, string> = {
   violet: 'Violet',
 };
 
-/** Settings → Appearance: colour scheme and accent colour, saved in this browser (PreferencesService). */
+/**
+ * Settings → Appearance: colour scheme, accent colour and the order of the sidebar pages, saved in this browser
+ * (PreferencesService).
+ */
 @Component({
   selector: 'app-appearance',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -37,6 +41,8 @@ export class AppearancePanel {
   /** The System preview shows both schemes side by side. */
   protected readonly schemesBoth = ['light', 'dark'] as const;
   protected readonly accents = ACCENTS.map((name) => ({ name, label: ACCENT_LABELS[name] }));
+
+  protected readonly navigation = inject(NavigationService);
 
   protected setTheme(mode: ThemeMode): void {
     this.preferences.theme.set(mode);
