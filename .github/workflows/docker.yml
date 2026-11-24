@@ -38,7 +38,7 @@ jobs:
           build-args: |
             TARGET=${{ matrix.target }}
           cache-from: type=gha,scope=ci-${{ matrix.platform }}-${{ matrix.target }}
-          cache-to: type=gha,mode=max,scope=ci-${{ matrix.platform }}-${{ matrix.target }}
+          cache-to: type=gha,mode=max,ignore-error=true,scope=ci-${{ matrix.platform }}-${{ matrix.target }}
       - name: Start the image and wait for /health
         run: |
           docker run -d --name rw --platform ${{ matrix.platform }} -p 8080:8080 releasewatcher:test
