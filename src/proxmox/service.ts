@@ -4,6 +4,13 @@ import { DOCKER_LIST_SCRIPT } from '../docker/domain.ts';
 import type { NotificationDispatcher } from '../notifiers/dispatcher.ts';
 import {
   PACKAGES_CHECK_SCRIPT,
+  APP_STORES,
+  APP_STORES_CHECK_SCRIPT,
+  APP_STORE_LABELS,
+  APP_STORE_UPDATE_SCRIPTS,
+  type AppStore,
+  appStoreRunKind,
+  parseAppStoreCheck,
   PACKAGES_UPGRADE_SCRIPT,
   packageManagerLabel,
   parsePackageCheck,
@@ -134,6 +141,8 @@ export async function fetchCommunityScript(slug: string): Promise<string | null>
 const NODE_TIMEOUT_MS = 30_000;
 const CHECK_TIMEOUT_SECONDS = 2 * 60;
 const APT_CHECK_TIMEOUT_SECONDS = 5 * 60;
+/** Flatpak (AppStream data) and Snap listings of a check. */
+const APP_STORES_CHECK_TIMEOUT_SECONDS = 3 * 60;
 const RESTART_CHECK_TIMEOUT_SECONDS = 60;
 const OS_CHECK_TIMEOUT_SECONDS = 15;
 const HA_CHECK_TIMEOUT_SECONDS = 90;
@@ -533,6 +542,27 @@ export class ContainerService {
         const result = await this.withUpdateResources(container, log, () => {
           log.note(`Upgrading the system packages in ${targetLabel(container)}`);
           return this.execInGuest(log, container, PACKAGES_UPGRADE_SCRIPT, {
+            timeoutMs: APT_UPGRADE_TIMEOUT_MS,
+            startedContainer,
+          });
+        });
+        return this.finishUpdate(container, log, result);
+      }),
+    );
+  }
+
+  /**
+   * Updates every application of a store (`flatpak update` / `snap refresh`) – in a guest after an optional backup.
+   * @param backupStorage back up to this storage first (null = no backup; always null for targets without backups)
+   */
+  startAppStoreUpdate(container: Container, store: AppStore, backupStorage: string | null): Run {
+    const label = APP_STORE_LABELS[store];
+    return this.start(container, null, appStoreRunKind(store), 'manual', (log) =>
+      this.whileRunning(container, log, async (startedContainer) => {
+        await this.backupFirst(container, backupStorage, log, `${label} update`, startedContainer);
+        const result = await this.withUpdateResources(container, log, () => {
+          log.note(`Updating the ${label} applications in ${targetLabel(container)}`);
+          return this.execInGuest(log, container, APP_STORE_UPDATE_SCRIPTS[store], {
             timeoutMs: APT_UPGRADE_TIMEOUT_MS,
             startedContainer,
           });
@@ -1309,6 +1339,7 @@ export class ContainerService {
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
     steps.push({ id: 'os', script: OS_CHECK_SCRIPT, timeoutSeconds: OS_CHECK_TIMEOUT_SECONDS });
+    steps.push({ id: 'stores', script: APP_STORES_CHECK_SCRIPT, timeoutSeconds: APP_STORES_CHECK_TIMEOUT_SECONDS });
     if (capabilities(container.kind).homeAssistant) {
       steps.push({ id: 'ha', script: HA_CHECK_SCRIPT, timeoutSeconds: HA_CHECK_TIMEOUT_SECONDS });
     }
@@ -1374,6 +1405,11 @@ export class ContainerService {
         }
       } else {
         container.aptUpgradable = [];
+      }
+      if (isHomeAssistant) {
+        container.appStores = {};
+      } else {
+        this.applyAppStores(container, batch.steps.get('stores'), errors, log);
       }
 
       // Not counted as an error: the badge only hints at a restart; a failed probe keeps the previous result.
@@ -1544,6 +1580,39 @@ export class ContainerService {
     );
   }
 
+  /**
+   * Reads the Flatpak / Snap part of a check: stores that are not installed (any more) disappear, a store whose listing
+   * failed keeps its previous result and counts as an error.
+   */
+  private applyAppStores(container: Container, step: StepResult | undefined, errors: string[], log: RunLog): void {
+    if (step?.exitCode !== 0) {
+      // The step always exits 0 – it did not run (e.g. timed out): keep the previous results.
+      if (Object.keys(container.appStores).length > 0) log.note(`Could not check Flatpak and Snap: ${describeStep(step)}`);
+      return;
+    }
+    const check = parseAppStoreCheck(step.output);
+    const stores = { ...check.stores };
+    for (const store of APP_STORES) {
+      const label = APP_STORE_LABELS[store];
+      const failure = check.failed[store];
+      if (failure !== undefined) {
+        stores[store] = container.appStores[store] ?? [];
+        errors.push(`${label}: ${failure}`);
+        log.note(`${label} check failed: ${failure}`);
+        continue;
+      }
+      const packages = stores[store];
+      if (packages) {
+        log.note(`${label}: ${packages.length} update(s)`);
+        for (const pkg of packages) {
+          log.write(`   ${pkg.name} ${pkg.currentVersion ?? '?'} → ${pkg.newVersion}
+`);
+        }
+      }
+    }
+    container.appStores = stores;
+  }
+
   /** Sends a notification when something pending was not part of the previous notification. */
   private async notifyNewUpdates(container: Container, apps: readonly ContainerApp[], log: RunLog): Promise<void> {
     const signature = pendingSignature(container, apps);
@@ -1559,6 +1628,10 @@ export class ContainerService {
       containerName: container.name,
       aptPackages: container.aptUpgradable,
       packageManager: container.packageManager,
+      appStores: APP_STORES.flatMap((store) => {
+        const packages = container.appStores[store] ?? [];
+        return packages.length > 0 ? [{ name: APP_STORE_LABELS[store], packages }] : [];
+      }),
       apps: [
         ...apps
           .filter((a) => appUpdateAvailable(a))

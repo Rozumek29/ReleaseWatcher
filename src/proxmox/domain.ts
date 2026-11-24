@@ -134,6 +134,8 @@ export interface Container {
   osRelease: OsRelease | null;
   /** Home Assistant OS found in this virtual machine by the last check (its pending updates); null = not HAOS. */
   homeAssistant: HomeAssistantState | null;
+  /** Flatpak / Snap found by the last check, with their pending updates (a store not installed is missing). */
+  appStores: AppStoreUpdates;
   /** Base URL of Home Assistant for the REST API (live checks, integration updates); null = not configured. */
   homeAssistantUrl: string | null;
   /** Long-lived access token for the REST API (secret, encrypted at rest); null = read saved states without it. */
@@ -187,7 +189,7 @@ export interface ContainerApp {
   createdAt: string;
 }
 
-export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart', 'home-assistant-update'] as const;
+export const RUN_KINDS = ['check', 'apt-upgrade', 'app-update', 'restart', 'home-assistant-update', 'flatpak-update', 'snap-update'] as const;
 export type RunKind = (typeof RUN_KINDS)[number];
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 export type RunTrigger = 'manual' | 'schedule';
@@ -256,7 +258,11 @@ export function appUpdateAvailable(app: Pick<ContainerApp, 'installedVersion' | 
 }
 
 /** One update of a container started by "update all". */
-export type PendingUpdate = { kind: 'apt-upgrade' } | { kind: 'app-update'; appId: number } | { kind: 'home-assistant-update' };
+export type PendingUpdate =
+  | { kind: 'apt-upgrade' }
+  | { kind: 'flatpak-update' | 'snap-update'; store: AppStore }
+  | { kind: 'app-update'; appId: number }
+  | { kind: 'home-assistant-update' };
 
 /** True when the Home Assistant API can be used (URL and token configured). */
 export const hasHomeAssistantApi = (c: Pick<Container, 'homeAssistantUrl' | 'homeAssistantToken'>): boolean =>
@@ -268,7 +274,7 @@ export const homeAssistantInstallContext = (
 ): InstallContext => ({ enabled: c.homeAssistantInstall, hasApi: hasHomeAssistantApi(c) });
 
 /**
- * Updates "update all" runs in a container, in order: apt first, then every application with a known newer
+ * Updates "update all" runs in a container, in order: system packages first, then Flatpak and Snap, then every application with a known newer
  * version and an update command, then the Home Assistant updates that can be installed from here. The Proxmox host, disabled containers and stopped containers that may not be
  * started are left out (they are updated by hand).
  */
@@ -282,6 +288,11 @@ export function pendingUpdates(container: Container, apps: readonly ContainerApp
   const updates: PendingUpdate[] = [];
   if (container.aptEnabled && container.aptUpgradable.length > 0) {
     updates.push({ kind: 'apt-upgrade' });
+  }
+  for (const store of APP_STORES) {
+    if ((container.appStores[store]?.length ?? 0) > 0) {
+      updates.push({ kind: appStoreRunKind(store), store });
+    }
   }
   for (const app of apps) {
     if (app.updateCommand && appUpdateAvailable(app) === true) {
@@ -1199,6 +1210,145 @@ export function parsePackageCheck(output: string): PackageCheck | null {
   return { manager, packages };
 }
 
+export const APP_STORES = ['flatpak', 'snap'] as const;
+/** Application stores checked next to the system packages (only where they are installed). */
+export type AppStore = (typeof APP_STORES)[number];
+export const isAppStore = (value: unknown): value is AppStore => (APP_STORES as readonly unknown[]).includes(value);
+export const APP_STORE_LABELS: Readonly<Record<AppStore, string>> = { flatpak: 'Flatpak', snap: 'Snap' };
+
+/** Pending updates per application store installed on a target; a store that is missing is not installed there. */
+export type AppStoreUpdates = Partial<Record<AppStore, AptPackage[]>>;
+
+/** Run kind updating every application of a store. */
+export const appStoreRunKind = (store: AppStore): 'flatpak-update' | 'snap-update' => `${store}-update`;
+
+/** Marker lines of {@link APP_STORES_CHECK_SCRIPT}: `<marker> flatpak`, `<marker> flatpak-installed`, `<marker> flatpak-failed <rc>` … */
+export const APP_STORE_MARKER = '---releasewatcher-store---';
+
+/**
+ * Lists the pending updates of Flatpak and Snap – each only when it is installed and works (snapd answers; it does
+ * not in unprivileged containers) – followed by the installed versions. Flatpak reads the AppStream data first, which
+ * holds the versions of the updates. Always exits 0; a failing listing is reported by a `failed` marker.
+ */
+export const APP_STORES_CHECK_SCRIPT = String.raw`export LC_ALL=C
+if command -v flatpak >/dev/null 2>&1 && flatpak --version >/dev/null 2>&1; then
+  flatpak update --appstream >/dev/null 2>&1
+  echo '${APP_STORE_MARKER} flatpak'
+  flatpak remote-ls --updates --columns=application,version,branch,commit,ref || echo "${APP_STORE_MARKER} flatpak-failed $?"
+  echo '${APP_STORE_MARKER} flatpak-installed'
+  flatpak list --columns=ref,version,active
+fi
+if command -v snap >/dev/null 2>&1 && snap list >/dev/null 2>&1; then
+  echo '${APP_STORE_MARKER} snap'
+  snap refresh --list 2>&1 || echo "${APP_STORE_MARKER} snap-failed $?"
+  echo '${APP_STORE_MARKER} snap-installed'
+  snap list
+fi
+true`;
+
+/** Updates every installed application of a store without questions. */
+export const APP_STORE_UPDATE_SCRIPTS: Readonly<Record<AppStore, string>> = {
+  flatpak: "echo '$ flatpak update -y --noninteractive'\nflatpak update -y --noninteractive",
+  snap: "echo '$ snap refresh'\nsnap refresh",
+};
+
+/** Shows a commit next to equal versions, so an update that only changes the build is visible. */
+function withBuild(pkg: { current: string | null; currentBuild: string | null; next: string; nextBuild: string }) {
+  if (pkg.current !== null && pkg.current === pkg.next && pkg.currentBuild !== pkg.nextBuild) {
+    return { currentVersion: `${pkg.current} (${pkg.currentBuild ?? '?'})`, newVersion: `${pkg.next} (${pkg.nextBuild})` };
+  }
+  return { currentVersion: pkg.current, newVersion: pkg.next };
+}
+
+/**
+ * Parses `flatpak remote-ls --updates --columns=application,version,branch,commit,ref` with the installed refs from
+ * `flatpak list --columns=ref,version,active` (tab-separated). Runtimes are named with their branch
+ * (`org.gnome.Platform//51`); without a version (most runtimes) the commit stands for it.
+ */
+export function parseFlatpakUpdates(list: string, installed: string): AptPackage[] {
+  const current = new Map<string, { version: string | null; commit: string | null }>();
+  for (const line of installed.split('\n')) {
+    const [ref, version, commit] = line.split('\t').map((c) => c.trim());
+    if (ref?.includes('/')) {
+      current.set(ref, { version: version || null, commit: commit || null });
+    }
+  }
+  const packages: AptPackage[] = [];
+  for (const line of list.split('\n')) {
+    const [application, version, branch, commit, ref] = line.split('\t').map((c) => c.trim());
+    if (!application || !ref || !commit || !ref.includes('/')) {
+      continue;
+    }
+    const installedRef = ref.replace(/^(app|runtime)\//, '');
+    const before = current.get(installedRef);
+    const short = commit.slice(0, 12);
+    packages.push({
+      name: ref.startsWith('runtime/') && branch ? `${application}//${branch}` : application,
+      ...withBuild({
+        current: before ? (before.version ?? before.commit) : null,
+        currentBuild: before?.commit ?? null,
+        next: version || short,
+        nextBuild: short,
+      }),
+    });
+  }
+  return packages;
+}
+
+/** Parses `snap refresh --list` (`Name Version Rev Size Publisher Notes`) with the installed versions from `snap list`. */
+export function parseSnapUpdates(list: string, installed: string): AptPackage[] {
+  const rows = (text: string) =>
+    text
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/))
+      .filter((cells) => cells.length >= 3 && cells[0] !== 'Name' && /^\d+$/.test(cells[2]!));
+  const current = new Map(rows(installed).map(([name, version, rev]) => [name!, { version: version!, rev: rev! }]));
+  return rows(list).map(([name, version, rev]) => {
+    const before = current.get(name!);
+    return {
+      name: name!,
+      ...withBuild({ current: before?.version ?? null, currentBuild: before ? `rev ${before.rev}` : null, next: version!, nextBuild: `rev ${rev}` }),
+    };
+  });
+}
+
+/** Result of {@link APP_STORES_CHECK_SCRIPT}: the stores found with their pending updates, and listings that failed. */
+export interface AppStoreCheck {
+  stores: AppStoreUpdates;
+  /** Stores whose listing failed (their previous result is kept), with the output that explains why. */
+  failed: Partial<Record<AppStore, string>>;
+}
+
+/** Parses the output of {@link APP_STORES_CHECK_SCRIPT}. */
+export function parseAppStoreCheck(output: string): AppStoreCheck {
+  const sections = new Map<string, string>();
+  const markers = [...output.matchAll(new RegExp(`^${APP_STORE_MARKER} (\\S+)(?: (-?\\d+))?\\s*$`, 'gm'))];
+  const failedCodes = new Map<string, string>();
+  markers.forEach((marker, i) => {
+    const end = markers[i + 1]?.index ?? output.length;
+    const text = output.slice(marker.index + marker[0].length, end);
+    if (marker[1]!.endsWith('-failed')) {
+      failedCodes.set(marker[1]!.slice(0, -'-failed'.length), marker[2] ?? '1');
+    } else {
+      sections.set(marker[1]!, (sections.get(marker[1]!) ?? '') + text);
+    }
+  });
+  const result: AppStoreCheck = { stores: {}, failed: {} };
+  for (const store of APP_STORES) {
+    const list = sections.get(store);
+    if (list === undefined) {
+      continue;
+    }
+    if (failedCodes.has(store)) {
+      result.failed[store] = list.trim().slice(-500) || `exit code ${failedCodes.get(store)}`;
+      continue;
+    }
+    const installed = sections.get(`${store}-installed`) ?? '';
+    result.stores[store] = store === 'flatpak' ? parseFlatpakUpdates(list, installed) : parseSnapUpdates(list, installed);
+  }
+  return result;
+}
+
 /** First non-empty output line – how a version command reports its result. */
 export function firstLine(output: string): string | null {
   const line = output
@@ -1258,11 +1408,12 @@ export class OutputCleaner {
 
 /** Fingerprint of everything pending in a container; null when nothing is pending. */
 export function pendingSignature(
-  container: Pick<Container, 'aptUpgradable' | 'homeAssistant'>,
+  container: Pick<Container, 'aptUpgradable' | 'homeAssistant' | 'appStores'>,
   apps: readonly ContainerApp[],
 ): string | null {
   const parts = [
     ...container.aptUpgradable.map((p) => `apt:${p.name}=${p.newVersion}`),
+    ...APP_STORES.flatMap((store) => (container.appStores[store] ?? []).map((p) => `${store}:${p.name}=${p.newVersion}`)),
     ...(container.homeAssistant?.updates ?? []).map((u) => `ha:${u.id}=${u.latestVersion}`),
     ...apps.filter((a) => appUpdateAvailable(a)).map((a) => `app:${a.id}=${a.latestVersion}`),
   ].toSorted();

@@ -17,6 +17,9 @@ import {
   pctSetResourcesCommand,
   planResourceRaise,
   parsePackageCheck,
+  parseAppStoreCheck,
+  APP_STORE_MARKER,
+  APP_STORES_CHECK_SCRIPT,
   PACKAGES_CHECK_SCRIPT,
   PACKAGES_UPGRADE_SCRIPT,
   MACHINE_RESTART_COMMAND,
@@ -252,6 +255,62 @@ describe('proxmox domain', () => {
     });
   });
 
+  // Recorded with APP_STORES_CHECK_SCRIPT in Debian 12 (Flatpak 1.14) and Ubuntu 22.04 (snapd 2.78) containers.
+  it('parses the pending Flatpak and Snap updates with their installed versions', () => {
+    const output = [
+      `${APP_STORE_MARKER} flatpak`,
+      'org.gnome.Calculator\t51.1\tstable\t00516a24d410\tapp/org.gnome.Calculator/x86_64/stable',
+      'org.gnome.Platform\t\t51\t9b1f00c0ffee\truntime/org.gnome.Platform/x86_64/51',
+      'org.freedesktop.Platform.GL.default\t26.2.5\t26.08\t77aa11bb22cc\truntime/org.freedesktop.Platform.GL.default/x86_64/26.08',
+      `${APP_STORE_MARKER} flatpak-installed`,
+      'org.freedesktop.Platform.GL.default/x86_64/26.08\t26.2.5\t5aec1b8281d5',
+      'org.gnome.Calculator/x86_64/stable\t51.0\t0032886e3396',
+      'org.gnome.Platform/x86_64/51\t\t8aba85f0de52',
+      `${APP_STORE_MARKER} snap`,
+      'Name  Version  Rev   Size    Publisher  Notes',
+      'yq    v4.54.3  3003  21.6MB  mikefarah  -',
+      'core  16-2.61.4-20260225  17300  105MB  canonical**  core',
+      `${APP_STORE_MARKER} snap-installed`,
+      'Name         Version             Rev    Tracking       Publisher    Notes',
+      'core         16-2.61.4-20260225  17292  latest/stable  canonical**  core',
+      'yq           v4.49.2             2759   latest/edge    mikefarah    -',
+    ].join('\n');
+    assert.deepEqual(parseAppStoreCheck(output), {
+      stores: {
+        flatpak: [
+          { name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' },
+          // Runtimes without a version are shown by their commits, equal versions with the commit next to them.
+          { name: 'org.gnome.Platform//51', currentVersion: '8aba85f0de52', newVersion: '9b1f00c0ffee' },
+          { name: 'org.freedesktop.Platform.GL.default//26.08', currentVersion: '26.2.5 (5aec1b8281d5)', newVersion: '26.2.5 (77aa11bb22cc)' },
+        ],
+        snap: [
+          { name: 'yq', currentVersion: 'v4.49.2', newVersion: 'v4.54.3' },
+          { name: 'core', currentVersion: '16-2.61.4-20260225 (rev 17292)', newVersion: '16-2.61.4-20260225 (rev 17300)' },
+        ],
+      },
+      failed: {},
+    });
+  });
+
+  it('finds no store where neither is installed and reports a failed listing', () => {
+    assert.deepEqual(parseAppStoreCheck(''), { stores: {}, failed: {} });
+    const upToDate = [`${APP_STORE_MARKER} snap`, 'All snaps up to date.', `${APP_STORE_MARKER} snap-installed`, 'Name Version Rev'].join('\n');
+    assert.deepEqual(parseAppStoreCheck(upToDate), { stores: { snap: [] }, failed: {} });
+    const failed = [
+      `${APP_STORE_MARKER} flatpak`,
+      'error: Unable to load summary from remote flathub: Could not resolve hostname',
+      `${APP_STORE_MARKER} flatpak-failed 1`,
+      `${APP_STORE_MARKER} flatpak-installed`,
+    ].join('\n');
+    assert.deepEqual(parseAppStoreCheck(failed), {
+      stores: {},
+      failed: { flatpak: 'error: Unable to load summary from remote flathub: Could not resolve hostname' },
+    });
+    // Each store only when it is installed and answers (snapd does not run in unprivileged containers).
+    assert.match(APP_STORES_CHECK_SCRIPT, /command -v flatpak >\/dev\/null 2>&1 && flatpak --version/);
+    assert.match(APP_STORES_CHECK_SCRIPT, /command -v snap >\/dev\/null 2>&1 && snap list >\/dev\/null 2>&1/);
+  });
+
   it('returns null without a known package manager marker', () => {
     assert.equal(parsePackageCheck('E: something went wrong'), null);
     assert.equal(parsePackageCheck(`${PACKAGE_LIST_MARKER} emerge\nfoo`), null);
@@ -449,12 +508,12 @@ describe('proxmox domain', () => {
     assert.deepEqual(args.slice(-3), ['--', 'pve.lan', "sudo -n -- sh -c 'pct list'"]);
   });
 
-  it('lists the updates "update all" runs: apt first, then applications with an update command', () => {
+  it('lists the updates "update all" runs: system packages, Flatpak and Snap, then applications with an update command', () => {
     const container = {
       id: 1, kind: 'lxc', vmid: 101, name: 'ct', isEnabled: true, aptEnabled: true, backupBeforeUpdate: null,
       startWhenStopped: false, checkCron: null, updateCores: null, updateMemoryMb: null, resourcesToRestore: null,
       status: 'running', aptUpgradable: [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }],
-      lastCheckedAt: null, lastError: null, notifiedSignature: null,
+      lastCheckedAt: null, lastError: null, notifiedSignature: null, appStores: {},
     } as unknown as Container;
     const app = (id: number, extra: Partial<ContainerApp>) =>
       ({ id, installedVersion: '1.0.0', latestVersion: '1.1.0', updateCommand: 'update', ...extra }) as ContainerApp;
@@ -470,6 +529,15 @@ describe('proxmox domain', () => {
     assert.deepEqual(pendingUpdates({ ...container, isEnabled: false }, apps), []);
     assert.deepEqual(pendingUpdates({ ...container, status: 'stopped' }, apps), []);
     assert.equal(pendingUpdates({ ...container, status: 'stopped', startWhenStopped: true }, apps).length, 2);
+
+    const pkg = { name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' };
+    assert.deepEqual(pendingUpdates({ ...container, appStores: { flatpak: [pkg], snap: [] } }, apps), [
+      { kind: 'apt-upgrade' },
+      { kind: 'flatpak-update', store: 'flatpak' },
+      { kind: 'app-update', appId: 1 },
+    ]);
+    // Flatpak and Snap do not depend on the system packages switch.
+    assert.deepEqual(pendingUpdates({ ...container, aptEnabled: false, appStores: { snap: [pkg] } }, []), [{ kind: 'snap-update', store: 'snap' }]);
   });
 
   it('turns the restart check output into readable reasons', () => {

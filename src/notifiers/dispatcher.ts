@@ -85,15 +85,16 @@ export class NotificationDispatcher {
     return this.send({ type: 'vulnerability', vulnerability: notification });
   }
 
-  /** Pending updates in a container; apt packages and applications are left out when switched off. */
+  /** Pending updates in a container; packages (system, Flatpak, Snap) and applications are left out when switched off. */
   dispatchContainerUpdates(notification: ContainerUpdatesNotification): Promise<DispatchResult> {
     const preferences = this.preferences();
     const filtered: ContainerUpdatesNotification = {
       ...notification,
       apps: preferences.appUpdates ? notification.apps : [],
       aptPackages: preferences.aptUpdates ? notification.aptPackages : [],
+      appStores: preferences.aptUpdates ? (notification.appStores ?? []).filter((s) => s.packages.length > 0) : [],
     };
-    if (filtered.apps.length === 0 && filtered.aptPackages.length === 0) {
+    if (filtered.apps.length === 0 && filtered.aptPackages.length === 0 && filtered.appStores?.length === 0) {
       return Promise.resolve(skipped());
     }
     return this.send({ type: 'container-updates', updates: filtered });

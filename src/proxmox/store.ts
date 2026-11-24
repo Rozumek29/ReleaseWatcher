@@ -20,6 +20,8 @@ import {
   type RunTrigger,
   type TargetKind,
   isPackageManager,
+  APP_STORES,
+  type AppStoreUpdates,
 } from './domain.ts';
 
 interface ContainerRow {
@@ -39,6 +41,7 @@ interface ContainerRow {
   status: string | null;
   apt_upgradable: string | null;
   package_manager: string | null;
+  app_stores: string | null;
   restart_reasons: string | null;
   os_release: string | null;
   home_assistant: string | null;
@@ -91,6 +94,18 @@ function parsePackages(json: string | null): AptPackage[] {
   return Array.isArray(parsed) ? parsed.filter((p): p is AptPackage => typeof p?.name === 'string') : [];
 }
 
+function parseAppStores(json: string | null): AppStoreUpdates {
+  const parsed = parseJson<Record<string, unknown> | null>(json, null);
+  const stores: AppStoreUpdates = {};
+  for (const store of APP_STORES) {
+    const packages = parsed?.[store];
+    if (Array.isArray(packages)) {
+      stores[store] = packages.filter((p): p is AptPackage => typeof p?.name === 'string');
+    }
+  }
+  return stores;
+}
+
 const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   id: r.id,
   hostId: r.host_id,
@@ -108,6 +123,7 @@ const toContainer = (r: ContainerRow, secrets: SecretBox): Container => ({
   status: r.status,
   aptUpgradable: parsePackages(r.apt_upgradable),
   packageManager: isPackageManager(r.package_manager) ? r.package_manager : null,
+  appStores: parseAppStores(r.app_stores),
   restartReasons: parseStringArray(r.restart_reasons),
   osRelease: parseOsReleaseJson(r.os_release),
   homeAssistant: parseHomeAssistant(r.home_assistant),
@@ -316,7 +332,7 @@ export class ContainerStore {
         `UPDATE containers SET
            name = ?, is_enabled = ?, apt_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
-           apt_upgradable = ?, package_manager = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
+           apt_upgradable = ?, package_manager = ?, app_stores = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
            home_assistant_install = ?, last_checked_at = ?, last_error = ?, notified_signature = ?,
            docker_enabled = ?, docker_engine = ?, docker_error = ?
          WHERE id = ?`,
@@ -333,6 +349,7 @@ export class ContainerStore {
         c.status,
         c.aptUpgradable.length > 0 ? JSON.stringify(c.aptUpgradable) : null,
         c.packageManager,
+        Object.keys(c.appStores).length > 0 ? JSON.stringify(c.appStores) : null,
         c.restartReasons.length > 0 ? JSON.stringify(c.restartReasons) : null,
         c.osRelease ? JSON.stringify(c.osRelease) : null,
         c.homeAssistant ? JSON.stringify(c.homeAssistant) : null,
@@ -409,13 +426,16 @@ export class ContainerStore {
   }
 
   /** Counts for the status summary, computed by SQLite (no rows are read, no secrets decrypted). */
-  statusCounts(): { total: number; enabled: number; withErrors: number; aptPending: number; homeAssistantUpdates: number } {
+  statusCounts(): { total: number; enabled: number; withErrors: number; aptPending: number; appStorePending: number; homeAssistantUpdates: number } {
     return this.db
-      .query<{ total: number; enabled: number; withErrors: number; aptPending: number; homeAssistantUpdates: number }, []>(
+      .query<{ total: number; enabled: number; withErrors: number; aptPending: number; appStorePending: number; homeAssistantUpdates: number }, []>(
         `SELECT count(*) AS total,
                 coalesce(sum(is_enabled = 1), 0) AS enabled,
                 coalesce(sum(last_error IS NOT NULL AND last_error <> ''), 0) AS withErrors,
                 coalesce(sum(CASE WHEN json_valid(apt_upgradable) THEN json_array_length(apt_upgradable) > 0 ELSE 0 END), 0) AS aptPending,
+                coalesce(sum(CASE WHEN json_valid(app_stores)
+                                  THEN (coalesce(json_array_length(app_stores, '$.flatpak'), 0) > 0) + (coalesce(json_array_length(app_stores, '$.snap'), 0) > 0)
+                                  ELSE 0 END), 0) AS appStorePending,
                 coalesce(sum(CASE WHEN json_valid(home_assistant) AND json_type(home_assistant, '$.updates') = 'array'
                                   THEN json_array_length(home_assistant, '$.updates') ELSE 0 END), 0) AS homeAssistantUpdates
          FROM containers`,

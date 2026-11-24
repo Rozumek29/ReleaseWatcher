@@ -65,6 +65,36 @@ describe('ContainersPage', () => {
     expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
   });
 
+  it('shows Flatpak and Snap next to the system packages and updates them', async () => {
+    const flatpak = { name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' };
+    const { fixture, el } = await create([
+      container({
+        aptUpgradable: [],
+        apps: [],
+        appStores: [
+          { store: 'flatpak', label: 'Flatpak', packages: [flatpak] },
+          { store: 'snap', label: 'Snap', packages: [] },
+        ],
+      }),
+    ]);
+    const stores = [...el.querySelectorAll('.store-item')];
+    expect(stores.map((s) => s.querySelector('.item-name')?.textContent?.trim())).toEqual(['Flatpak', 'Snap']);
+    expect(stores[1]?.textContent).toContain('no pending updates');
+    expect(el.textContent).toContain('1 update(s)');
+
+    stores[0]!.querySelector<HTMLButtonElement>('.link-btn')!.click();
+    await settle(fixture);
+    expect(el.querySelector('.store-item app-apt-packages')?.textContent).toContain('org.gnome.Calculator');
+
+    [...stores[0]!.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Update')!.click();
+    await settle(fixture);
+    expect(el.textContent).toContain('Update 1 Flatpak application(s)?');
+    [...el.querySelectorAll<HTMLButtonElement>('.store-item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
+    const request = http.expectOne('/api/containers/1/flatpak-update');
+    expect(request.request.method).toBe('POST');
+    expect(request.request.body).toEqual({ backup: true });
+  });
+
   it('names the package manager of a machine and its upgrade command', async () => {
     const { fixture, el } = await create([container({ kind: 'server', packageManager: 'apk', capabilities: { ...container().capabilities, backup: null } })]);
     expect(el.querySelector('.item-name')?.textContent).toContain('apk');

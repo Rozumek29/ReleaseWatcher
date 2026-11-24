@@ -47,7 +47,7 @@ const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'
     hint: 'A security advisory was published for a watched repository (skipped when the installed version is not affected).',
   },
   { key: 'appUpdates', label: 'Application updates', hint: 'A newer version of an application in a container.' },
-  { key: 'aptUpdates', label: 'System package updates', hint: 'Upgradable packages (apt, dnf, zypper, apk, pacman …) on a machine or the Proxmox host.' },
+  { key: 'aptUpdates', label: 'System package updates', hint: 'Upgradable system packages (apt, dnf, zypper, apk, pacman …) and Flatpak / Snap applications on a machine or the Proxmox host.' },
   { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or package upgrade started here completed.' },
   { key: 'updateFailed', label: 'Update failed', hint: 'An update or package upgrade started here failed.' },
   {

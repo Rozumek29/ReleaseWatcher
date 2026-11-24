@@ -516,6 +516,50 @@
                 }
               </div>
             }
+            @for (s of c.appStores; track s.store) {
+              @let key = c.id + '-' + s.store;
+              <div class="item store-item">
+                <div class="item-main">
+                  <span class="item-name"><app-icon name="box" [size]="14" /> {{ s.label }}</span>
+                  @if (s.packages.length > 0) {
+                    <button type="button" class="link-btn" (click)="toggleStore(key)" [attr.aria-expanded]="expandedStores().has(key)">
+                      {{ s.packages.length }} update(s)
+                    </button>
+                  } @else {
+                    <span class="muted">no pending updates</span>
+                  }
+                </div>
+                @if (s.packages.length > 0) {
+                  <div class="item-actions">
+                    @if (confirming() === key) {
+                      <span class="confirm-text warn">Update {{ s.packages.length }} {{ s.label }} application(s)?</span>
+                      @if (!c.capabilities.backup) {
+                        <span class="muted small mono">{{ s.store === 'snap' ? 'snap refresh' : 'flatpak update' }}</span><span class="muted small">, no backup</span>
+                      } @else {
+                        <label class="backup-check" [class.disabled]="!c.backupStorage">
+                          <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
+                          Backup first
+                          @if (c.backupStorage; as storage) {
+                            <span class="muted mono">→ {{ storage }}</span>
+                          } @else {
+                            <span class="muted">(choose a storage in Settings)</span>
+                          }
+                        </label>
+                      }
+                      <button type="button" class="btn btn-sm" (click)="updateAppStore(c, s.store)">Yes</button>
+                      <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+                    } @else {
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask(key, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to update it' : s.store === 'snap' ? 'snap refresh' : 'flatpak update'">
+                        <app-icon name="arrowUp" [size]="14" /> Update
+                      </button>
+                    }
+                  </div>
+                }
+                @if (expandedStores().has(key) && s.packages.length > 0) {
+                  <app-apt-packages [packages]="s.packages" [listId]="key" />
+                }
+              </div>
+            }
               @if (c.homeAssistant?.detected) {
               @let ha = c.homeAssistant!;
               <div class="item ha-item">

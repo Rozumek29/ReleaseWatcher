@@ -30,7 +30,7 @@ export function upgradeCommand(c: Pick<Container, 'kind' | 'packageManager' | 'o
   }
 }
 
-/** "Check", "Package upgrade", "Application update", "Home Assistant update" or "Restart". */
+/** "Check", "Package upgrade", "Flatpak update", "Snap update", "Application update", "Home Assistant update" or "Restart". */
 export function kindLabel(kind: RunKind): string {
   switch (kind) {
     case 'check':
@@ -43,5 +43,9 @@ export function kindLabel(kind: RunKind): string {
       return 'Restart';
     case 'home-assistant-update':
       return 'Home Assistant update';
+    case 'flatpak-update':
+      return 'Flatpak update';
+    case 'snap-update':
+      return 'Snap update';
   }
 }

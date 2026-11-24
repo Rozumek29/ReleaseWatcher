@@ -391,6 +391,8 @@ export interface AppStatus {
     enabled: number;
     withErrors: number;
     aptPending: number;
+    /** Pending Flatpak / Snap updates, one per store and machine. */
+    appStorePending?: number;
     appUpdatesAvailable: number;
     homeAssistantUpdatesAvailable?: number;
   };
@@ -413,6 +415,15 @@ export interface RateLimit {
 }
 
 /* ---------- Proxmox containers ---------- */
+
+export type AppStore = 'flatpak' | 'snap';
+
+export interface AppStoreInfo {
+  store: AppStore;
+  /** "Flatpak", "Snap". */
+  label: string;
+  packages: AptPackage[];
+}
 
 export interface AptPackage {
   name: string;
@@ -572,6 +583,8 @@ export interface Container {
   aptUpgradable: AptPackage[];
   /** Package manager found by the last check; null = not checked yet (or none found). */
   packageManager: PackageManager | null;
+  /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
+  appStores: AppStoreInfo[];
   /** Why a restart is needed (last check); empty = none. */
   restartReasons: string[];
   /** Operating system read by the last check; null = not read yet. */
@@ -633,7 +646,7 @@ export interface DiscoveredContainer {
   added: boolean;
 }
 
-export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart' | 'home-assistant-update';
+export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {

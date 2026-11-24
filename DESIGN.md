@@ -60,7 +60,9 @@ This file does not repeat those; it describes the **shape** of the system, the *
   process-group kill at the timeout), so scripts that run on a server must stay POSIX `sh` and BusyBox compatible.
 - System packages are handled by whichever package manager a check finds (`PACKAGES_CHECK_SCRIPT` /
   `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); the API keeps the historical `apt*` names
-  (`aptEnabled`, `aptUpgradable`, `apt-upgrade`) and adds `packageManager`.
+  (`aptEnabled`, `aptUpgradable`, `apt-upgrade`) and adds `packageManager`. Flatpak and Snap are separate
+  *application stores* (`APP_STORES`, `appStores` on the target, runs `flatpak-update` / `snap-update`), checked only
+  where they are installed and work.
 - State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
   cleared after undoing it, so a restart can finish the job.
 - At most one task per container at a time (`ContainerService`); schedulers only check, never update.

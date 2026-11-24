@@ -36,6 +36,7 @@ import {
   UpdateContainerRequest,
   UpdateRepositoryRequest,
   WatchedRepository,
+  AppStore,
 } from './models';
 
 /** Icon list of https://github.com/selfhst/icons, served by jsDelivr (CORS enabled) – loaded by the browser. */
@@ -326,6 +327,11 @@ export class ApiService {
   /** Restarts a container, or schedules a restart of the Proxmox host. */
   restartContainer(id: number): Observable<Run> {
     return this.http.post<Run>(`${this.baseUrl}/containers/${id}/restart`, {});
+  }
+
+  /** Updates every Flatpak / Snap application of a machine; `backup` decides about a backup (vzdump) first. */
+  updateAppStore(id: number, store: AppStore, backup: boolean): Observable<Run> {
+    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/${store}-update`, { backup });
   }
 
   /** `backup` decides about a backup (vzdump) before this update. */

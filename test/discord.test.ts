@@ -97,6 +97,25 @@ describe('DiscordNotifier', () => {
     assert.equal('components' in plain, false);
   });
 
+  it('lists the system packages, then Flatpak and Snap updates of a machine', () => {
+    const payload = buildContainerPayload(
+      {
+        vmid: 0,
+        targetKind: 'server',
+        containerName: 'desktop',
+        aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
+        packageManager: 'dnf',
+        appStores: [{ name: 'Flatpak', packages: [{ name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' }] }],
+        apps: [],
+      },
+      options,
+    );
+    assert.equal(
+      payload.embeds[0]!.description,
+      ['**dnf** – 1 package(s):', '• curl 8.0 → 8.1', '', '**Flatpak** – 1 update(s):', '• org.gnome.Calculator 51.0 → 51.1'].join('\n'),
+    );
+  });
+
   it('asks Discord to accept components when the message has a link button', async () => {
     const urls: string[] = [];
     const fetch = (async (url: string) => {

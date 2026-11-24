@@ -439,7 +439,7 @@ describe('containers API', () => {
     assert.equal(notifier.containerSent.length, 2);
 
     const status = (await request('GET', '/api/status')).json();
-    assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, aptPending: 1, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
+    assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, aptPending: 1, appStorePending: 0, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
   });
 
   it('takes the installed version of an app without a version command by hand and marks the latest as installed', async () => {

@@ -42,7 +42,7 @@ const FILTER_FROM = 10;
 export class AptPackages {
   readonly packages = input.required<readonly AptPackage[]>();
   /** Used for unique element ids when several lists are open. */
-  readonly listId = input.required<number>();
+  readonly listId = input.required<string | number>();
 
   protected readonly query = signal('');
   protected readonly showFilter = computed(() => this.packages().length > FILTER_FROM);

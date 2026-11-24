@@ -18,7 +18,8 @@ import {
   severityLabel,
   type UpdateResultNotification,
   type VulnerabilityNotification,
-  packageManagerName,
+  packageGroups,
+  packageLine,
 } from './notifier.ts';
 import { sendMail, type SmtpServer } from './smtp.ts';
 
@@ -215,13 +216,16 @@ function vulnerabilitySection(notification: VulnerabilityNotification): Section 
 function containerSection(notification: ContainerUpdatesNotification): Section {
   const target = targetName(notification);
   const appLines = notification.apps.map((a) => `${a.name}: ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`);
-  const packages = notification.aptPackages.slice(0, MAX_LISTED).map((p) => `${p.name} ${p.currentVersion ? `${p.currentVersion} → ` : ''}${p.newVersion}`);
-  const more = notification.aptPackages.length - packages.length;
-  const aptTitle = `${packageManagerName(notification)} – ${notification.aptPackages.length} package(s)`;
+  const groups = packageGroups(notification).map((g) => {
+    const lines = g.packages.slice(0, MAX_LISTED).map(packageLine);
+    return { title: g.title, lines, more: g.packages.length - lines.length };
+  });
 
   const text: string[] = [`${target}: updates available`];
   if (appLines.length > 0) text.push('', ...appLines);
-  if (packages.length > 0) text.push('', `${aptTitle}:`, ...packages.map((p) => `  • ${p}`), ...(more > 0 ? [`  … and ${more} more`] : []));
+  for (const g of groups) {
+    text.push('', `${g.title}:`, ...g.lines.map((p) => `  • ${p}`), ...(g.more > 0 ? [`  … and ${g.more} more`] : []));
+  }
 
   const list = (items: string[]) =>
     `<ul style="margin:6px 0 0;padding-left:20px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px">${items.map((i) => `<li>${Bun.escapeHTML(i)}</li>`).join('')}</ul>`;
@@ -231,7 +235,7 @@ function containerSection(notification: ContainerUpdatesNotification): Section {
     html: [
       `<h2 style="margin:0 0 6px;font-size:18px;font-weight:650">${Bun.escapeHTML(target)}: updates available</h2>`,
       appLines.length > 0 ? `<div style="margin-top:10px;font-weight:600">Applications</div>${list(appLines)}` : '',
-      packages.length > 0 ? `<div style="margin-top:10px;font-weight:600">${Bun.escapeHTML(aptTitle)}</div>${list(more > 0 ? [...packages, `… and ${more} more`] : packages)}` : '',
+      ...groups.map((g) => `<div style="margin-top:10px;font-weight:600">${Bun.escapeHTML(g.title)}</div>${list(g.more > 0 ? [...g.lines, `… and ${g.more} more`] : g.lines)}`),
     ].join(''),
   };
 }

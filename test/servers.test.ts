@@ -107,6 +107,47 @@ describe('servers', () => {
     assert.equal(shell.detached.at(-1)?.command, PACKAGES_UPGRADE_SCRIPT);
   });
 
+  it('checks Flatpak and Snap, notifies about their updates and updates them', async () => {
+    const stores = [
+      '---releasewatcher-store--- flatpak',
+      'org.gnome.Calculator\t51.1\tstable\t00516a24d410\tapp/org.gnome.Calculator/x86_64/stable',
+      '---releasewatcher-store--- flatpak-installed',
+      'org.gnome.Calculator/x86_64/stable\t51.0\t0032886e3396',
+      '---releasewatcher-store--- snap',
+      'All snaps up to date.',
+      '---releasewatcher-store--- snap-installed',
+      'Name Version Rev Tracking Publisher Notes',
+    ].join('\n');
+    shell.on(/flatpak remote-ls --updates/, { output: stores });
+    const { target } = await addServer();
+    assert.deepEqual(target.appStores, [
+      { store: 'flatpak', label: 'Flatpak', packages: [{ name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' }] },
+      { store: 'snap', label: 'Snap', packages: [] },
+    ]);
+    // apt (1) + Flatpak (1); Snap has nothing pending.
+    assert.equal(target.updatesAvailable, 2);
+    assert.deepEqual(notifier.containerSent.at(-1)?.appStores, [
+      { name: 'Flatpak', packages: [{ name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' }] },
+    ]);
+    assert.equal((await request('GET', '/api/status')).json().containers.appStorePending, 1);
+
+    shell.on(/flatpak update -y --noninteractive/, { output: 'Updating app/org.gnome.Calculator/x86_64/stable\n' });
+    assert.equal((await request('POST', `/api/containers/${target.id}/flatpak-update`, {})).status, 202);
+    const run = await app.containers.wait(target.id);
+    assert.equal(run?.kind, 'flatpak-update');
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /Updating the Flatpak applications in Hetzner VPS/);
+    assert.match(shell.detached.at(-1)?.command ?? '', /flatpak update -y --noninteractive/);
+
+    // A store the last check did not find cannot be updated.
+    shell.on(/flatpak remote-ls --updates/, { output: '' });
+    await request('POST', `/api/containers/${target.id}/check`);
+    await app.containers.wait(target.id);
+    const missing = await request('POST', `/api/containers/${target.id}/snap-update`, {});
+    assert.equal(missing.status, 409);
+    assert.match(missing.json().title, /Snap was not found on Hetzner VPS/);
+  });
+
   it('reports a machine without a supported package manager', async () => {
     shell.on(/apt list --upgradable/, { exitCode: 127, output: 'No supported package manager found (apt, dnf, yum, zypper, apk or pacman)\n' });
     const { target } = await addServer();

@@ -41,7 +41,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 
 **Proxmox containers, VMs and servers**
 
-- Pending **system packages** (apt, dnf/yum, zypper, apk, pacman) and **application** versions of LXC containers,
+- Pending **system packages** (apt, dnf/yum, zypper, apk, pacman), **Flatpak** / **Snap** apps and **application** versions of LXC containers,
   virtual machines (QEMU guest agent), the Proxmox node and plain Linux servers – over SSH, guests need no SSH server.
 - One-click updates with live output, optional `vzdump` backup first, temporary CPU/RAM boost, *restart needed* hints.
   **Updates never run automatically.**

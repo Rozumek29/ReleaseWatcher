@@ -82,9 +82,9 @@
           <div class="poller-meta warn-text">{{ s.repositories.withErrors }} repo(s) with errors</div>
         }
         @if (s.containers; as c) {
-          @if (c.aptPending + c.appUpdatesAvailable > 0) {
+          @if (c.aptPending + (c.appStorePending ?? 0) + c.appUpdatesAvailable > 0) {
             <a class="poller-meta update-link containers-link" routerLink="/machines">
-              {{ c.aptPending + c.appUpdatesAvailable }} container update(s) waiting
+              {{ c.aptPending + (c.appStorePending ?? 0) + c.appUpdatesAvailable }} container update(s) waiting
             </a>
           }
           @if (c.withErrors > 0) {

@@ -18,7 +18,8 @@ import {
   severityLabel,
   type UpdateResultNotification,
   type VulnerabilityNotification,
-  packageManagerName,
+  packageGroups,
+  packageLine,
 } from './notifier.ts';
 
 /** Author icon of a repository embed: its custom icon (Discord shows no SVG) or the owner's avatar. */
@@ -204,16 +205,16 @@ export function buildContainerPayload(
   for (const app of notification.apps) {
     lines.push(`**${app.name}**: ${app.installedVersion ?? '?'} → ${app.latestVersion ?? '?'}`);
   }
-  if (notification.aptPackages.length > 0) {
+  for (const group of packageGroups(notification)) {
     if (lines.length > 0) {
       lines.push('');
     }
-    lines.push(`**${packageManagerName(notification)}** – ${notification.aptPackages.length} package(s):`);
-    for (const pkg of notification.aptPackages.slice(0, MAX_LISTED)) {
-      lines.push(`• ${pkg.name} ${pkg.currentVersion ? `${pkg.currentVersion} → ` : ''}${pkg.newVersion}`);
+    lines.push(`**${group.name}**${group.title.slice(group.name.length)}:`);
+    for (const pkg of group.packages.slice(0, MAX_LISTED)) {
+      lines.push(`• ${packageLine(pkg)}`);
     }
-    if (notification.aptPackages.length > MAX_LISTED) {
-      lines.push(`… and ${notification.aptPackages.length - MAX_LISTED} more`);
+    if (group.packages.length > MAX_LISTED) {
+      lines.push(`… and ${group.packages.length - MAX_LISTED} more`);
     }
   }
   return {
@@ -317,7 +318,7 @@ export function buildDigestPayload(
         const { updates } = event;
         const parts = [
           ...updates.apps.map((a) => `${a.name} ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`),
-          ...(updates.aptPackages.length > 0 ? [`${updates.aptPackages.length} ${packageManagerName(updates)} package(s)`] : []),
+          ...packageGroups(updates).map((g) => g.summary),
         ];
         containers.push(`• **${targetName(updates)}**: ${parts.join(', ')}`);
         break;

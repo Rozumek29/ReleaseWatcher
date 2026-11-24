@@ -33,9 +33,11 @@ export interface ContainerUpdatesNotification {
   targetKind: TargetKind;
   containerName: string;
   /** Upgradable system packages (all of them, not only new ones). */
-  aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];
+  aptPackages: PackageUpdate[];
   /** Package manager of the target (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
   packageManager?: string | null;
+  /** Flatpak / Snap applications with updates (stores without updates are left out). */
+  appStores?: { name: string; packages: PackageUpdate[] }[];
   /** Applications with a newer version available. */
   apps: { name: string; installedVersion: string | null; latestVersion: string | null }[];
 }
@@ -45,7 +47,7 @@ export interface UpdateResultNotification {
   vmid: number;
   targetKind: TargetKind;
   containerName: string;
-  kind: 'apt-upgrade' | 'app-update' | 'home-assistant-update';
+  kind: 'apt-upgrade' | 'app-update' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
   /** Application name for `app-update` ("Home Assistant" for `home-assistant-update`). */
   appName: string | null;
   succeeded: boolean;
@@ -96,9 +98,53 @@ const TARGET_PREFIX: Readonly<Record<Exclude<TargetKind, 'server'>, (vmid: numbe
 /** Name of the package manager in notifications ("apt", "dnf" …). */
 export const packageManagerName = (n: { packageManager?: string | null }): string => n.packageManager ?? 'apt';
 
-/** "apt upgrade", "dnf upgrade", "update of Nextcloud" or "update of Home Assistant". */
-export const updateLabel = (n: UpdateResultNotification): string =>
-  n.kind === 'apt-upgrade' ? `${packageManagerName(n)} upgrade` : `update of ${n.appName ?? 'the application'}`;
+/** "apt upgrade", "dnf upgrade", "Flatpak update", "Snap update", "update of Nextcloud" or "update of Home Assistant". */
+export function updateLabel(n: UpdateResultNotification): string {
+  switch (n.kind) {
+    case 'apt-upgrade':
+      return `${packageManagerName(n)} upgrade`;
+    case 'flatpak-update':
+      return 'Flatpak update';
+    case 'snap-update':
+      return 'Snap update';
+    default:
+      return `update of ${n.appName ?? 'the application'}`;
+  }
+}
+
+export type PackageUpdate = { name: string; currentVersion: string | null; newVersion: string };
+
+/** A list of package updates of a target: its system packages, or the applications of a store (Flatpak, Snap). */
+export interface PackageGroup {
+  /** "apt – 3 package(s)", "Flatpak – 2 update(s)". */
+  title: string;
+  /** Name of the list ("apt", "Flatpak"), the start of {@link title}. */
+  name: string;
+  /** Short form for summaries: "3 apt package(s)", "2 Flatpak update(s)". */
+  summary: string;
+  packages: PackageUpdate[];
+}
+
+/** The non-empty package lists of a notification: system packages first, then Flatpak and Snap. */
+export function packageGroups(n: ContainerUpdatesNotification): PackageGroup[] {
+  const groups: PackageGroup[] = [];
+  if (n.aptPackages.length > 0) {
+    const name = packageManagerName(n);
+    const count = `${n.aptPackages.length} package(s)`;
+    groups.push({ title: `${name} – ${count}`, name, summary: `${n.aptPackages.length} ${name} package(s)`, packages: n.aptPackages });
+  }
+  for (const store of n.appStores ?? []) {
+    if (store.packages.length > 0) {
+      const count = store.packages.length;
+      groups.push({ title: `${store.name} – ${count} update(s)`, name: store.name, summary: `${count} ${store.name} update(s)`, packages: store.packages });
+    }
+  }
+  return groups;
+}
+
+/** "curl 8.0 → 8.1" (without the installed version when it is not known). */
+export const packageLine = (p: PackageUpdate): string =>
+  `${p.name} ${p.currentVersion ? `${p.currentVersion} → ` : ''}${p.newVersion}`;
 
 /** Short heading of a digest, e.g. "2 new releases, 1 container with updates". */
 export function digestSummary(events: readonly NotificationEvent[]): string {

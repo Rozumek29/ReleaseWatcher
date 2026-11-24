@@ -127,6 +127,7 @@ export const container = (overrides: Partial<Container> = {}): Container => ({
     { name: 'libssl3', currentVersion: '3.0.14', newVersion: '3.0.15' },
   ],
   packageManager: 'apt',
+  appStores: [],
   restartReasons: [],
   os: null,
   homeAssistant: null,

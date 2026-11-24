@@ -15,7 +15,8 @@ import {
   type UpdateResultNotification,
   updateLabel,
   type VulnerabilityNotification,
-  packageManagerName,
+  packageGroups,
+  packageLine,
 } from './notifier.ts';
 
 /**
@@ -130,15 +131,12 @@ function containerMessage(n: ContainerUpdatesNotification, options: MessageOptio
       lines: n.apps.map((a) => ({ text: `${a.name}: ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}` })),
     });
   }
-  if (n.aptPackages.length > 0) {
-    const listed = n.aptPackages.slice(0, MAX_LISTED);
-    const more = n.aptPackages.length - listed.length;
+  for (const group of packageGroups(n)) {
+    const listed = group.packages.slice(0, MAX_LISTED);
+    const more = group.packages.length - listed.length;
     sections.push({
-      heading: `${packageManagerName(n)} – ${n.aptPackages.length} package(s)`,
-      lines: [
-        ...listed.map((p) => ({ text: `${p.name} ${p.currentVersion ? `${p.currentVersion} → ` : ''}${p.newVersion}` })),
-        ...(more > 0 ? [{ text: `… and ${more} more` }] : []),
-      ],
+      heading: group.title,
+      lines: [...listed.map((p) => ({ text: packageLine(p) })), ...(more > 0 ? [{ text: `… and ${more} more` }] : [])],
     });
   }
   return {
@@ -211,7 +209,7 @@ function digestMessage(events: readonly NotificationEvent[], options: MessageOpt
         const u = event.updates;
         const parts = [
           ...u.apps.map((a) => `${a.name} ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`),
-          ...(u.aptPackages.length > 0 ? [`${u.aptPackages.length} ${packageManagerName(u)} package(s)`] : []),
+          ...packageGroups(u).map((g) => g.summary),
         ];
         containers.push({ text: `${targetName(u)}: ${parts.join(', ')}` });
         break;

@@ -539,6 +539,8 @@ const MIGRATIONS: readonly string[] = [
   `ALTER TABLE containers ADD COLUMN package_manager TEXT;
    UPDATE containers SET package_manager = 'apt'
     WHERE apt_enabled = 1 AND last_checked_at IS NOT NULL AND (last_error IS NULL OR last_error NOT LIKE '%apt:%');`,
+  // Flatpak / Snap found by the last check with their pending updates (JSON object keyed by store).
+  `ALTER TABLE containers ADD COLUMN app_stores TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

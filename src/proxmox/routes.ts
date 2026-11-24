@@ -26,6 +26,8 @@ import {
   targetTitle,
   capabilities,
   osLabel,
+  APP_STORES,
+  APP_STORE_LABELS,
 } from './domain.ts';
 import { installBlocker, normalizeHomeAssistantUrl } from './home-assistant.ts';
 import type { ContainerScheduler } from './scheduler.ts';
@@ -314,6 +316,11 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       status: c.status,
       aptUpgradable: c.aptUpgradable,
       packageManager: c.packageManager,
+      /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
+      appStores: APP_STORES.flatMap((store) => {
+        const packages = c.appStores[store];
+        return packages ? [{ store, label: APP_STORE_LABELS[store], packages }] : [];
+      }),
       /** Why a restart is needed (last check); empty = none. */
       restartReasons: c.restartReasons,
       /** Operating system read by the last check (`label` for display); null = not read yet. */
@@ -329,9 +336,10 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       /** The check/update running right now (its live log: `GET /api/runs/:id`); null while waiting in "update all". */
       activeRunId: service.activeRunId(c.id),
       apps: appDtos,
-      /** apt counts as one pending update, every Home Assistant update as one. */
+      /** System packages count as one pending update, so do Flatpak and Snap; every Home Assistant update as one. */
       updatesAvailable:
         (c.aptUpgradable.length > 0 ? 1 : 0) +
+        APP_STORES.filter((store) => (c.appStores[store]?.length ?? 0) > 0).length +
         appDtos.filter((a) => a.updateAvailable).length +
         (c.homeAssistant?.updates.length ?? 0),
     };
@@ -717,6 +725,27 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
         }),
     },
+    // Updates every Flatpak / Snap application of a machine (`flatpak update` / `snap refresh`).
+    ...Object.fromEntries(
+      APP_STORES.map((store) => [
+        `/api/containers/:id/${store}-update`,
+        {
+          POST: (req: Bun.BunRequest<'/api/containers/:id'>) =>
+            guard(async () => {
+              const options = await readUpdateOptions(req);
+              const container = findContainer(req.params.id);
+              if (!container) {
+                return problem(404, 'Container not found.');
+              }
+              if (!container.appStores[store]) {
+                return problem(409, `${APP_STORE_LABELS[store]} was not found on ${targetLabel(container)} by its last check.`);
+              }
+              const backup = resolveBackup(container, options.backup);
+              return backup instanceof Response ? backup : accepted(service.startAppStoreUpdate(container, store, backup));
+            }),
+        },
+      ]),
+    ),
     // Installs Home Assistant updates in a Home Assistant OS virtual machine (every installable one, or `ids`).
     '/api/containers/:id/home-assistant-update': {
       POST: (req: Bun.BunRequest<'/api/containers/:id/home-assistant-update'>) =>
@@ -965,6 +994,8 @@ export function containerStatus(containers: ContainerStore) {
     enabled: counts.enabled,
     withErrors: counts.withErrors,
     aptPending: counts.aptPending,
+    /** Pending Flatpak / Snap updates, one per store and machine. */
+    appStorePending: counts.appStorePending,
     appUpdatesAvailable: containers.listAppVersions().filter((a) => appUpdateAvailable(a)).length,
     homeAssistantUpdatesAvailable: counts.homeAssistantUpdates,
   };

@@ -16,7 +16,7 @@ import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ClockService } from '../../core/clock.service';
 import { ApiService, describeError } from '../../core/api.service';
-import { AppSettings, Container, ContainerApp, DiscoveredContainer, DockerContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
+import { AppSettings, AppStore, Container, ContainerApp, DiscoveredContainer, DockerContainer, HomeAssistantUpdate, Host, Run } from '../../core/models';
 import { StatusService } from '../../core/status.service';
 import { ContainerSort, PreferencesService } from '../../core/preferences.service';
 import { ToastService } from '../../core/toast.service';
@@ -73,6 +73,8 @@ export class ContainersPage {
   protected readonly confirming = signal<string | null>(null);
   /** Containers whose apt package list is expanded. */
   protected readonly expanded = signal<ReadonlySet<number>>(new Set());
+  /** Flatpak / Snap lists that are expanded (`<container id>-<store>`). */
+  protected readonly expandedStores = signal<ReadonlySet<string>>(new Set());
 
   protected readonly editing = signal<Container | null>(null);
   protected readonly runTarget = signal<RunLogTarget | null>(null);
@@ -477,6 +479,22 @@ export class ContainersPage {
     return this.startRun(container, () => this.api.upgradeApt(container.id, backup));
   }
 
+  protected updateAppStore(container: Container, store: AppStore): Promise<void> {
+    this.confirming.set(null);
+    const backup = this.backupFirst();
+    return this.startRun(container, () => this.api.updateAppStore(container.id, store, backup));
+  }
+
+  protected toggleStore(key: string): void {
+    this.expandedStores.update((keys) => {
+      const next = new Set(keys);
+      if (!next.delete(key)) {
+        next.add(key);
+      }
+      return next;
+    });
+  }
+
   protected restart(container: Container): Promise<void> {
     this.confirming.set(null);
     return this.startRun(container, () => this.api.restartContainer(container.id));
@@ -614,7 +632,7 @@ export class ContainersPage {
   }
 
   /**
-   * Updates "Update all" runs in the container (same rules as the server: apt counts once, then every application
+   * Updates "Update all" runs in the container (same rules as the server: system packages, Flatpak and Snap count once each, then every application
    * with a newer version and an update command; nothing for the host, paused or blocked containers).
    */
   protected pendingCount(container: Container): number {
@@ -622,9 +640,11 @@ export class ContainersPage {
       return 0;
     }
     const apt = container.aptEnabled && container.aptUpgradable.length > 0 ? 1 : 0;
+    // Flatpak and Snap update all their applications at once.
+    const stores = container.appStores.filter((s) => s.packages.length > 0).length;
     // Home Assistant updates run as one task.
     const ha = this.installableHa(container).length > 0 ? 1 : 0;
-    return apt + ha + container.apps.filter((a) => a.updateAvailable === true && !!a.updateCommand).length;
+    return apt + stores + ha + container.apps.filter((a) => a.updateAvailable === true && !!a.updateCommand).length;
   }
 
   /** Runs every pending update of one container, one after another (a single backup before the first one). */
