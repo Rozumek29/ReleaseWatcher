@@ -749,6 +749,28 @@ export const MIGRATIONS: readonly string[] = [
    UPDATE container_apps SET latest_source = 'repository' WHERE latest_source = 'github';
    UPDATE container_runs SET kind = 'packages-upgrade' WHERE kind = 'apt-upgrade';
    UPDATE settings SET key = 'notifyPackageUpdates' WHERE key = 'notifyAptUpdates';`,
+  // `containers` holds every target (containers, virtual machines, Proxmox nodes, servers): renamed with its apps and
+  // runs. SQLite updates the foreign keys, indexes and triggers that refer to them; the indexes get matching names.
+  `ALTER TABLE containers RENAME TO targets;
+   ALTER TABLE container_apps RENAME TO target_apps;
+   ALTER TABLE container_runs RENAME TO target_runs;
+   ALTER TABLE target_apps RENAME COLUMN container_id TO target_id;
+   ALTER TABLE target_runs RENAME COLUMN container_id TO target_id;
+
+   DROP INDEX idx_containers_enabled;
+   DROP INDEX idx_containers_host_vmid;
+   DROP INDEX idx_container_apps_container;
+   DROP INDEX idx_container_apps_repository;
+   DROP INDEX idx_container_runs_container;
+   DROP INDEX idx_container_runs_app;
+   DROP INDEX idx_container_runs_running;
+   CREATE INDEX idx_targets_enabled ON targets (is_enabled, vmid);
+   CREATE UNIQUE INDEX idx_targets_host_vmid ON targets (host_id, kind, vmid);
+   CREATE INDEX idx_target_apps_target ON target_apps (target_id, id);
+   CREATE INDEX idx_target_apps_repository ON target_apps (repository_id) WHERE repository_id IS NOT NULL;
+   CREATE INDEX idx_target_runs_target ON target_runs (target_id, id DESC);
+   CREATE INDEX idx_target_runs_app ON target_runs (app_id) WHERE app_id IS NOT NULL;
+   CREATE INDEX idx_target_runs_running ON target_runs (status) WHERE status = 'running';`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -955,7 +977,7 @@ export class RepositoryStore {
               SET installed_app_id = a.id, installed_docker_id = NULL,
                   installed_version = coalesce(a.installed_version, watched_repositories.installed_version),
                   installed_version_checked_at = a.checked_at, installed_version_error = a.error
-             FROM container_apps a
+             FROM target_apps a
             WHERE a.id = ?2 AND watched_repositories.id = ?1`,
         )
         .run(repositoryId, app.id);
@@ -981,13 +1003,13 @@ export class RepositoryStore {
       .query<NameRow, []>(
         `SELECT r.id AS repository_id, 'app' AS kind, a.id, a.name, c.name AS machine
            FROM watched_repositories r
-           JOIN container_apps a ON a.id = r.installed_app_id
-           JOIN containers c ON c.id = a.container_id
+           JOIN target_apps a ON a.id = r.installed_app_id
+           JOIN targets c ON c.id = a.target_id
          UNION ALL
          SELECT r.id, 'docker', d.id, d.name, coalesce(c.name, e.name)
            FROM watched_repositories r
            JOIN docker_containers d ON d.id = r.installed_docker_id
-           LEFT JOIN containers c ON c.id = d.target_id
+           LEFT JOIN targets c ON c.id = d.target_id
            LEFT JOIN docker_endpoints e ON e.id = d.endpoint_id`,
       )
       .all();

@@ -10,7 +10,7 @@ import { container, homeAssistant, proxmoxSettings } from './fixtures';
 
 const run = (overrides: Partial<Run> = {}): Run => ({
   id: 9,
-  containerId: 1,
+  targetId: 1,
   appId: null,
   kind: 'check',
   trigger: 'manual',
@@ -33,7 +33,7 @@ describe('ContainersPage', () => {
     http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(ContainersPage);
     fixture.detectChanges();
-    http.expectOne('/api/containers').flush(containers);
+    http.expectOne('/api/targets').flush(containers);
     http.expectOne('/api/settings').flush(proxmoxSettings(configured));
     await settle(fixture);
     return { fixture, el: fixture.nativeElement as HTMLElement };
@@ -90,7 +90,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(el.textContent).toContain('Update 1 Flatpak application(s)?');
     [...el.querySelectorAll<HTMLButtonElement>('.store-item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/flatpak-update');
+    const request = http.expectOne('/api/targets/1/flatpak-update');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: true });
   });
@@ -166,12 +166,12 @@ describe('ContainersPage', () => {
     const mosquitto = rows.find((r) => r.textContent?.includes('Mosquitto broker') && !r.classList.contains('ha-item'))!;
     [...mosquitto.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Update'))!.click();
     await settle(fixture);
-    http.expectNone('/api/containers/1/home-assistant-update');
+    http.expectNone('/api/targets/1/home-assistant-update');
     expect(el.textContent).toContain('Update Mosquitto broker?');
     el.querySelector<HTMLInputElement>('.backup-check input')!.click();
 
     [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/home-assistant-update');
+    const request = http.expectOne('/api/targets/1/home-assistant-update');
     expect(request.request.body).toEqual({ backup: false, ids: ['app:core_mosquitto'] });
     request.flush(run({ kind: 'home-assistant-update', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
@@ -181,7 +181,7 @@ describe('ContainersPage', () => {
     http.expectOne('/api/runs/9').flush(run({ kind: 'home-assistant-update', output: '» Updating Mosquitto broker\n' }));
     await settle(fixture);
     expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
-    http.expectOne('/api/containers').flush([vm]);
+    http.expectOne('/api/targets').flush([vm]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     http.expectOne('/api/status').flush({});
     await settle(fixture);
@@ -215,7 +215,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(el.textContent).toContain('Install 2 Home Assistant update(s)?');
     [...el.querySelectorAll<HTMLButtonElement>('.ha-item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/home-assistant-update');
+    const request = http.expectOne('/api/targets/1/home-assistant-update');
     expect(request.request.body).toEqual({ backup: true });
     request.flush({ message: 'busy' }, { status: 409, statusText: 'Conflict' });
     await settle(fixture);
@@ -320,7 +320,7 @@ describe('ContainersPage', () => {
     )!;
     upgrade.click();
     await settle(fixture);
-    http.expectNone('/api/containers/1/packages-upgrade');
+    http.expectNone('/api/targets/1/packages-upgrade');
     expect(el.textContent).toContain('Upgrade 2 package(s)?');
     // "Backup first" starts with the container's default and can be changed for this update.
     const backup = el.querySelector<HTMLInputElement>('.backup-check input')!;
@@ -329,7 +329,7 @@ describe('ContainersPage', () => {
     backup.click();
 
     [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/packages-upgrade');
+    const request = http.expectOne('/api/targets/1/packages-upgrade');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: false });
     request.flush(run({ kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
@@ -344,7 +344,7 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.output')?.textContent).toContain('Setting up curl');
     expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
 
-    http.expectOne('/api/containers').flush([container({ packageUpdates: [], updatesAvailable: 1 })]);
+    http.expectOne('/api/targets').flush([container({ packageUpdates: [], updatesAvailable: 1 })]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     http.expectOne('/api/status').flush({});
     await settle(fixture);
@@ -372,11 +372,11 @@ describe('ContainersPage', () => {
       )!;
     restartButton().click();
     await settle(fixture);
-    http.expectNone('/api/containers/1/restart');
+    http.expectNone('/api/targets/1/restart');
     expect(el.querySelector('.restart-line')?.textContent).toContain('Restart CT 101?');
 
     [...el.querySelectorAll<HTMLButtonElement>('.restart-line button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const request = http.expectOne('/api/containers/1/restart');
+    const request = http.expectOne('/api/targets/1/restart');
     expect(request.request.method).toBe('POST');
     request.flush(run({ kind: 'restart', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
@@ -387,7 +387,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(el.querySelector('.run-status')?.textContent).toContain('Succeeded');
 
-    http.expectOne('/api/containers').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 })]);
+    http.expectOne('/api/targets').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 })]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     http.expectOne('/api/status').flush({});
     await settle(fixture);
@@ -424,7 +424,7 @@ describe('ContainersPage', () => {
     expect(checkboxes()).toHaveLength(0);
     headerButton('Update').click();
     await settle(fixture);
-    http.expectNone('/api/containers/update-all');
+    http.expectNone('/api/targets/update-all');
     // Only containers with pending updates get a checkbox, all of them ticked.
     expect(checkboxes()).toHaveLength(2);
     expect(checkboxes().every((c) => c.checked)).toBe(true);
@@ -448,14 +448,14 @@ describe('ContainersPage', () => {
     await settle(fixture);
 
     headerButton('Update 1').click();
-    const request = http.expectOne('/api/containers/update-all');
+    const request = http.expectOne('/api/targets/update-all');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: true, ids: [1] });
-    request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
+    request.flush({ targets: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
     await settle(fixture);
     expect(checkboxes()).toHaveLength(0);
 
-    http.expectOne('/api/containers').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 }), node]);
+    http.expectOne('/api/targets').flush([container({ packageUpdates: [], apps: [], updatesAvailable: 0 }), node]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     await settle(fixture);
     http.expectOne('/api/status').flush({});
@@ -475,7 +475,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(el.querySelectorAll('.ct-list .pick input')).toHaveLength(0);
     expect(headerButton('Check all')).toBeTruthy();
-    http.expectNone('/api/containers/update-all');
+    http.expectNone('/api/targets/update-all');
   });
 
   it('updates everything in one container after a confirmation', async () => {
@@ -496,12 +496,12 @@ describe('ContainersPage', () => {
     detail().querySelector<HTMLInputElement>('.actions .backup-check input')!.click();
 
     detailButton('Yes')!.click();
-    const request = http.expectOne('/api/containers/1/update-all');
+    const request = http.expectOne('/api/targets/1/update-all');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ backup: false });
-    request.flush({ containers: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
+    request.flush({ targets: 1, updates: 2 }, { status: 202, statusText: 'Accepted' });
     await settle(fixture);
-    http.expectOne('/api/containers').flush([container({ isBusy: true, activeRunId: 9 }), single]);
+    http.expectOne('/api/targets').flush([container({ isBusy: true, activeRunId: 9 }), single]);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     await settle(fixture);
     http.expectOne('/api/status').flush({});
@@ -533,7 +533,7 @@ describe('ContainersPage', () => {
       http.expectOne('/api/runs/9').flush(run({ kind: 'packages-upgrade' }));
       await vi.advanceTimersByTimeAsync(0);
       http.expectOne('/api/status').flush({});
-      http.expectOne('/api/containers').flush([container({ isBusy: true, activeRunId: 10 })]);
+      http.expectOne('/api/targets').flush([container({ isBusy: true, activeRunId: 10 })]);
       http.expectOne('/api/settings').flush(proxmoxSettings(true));
       await vi.advanceTimersByTimeAsync(0);
       http
@@ -552,7 +552,7 @@ describe('ContainersPage', () => {
     vi.useFakeTimers();
     try {
       const respond = async (isBusy: boolean) => {
-        http.expectOne('/api/containers').flush([container({ isBusy })]);
+        http.expectOne('/api/targets').flush([container({ isBusy })]);
         http.expectOne('/api/settings').flush(proxmoxSettings(true));
         await vi.advanceTimersByTimeAsync(0);
       };
@@ -566,7 +566,7 @@ describe('ContainersPage', () => {
       await vi.advanceTimersByTimeAsync(3000);
       await respond(false);
       await vi.advanceTimersByTimeAsync(30_000);
-      http.expectNone('/api/containers');
+      http.expectNone('/api/targets');
     } finally {
       vi.useRealTimers();
     }
@@ -602,11 +602,11 @@ describe('ContainersPage', () => {
 
     markButtons()[0]!.click();
     await settle(fixture);
-    const request = http.expectOne('/api/containers/1/apps/2/mark-installed');
+    const request = http.expectOne('/api/targets/1/apps/2/mark-installed');
     expect(request.request.method).toBe('POST');
     request.flush({ ...manual, installedVersion: '1.32.0', updateAvailable: false });
     await settle(fixture);
-    http.expectOne('/api/containers/1').flush(
+    http.expectOne('/api/targets/1').flush(
       container({ apps: [{ ...base, id: 1, name: 'Scripted' }, { ...manual, installedVersion: '1.32.0', updateAvailable: false }] }),
     );
     await settle(fixture);
@@ -619,7 +619,7 @@ describe('ContainersPage', () => {
     const { fixture, el } = await create([]);
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
-    http.expectOne('/api/proxmox/containers').flush([
+    http.expectOne('/api/proxmox/guests').flush([
       { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: true },
       { kind: 'lxc', vmid: 102, status: 'running', name: 'jellyfin', added: false },
     ]);
@@ -630,7 +630,7 @@ describe('ContainersPage', () => {
     expect(el.querySelector('.vm-hint')).toBeNull();
 
     el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
-    const request = http.expectOne('/api/containers');
+    const request = http.expectOne('/api/targets');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({ vmid: 102, name: null });
     request.flush(container({ id: 2, vmid: 102, name: 'jellyfin', isBusy: true }));
@@ -649,7 +649,7 @@ describe('ContainersPage', () => {
     http = TestBed.inject(HttpTestingController);
     const fixture = TestBed.createComponent(ContainersPage);
     fixture.detectChanges();
-    http.expectOne('/api/containers').flush([]);
+    http.expectOne('/api/targets').flush([]);
     const settings = proxmoxSettings(true);
     settings.proxmox.nodes = [
       { id: 1, name: 'pve1', configured: true, backupStorage: null },
@@ -660,18 +660,18 @@ describe('ContainersPage', () => {
     const el = fixture.nativeElement as HTMLElement;
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
-    http.expectOne('/api/proxmox/containers?hostId=1').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'vw', added: false }]);
+    http.expectOne('/api/proxmox/guests?hostId=1').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'vw', added: false }]);
     await settle(fixture);
     const node = el.querySelector<HTMLSelectElement>('#add-node')!;
     expect([...node.options].map((o) => o.textContent)).toEqual(['pve1', 'pve2']);
     node.value = node.options[1]!.value;
     node.dispatchEvent(new Event('change'));
-    http.expectOne('/api/proxmox/containers?hostId=2').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'jf', added: false }]);
+    http.expectOne('/api/proxmox/guests?hostId=2').flush([{ kind: 'lxc', vmid: 100, status: 'running', name: 'jf', added: false }]);
     await settle(fixture);
     expect([...el.querySelectorAll('#vmid option')].map((o) => o.textContent)).toEqual(['CT 100 · jf (running)']);
 
     el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
-    const request = http.expectOne('/api/containers');
+    const request = http.expectOne('/api/targets');
     expect(request.request.body).toEqual({ vmid: 100, name: null, hostId: 2 });
     request.flush(container({ id: 2, vmid: 100, name: 'jf', hostId: 2, hostName: 'pve2', backupStorage: 'pbs2' }));
     await settle(fixture);
@@ -682,14 +682,14 @@ describe('ContainersPage', () => {
     const { fixture, el } = await create([]);
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
-    http.expectOne('/api/proxmox/containers').flush([{ kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false }]);
+    http.expectOne('/api/proxmox/guests').flush([{ kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false }]);
     await settle(fixture);
 
     expect([...el.querySelectorAll('#vmid option')].map((o) => o.textContent)).toEqual(['VM 137 · debian (running)']);
     expect(el.querySelector('.vm-hint')?.textContent).toContain('qemu-guest-agent');
 
     el.querySelector<HTMLButtonElement>('.add-form button[type=submit]')!.click();
-    http.expectOne('/api/containers').flush(
+    http.expectOne('/api/targets').flush(
       container({ id: 5, kind: 'vm', vmid: 137, name: 'debian', isBusy: true, restartReasons: [] }),
     );
     await settle(fixture);
@@ -703,7 +703,7 @@ describe('ContainersPage', () => {
     const { fixture, el } = await create([]);
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
-    http.expectOne('/api/proxmox/containers').flush([
+    http.expectOne('/api/proxmox/guests').flush([
       { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: false },
       { kind: 'lxc', vmid: 102, status: 'stopped', name: 'jellyfin', added: false },
       { kind: 'vm', vmid: 137, status: 'running', name: 'debian', added: false },
@@ -716,12 +716,12 @@ describe('ContainersPage', () => {
     // Virtual machines are added one by one.
     expect(addAll.textContent?.trim()).toBe('Add all containers (2)');
     addAll.click();
-    const request = http.expectOne('/api/containers/add-all');
+    const request = http.expectOne('/api/targets/add-all');
     expect(request.request.method).toBe('POST');
     const added = [container({ isBusy: true }), container({ id: 2, vmid: 102, name: 'jellyfin' })];
     request.flush(added, { status: 201, statusText: 'Created' });
     await settle(fixture);
-    http.expectOne('/api/containers').flush(added);
+    http.expectOne('/api/targets').flush(added);
     http.expectOne('/api/settings').flush(proxmoxSettings(true));
     await settle(fixture);
     http.expectOne('/api/status').flush({});
@@ -751,10 +751,10 @@ describe('ContainersPage', () => {
     const { fixture, el } = await create([container()]);
 
     [...el.querySelectorAll<HTMLButtonElement>('.header-actions button')].find((b) => b.textContent?.includes('Add container'))!.click();
-    http.expectOne('/api/proxmox/containers').flush([{ vmid: 101, status: 'running', name: 'vaultwarden', added: true }]);
+    http.expectOne('/api/proxmox/guests').flush([{ vmid: 101, status: 'running', name: 'vaultwarden', added: true }]);
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('.node-row button')!.click();
-    const request = http.expectOne('/api/containers/node');
+    const request = http.expectOne('/api/targets/node');
     expect(request.request.method).toBe('POST');
     const node = container({ id: 5, kind: 'node', vmid: 0, name: 'pve', apps: [], updatesAvailable: 1 });
     request.flush(node, { status: 201, statusText: 'Created' });
@@ -773,14 +773,14 @@ describe('ContainersPage', () => {
     expect(row.querySelector('.backup-check')).toBeNull();
     expect(row.textContent).toContain('dist-upgrade, no backup');
     [...row.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Yes')!.click();
-    const upgrade = http.expectOne('/api/containers/5/packages-upgrade');
+    const upgrade = http.expectOne('/api/targets/5/packages-upgrade');
     expect(upgrade.request.body).toEqual({ backup: false });
-    upgrade.flush(run({ containerId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
+    upgrade.flush(run({ targetId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null, exitCode: null }), {
       status: 202,
       statusText: 'Accepted',
     });
     await settle(fixture);
-    http.expectOne('/api/runs/9').flush(run({ containerId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null }));
+    http.expectOne('/api/runs/9').flush(run({ targetId: 5, kind: 'packages-upgrade', status: 'running', finishedAt: null }));
     await settle(fixture);
     expect(el.querySelector('app-run-log-dialog')?.textContent).toContain('Proxmox host (pve)');
   });

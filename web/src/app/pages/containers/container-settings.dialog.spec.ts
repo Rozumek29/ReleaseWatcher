@@ -51,7 +51,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
 
-    const request = http.expectOne('/api/containers/1');
+    const request = http.expectOne('/api/targets/1');
     expect(request.request.method).toBe('PUT');
     expect(request.request.body).toEqual({
       name: 'vaultwarden',
@@ -86,7 +86,7 @@ describe('ContainerSettingsDialog', () => {
 
     // Empty token field: the saved token is kept (omitted).
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
-    let request = http.expectOne('/api/containers/1');
+    let request = http.expectOne('/api/targets/1');
     expect(request.request.body.homeAssistantUrl).toBe('http://ha:8123');
     expect(request.request.body.homeAssistantInstall).toBe(true);
     expect('homeAssistantToken' in request.request.body).toBe(false);
@@ -98,7 +98,7 @@ describe('ContainerSettingsDialog', () => {
     type(el, '#ct-ha-token', 'new-token');
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
-    request = http.expectOne('/api/containers/1');
+    request = http.expectOne('/api/targets/1');
     expect(request.request.body.homeAssistantToken).toBe('new-token');
     expect(request.request.body.homeAssistantInstall).toBe(false);
     request.flush(vm);
@@ -107,7 +107,7 @@ describe('ContainerSettingsDialog', () => {
     [...el.querySelectorAll<HTMLButtonElement>('.input-with-action button')].find((b) => b.textContent?.trim() === 'Remove')!.click();
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
-    request = http.expectOne('/api/containers/1');
+    request = http.expectOne('/api/targets/1');
     expect(request.request.body.homeAssistantToken).toBeNull();
     request.flush(vm);
     await settle(fixture);
@@ -123,7 +123,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
 
-    const request = http.expectOne('/api/containers/1');
+    const request = http.expectOne('/api/targets/1');
     expect(request.request.body).toMatchObject({ updateCores: null, updateMemoryMb: 4096 });
     request.flush(container({ updateMemoryMb: 4096 }));
     await settle(fixture);
@@ -141,7 +141,7 @@ describe('ContainerSettingsDialog', () => {
     expect(el.textContent).toContain('Add application');
 
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
-    const request = http.expectOne('/api/containers/1');
+    const request = http.expectOne('/api/targets/1');
     expect(request.request.body).not.toHaveProperty('updateCores');
     request.flush(container({ kind: 'vm', vmid: 137, name: 'debian' }));
     await settle(fixture);
@@ -212,7 +212,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
 
     [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Add application'))!.click();
-    const request = http.expectOne('/api/containers/1/apps');
+    const request = http.expectOne('/api/targets/1/apps');
     expect(request.request.method).toBe('POST');
     expect(request.request.body).toEqual({
       name: 'Vaultwarden',
@@ -242,7 +242,7 @@ describe('ContainerSettingsDialog', () => {
     type(el, '#app-installed', ' 1.31.0 ');
 
     [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
-    const request = http.expectOne(`/api/containers/1/apps/${base.id}`);
+    const request = http.expectOne(`/api/targets/1/apps/${base.id}`);
     expect(request.request.body.installedVersion).toBe('1.31.0');
     request.flush({ ...base, versionCommand: null, installedVersion: '1.31.0' });
     await settle(fixture);
@@ -254,7 +254,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
     expect(el.querySelector('#app-installed')).toBeNull();
     [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
-    const second = http.expectOne(`/api/containers/1/apps/${base.id}`);
+    const second = http.expectOne(`/api/targets/1/apps/${base.id}`);
     expect('installedVersion' in second.request.body).toBe(false);
     second.flush(base);
     await settle(fixture);
@@ -277,7 +277,7 @@ describe('ContainerSettingsDialog', () => {
 
     type(el, '#app-name', 'Zeta');
     [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Save application'))!.click();
-    const request = http.expectOne('/api/containers/1/apps/2');
+    const request = http.expectOne('/api/targets/1/apps/2');
     expect(request.request.body.name).toBe('Zeta');
     request.flush(app(2, 'Zeta'));
     await settle(fixture);
@@ -293,7 +293,7 @@ describe('ContainerSettingsDialog', () => {
     button('Detect applications').click();
     await settle(fixture);
     expect(button('Detecting…').disabled).toBe(true);
-    const detect = http.expectOne('/api/containers/1/detect-apps');
+    const detect = http.expectOne('/api/targets/1/detect-apps');
     expect(detect.request.method).toBe('POST');
     detect.flush([
       {
@@ -331,7 +331,7 @@ describe('ContainerSettingsDialog', () => {
     watch.flush({ id: 7, fullName: 'immich-app/immich', lastSeenTag: 'v1.131.0' });
     await settle(fixture);
 
-    const add = http.expectOne('/api/containers/1/apps');
+    const add = http.expectOne('/api/targets/1/apps');
     expect(add.request.body).toEqual({
       name: 'Immich',
       versionCommand: 'cat /root/.immich',
@@ -352,7 +352,7 @@ describe('ContainerSettingsDialog', () => {
     const { fixture, el } = await open(container({ apps: [] }));
     [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Detect applications'))!.click();
     http
-      .expectOne('/api/containers/1/detect-apps')
+      .expectOne('/api/targets/1/detect-apps')
       .flush(
         { status: 409, title: 'CT 101 is stopped – start it to detect its applications.' },
         { status: 409, statusText: 'Conflict' },
@@ -371,7 +371,7 @@ describe('ContainerSettingsDialog', () => {
     await settle(fixture);
     [...el.querySelectorAll<HTMLButtonElement>('.app-form-actions button')].find((b) => b.textContent?.includes('Add application'))!.click();
     http
-      .expectOne('/api/containers/1/apps')
+      .expectOne('/api/targets/1/apps')
       .flush(
         { status: 400, errors: { latestCommand: ['Enter a command that prints the latest version.'] } },
         { status: 400, statusText: 'Bad Request' },

@@ -59,7 +59,7 @@ interface ContainerRow {
 
 interface AppRow {
   id: number;
-  container_id: number;
+  target_id: number;
   name: string;
   version_command: string | null;
   latest_source: string;
@@ -77,7 +77,7 @@ interface AppRow {
 
 interface RunRow {
   id: number;
-  container_id: number;
+  target_id: number;
   app_id: number | null;
   kind: string;
   trigger: string;
@@ -165,7 +165,7 @@ function parseHomeAssistant(json: string | null): HomeAssistantState | null {
 
 const toApp = (r: AppRow): ContainerApp => ({
   id: r.id,
-  containerId: r.container_id,
+  containerId: r.target_id,
   name: r.name,
   versionCommand: r.version_command,
   latestSource: r.latest_source as LatestSource,
@@ -183,7 +183,7 @@ const toApp = (r: AppRow): ContainerApp => ({
 
 const toRun = (r: RunRow): Run => ({
   id: r.id,
-  containerId: r.container_id,
+  containerId: r.target_id,
   appId: r.app_id,
   kind: r.kind as RunKind,
   trigger: r.trigger as RunTrigger,
@@ -234,21 +234,21 @@ export class ContainerStore {
   }
 
   list(): Container[] {
-    return this.db.query<ContainerRow, []>('SELECT * FROM containers ORDER BY vmid').all().map(this.toContainer);
+    return this.db.query<ContainerRow, []>('SELECT * FROM targets ORDER BY vmid').all().map(this.toContainer);
   }
 
   listEnabled(): Container[] {
-    return this.db.query<ContainerRow, []>('SELECT * FROM containers WHERE is_enabled = 1 ORDER BY vmid').all().map(this.toContainer);
+    return this.db.query<ContainerRow, []>('SELECT * FROM targets WHERE is_enabled = 1 ORDER BY vmid').all().map(this.toContainer);
   }
 
   get(id: number): Container | null {
-    const row = this.db.query<ContainerRow, [number]>('SELECT * FROM containers WHERE id = ?').get(id);
+    const row = this.db.query<ContainerRow, [number]>('SELECT * FROM targets WHERE id = ?').get(id);
     return row ? this.toContainer(row) : null;
   }
 
   /** Names of all targets by id – without reading (and decrypting) the rest of each row. */
   names(): Map<number, string> {
-    const rows = this.db.query<{ id: number; name: string }, []>('SELECT id, name FROM containers').all();
+    const rows = this.db.query<{ id: number; name: string }, []>('SELECT id, name FROM targets').all();
     return new Map(rows.map((r) => [r.id, r.name]));
   }
 
@@ -256,7 +256,7 @@ export class ContainerStore {
   listEnabledSchedules(): Pick<Container, 'id' | 'hostId' | 'checkCron'>[] {
     return this.db
       .query<Pick<ContainerRow, 'id' | 'host_id' | 'check_cron'>, []>(
-        'SELECT id, host_id, check_cron FROM containers WHERE is_enabled = 1 ORDER BY vmid',
+        'SELECT id, host_id, check_cron FROM targets WHERE is_enabled = 1 ORDER BY vmid',
       )
       .all()
       .map((r) => ({ id: r.id, hostId: r.host_id, checkCron: r.check_cron }));
@@ -265,7 +265,7 @@ export class ContainerStore {
   /** Ids of the targets reached through the host `hostId` (the node itself, its guests, a server). */
   idsOnHost(hostId: number | null): number[] {
     return this.db
-      .query<{ id: number }, [number | null]>('SELECT id FROM containers WHERE host_id IS ?')
+      .query<{ id: number }, [number | null]>('SELECT id FROM targets WHERE host_id IS ?')
       .all(hostId)
       .map((r) => r.id);
   }
@@ -273,7 +273,7 @@ export class ContainerStore {
   /** True when guest `vmid` of the node `hostId` has been added. */
   existsVmid(hostId: number, vmid: number): boolean {
     return (
-      this.db.query("SELECT 1 FROM containers WHERE host_id = ? AND vmid = ? AND kind IN ('lxc', 'vm')").get(hostId, vmid) !==
+      this.db.query("SELECT 1 FROM targets WHERE host_id = ? AND vmid = ? AND kind IN ('lxc', 'vm')").get(hostId, vmid) !==
       null
     );
   }
@@ -281,7 +281,7 @@ export class ContainerStore {
   /** VMIDs of the guests (containers, virtual machines) of the node `hostId` that have been added. */
   addedVmids(hostId: number): Set<number> {
     const rows = this.db
-      .query<{ vmid: number }, [number]>("SELECT vmid FROM containers WHERE host_id = ? AND kind IN ('lxc', 'vm')")
+      .query<{ vmid: number }, [number]>("SELECT vmid FROM targets WHERE host_id = ? AND kind IN ('lxc', 'vm')")
       .all(hostId);
     return new Set(rows.map((r) => r.vmid));
   }
@@ -289,7 +289,7 @@ export class ContainerStore {
   /** The entry of the Proxmox node `hostId` itself, when it has been added. */
   getNode(hostId: number): Container | null {
     const row = this.db
-      .query<ContainerRow, [number]>("SELECT * FROM containers WHERE host_id = ? AND kind = 'node'")
+      .query<ContainerRow, [number]>("SELECT * FROM targets WHERE host_id = ? AND kind = 'node'")
       .get(hostId);
     return row ? this.toContainer(row) : null;
   }
@@ -302,7 +302,7 @@ export class ContainerStore {
   /** The target of the server `hostId` (a server host has exactly one). */
   getServer(hostId: number): Container | null {
     const row = this.db
-      .query<ContainerRow, [number]>("SELECT * FROM containers WHERE host_id = ? AND kind = 'server'")
+      .query<ContainerRow, [number]>("SELECT * FROM targets WHERE host_id = ? AND kind = 'server'")
       .get(hostId);
     return row ? this.toContainer(row) : null;
   }
@@ -320,7 +320,7 @@ export class ContainerStore {
   private insert(hostId: number, kind: TargetKind, vmid: number, name: string): Container {
     const row = this.db
       .query<ContainerRow, [number, string, number, string, string]>(
-        'INSERT INTO containers (host_id, kind, vmid, name, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *',
+        'INSERT INTO targets (host_id, kind, vmid, name, created_at) VALUES (?, ?, ?, ?, ?) RETURNING *',
       )
       .get(hostId, kind, vmid, name, new Date().toISOString())!;
     return this.toContainer(row);
@@ -329,7 +329,7 @@ export class ContainerStore {
   save(c: Container): void {
     this.db
       .query(
-        `UPDATE containers SET
+        `UPDATE targets SET
            name = ?, is_enabled = ?, packages_enabled = ?, backup_before_update = ?, start_when_stopped = ?, check_cron = ?,
            update_cores = ?, update_memory_mb = ?, status = ?,
            package_updates = ?, package_manager = ?, app_stores = ?, restart_reasons = ?, os_release = ?, home_assistant = ?, home_assistant_url = ?, home_assistant_token = ?,
@@ -373,19 +373,19 @@ export class ContainerStore {
   setResourcesToRestore(c: Container, change: ResourceChange | null): void {
     c.resourcesToRestore = change;
     this.db
-      .query('UPDATE containers SET resources_to_restore = ? WHERE id = ?')
+      .query('UPDATE targets SET resources_to_restore = ? WHERE id = ?')
       .run(change ? JSON.stringify(change) : null, c.id);
   }
 
   delete(id: number): boolean {
-    return this.db.query('DELETE FROM containers WHERE id = ?').run(id).changes > 0;
+    return this.db.query('DELETE FROM targets WHERE id = ?').run(id).changes > 0;
   }
 
   listApps(containerId?: number): ContainerApp[] {
     const rows =
       containerId === undefined
-        ? this.db.query<AppRow, []>('SELECT * FROM container_apps ORDER BY container_id, name COLLATE NOCASE, id').all()
-        : this.db.query<AppRow, [number]>('SELECT * FROM container_apps WHERE container_id = ? ORDER BY name COLLATE NOCASE, id').all(containerId);
+        ? this.db.query<AppRow, []>('SELECT * FROM target_apps ORDER BY target_id, name COLLATE NOCASE, id').all()
+        : this.db.query<AppRow, [number]>('SELECT * FROM target_apps WHERE target_id = ? ORDER BY name COLLATE NOCASE, id').all(containerId);
     return rows.map(toApp);
   }
 
@@ -393,7 +393,7 @@ export class ContainerStore {
   listAppVersions(): Pick<ContainerApp, 'repositoryId' | 'installedVersion' | 'latestVersion'>[] {
     return this.db
       .query<Pick<AppRow, 'repository_id' | 'installed_version' | 'latest_version'>, []>(
-        'SELECT repository_id, installed_version, latest_version FROM container_apps',
+        'SELECT repository_id, installed_version, latest_version FROM target_apps',
       )
       .all()
       .map((r) => ({ repositoryId: r.repository_id, installedVersion: r.installed_version, latestVersion: r.latest_version }));
@@ -402,7 +402,7 @@ export class ContainerStore {
   /** Installed versions of the applications linked to a repository. */
   linkedAppVersions(repositoryId: number): (string | null)[] {
     return this.db
-      .query<Pick<AppRow, 'installed_version'>, [number]>('SELECT installed_version FROM container_apps WHERE repository_id = ?')
+      .query<Pick<AppRow, 'installed_version'>, [number]>('SELECT installed_version FROM target_apps WHERE repository_id = ?')
       .all(repositoryId)
       .map((r) => r.installed_version);
   }
@@ -412,8 +412,8 @@ export class ContainerStore {
    * differs from that repository's newest release – the checks that bring them up to date (all repositories, or one).
    */
   enabledIdsWithStaleLatest(repositoryId?: number): number[] {
-    const sql = `SELECT DISTINCT c.id FROM containers c
-        JOIN container_apps a ON a.container_id = c.id
+    const sql = `SELECT DISTINCT c.id FROM targets c
+        JOIN target_apps a ON a.target_id = c.id
         JOIN watched_repositories r ON r.id = a.repository_id
        WHERE c.is_enabled = 1 AND a.latest_source = 'repository' AND r.last_seen_tag IS NOT NULL
          AND a.latest_version IS NOT r.last_seen_tag`;
@@ -438,21 +438,21 @@ export class ContainerStore {
                                   ELSE 0 END), 0) AS appStorePending,
                 coalesce(sum(CASE WHEN json_valid(home_assistant) AND json_type(home_assistant, '$.updates') = 'array'
                                   THEN json_array_length(home_assistant, '$.updates') ELSE 0 END), 0) AS homeAssistantUpdates
-         FROM containers`,
+         FROM targets`,
       )
       .get()!;
   }
 
   getApp(containerId: number, appId: number): ContainerApp | null {
     const row = this.db
-      .query<AppRow, [number, number]>('SELECT * FROM container_apps WHERE id = ? AND container_id = ?')
+      .query<AppRow, [number, number]>('SELECT * FROM target_apps WHERE id = ? AND target_id = ?')
       .get(appId, containerId);
     return row ? toApp(row) : null;
   }
 
   /** An application of any target. */
   findApp(appId: number): ContainerApp | null {
-    const row = this.db.query<AppRow, [number]>('SELECT * FROM container_apps WHERE id = ?').get(appId);
+    const row = this.db.query<AppRow, [number]>('SELECT * FROM target_apps WHERE id = ?').get(appId);
     return row ? toApp(row) : null;
   }
 
@@ -460,7 +460,7 @@ export class ContainerStore {
     const app = toApp(
       this.db
         .query<AppRow, [number, string, string]>(
-          'INSERT INTO container_apps (container_id, name, created_at) VALUES (?, ?, ?) RETURNING *',
+          'INSERT INTO target_apps (target_id, name, created_at) VALUES (?, ?, ?) RETURNING *',
         )
         .get(containerId, input.name, new Date().toISOString())!,
     );
@@ -472,7 +472,7 @@ export class ContainerStore {
   saveApp(a: ContainerApp): void {
     this.db
       .query(
-        `UPDATE container_apps SET
+        `UPDATE target_apps SET
            name = ?, version_command = ?, latest_source = ?, repository_id = ?, latest_command = ?, update_command = ?,
            use_tty = ?, timeout_seconds = ?, installed_version = ?, latest_version = ?, checked_at = ?, error = ?
          WHERE id = ?`,
@@ -495,33 +495,33 @@ export class ContainerStore {
   }
 
   deleteApp(containerId: number, appId: number): boolean {
-    return this.db.query('DELETE FROM container_apps WHERE id = ? AND container_id = ?').run(appId, containerId).changes > 0;
+    return this.db.query('DELETE FROM target_apps WHERE id = ? AND target_id = ?').run(appId, containerId).changes > 0;
   }
 
   startRun(containerId: number, appId: number | null, kind: RunKind, trigger: RunTrigger): Run {
     const row = this.db
       .query<RunRow, [number, number | null, string, string, string]>(
-        `INSERT INTO container_runs (container_id, app_id, kind, trigger, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)
-         RETURNING id, container_id, app_id, kind, trigger, status, started_at, finished_at, exit_code, output`,
+        `INSERT INTO target_runs (target_id, app_id, kind, trigger, status, started_at) VALUES (?, ?, ?, ?, 'running', ?)
+         RETURNING id, target_id, app_id, kind, trigger, status, started_at, finished_at, exit_code, output`,
       )
       .get(containerId, appId, kind, trigger, new Date().toISOString())!;
     return toRun(row);
   }
 
   saveRunOutput(id: number, output: string): void {
-    this.db.query('UPDATE container_runs SET output = ? WHERE id = ?').run(output, id);
+    this.db.query('UPDATE target_runs SET output = ? WHERE id = ?').run(output, id);
   }
 
   /** Records the detached step a run is waiting for (null when it is done). */
   setRunResume(id: number, resume: RunResume | null): void {
-    this.db.query('UPDATE container_runs SET resume = ? WHERE id = ?').run(resume ? JSON.stringify(resume) : null, id);
+    this.db.query('UPDATE target_runs SET resume = ? WHERE id = ?').run(resume ? JSON.stringify(resume) : null, id);
   }
 
   /** Runs left "running" by a previous process while a detached step was executing on the node. */
   listResumableRuns(): { run: Run; resume: RunResume }[] {
     return this.db
       .query<RunRow & { resume: string | null }, []>(
-        "SELECT * FROM container_runs WHERE status = 'running' AND resume IS NOT NULL ORDER BY id",
+        "SELECT * FROM target_runs WHERE status = 'running' AND resume IS NOT NULL ORDER BY id",
       )
       .all()
       .flatMap((r) => {
@@ -532,7 +532,7 @@ export class ContainerStore {
 
   finishRun(run: Run): void {
     this.db
-      .query('UPDATE container_runs SET status = ?, finished_at = ?, exit_code = ?, output = ?, resume = NULL WHERE id = ?')
+      .query('UPDATE target_runs SET status = ?, finished_at = ?, exit_code = ?, output = ?, resume = NULL WHERE id = ?')
       .run(run.status, run.finishedAt, run.exitCode, packOutput(run.output), run.id);
     this.pruneRuns(run.containerId);
   }
@@ -548,10 +548,10 @@ export class ContainerStore {
     }
     const pruned = this.db
       .query(
-        `DELETE FROM container_runs WHERE status <> 'running' AND id IN (
+        `DELETE FROM target_runs WHERE status <> 'running' AND id IN (
            SELECT id FROM (
-             SELECT id, kind, ROW_NUMBER() OVER (PARTITION BY container_id, kind = 'check' ORDER BY id DESC) AS n
-             FROM container_runs WHERE ?1 IS NULL OR container_id = ?1)
+             SELECT id, kind, ROW_NUMBER() OVER (PARTITION BY target_id, kind = 'check' ORDER BY id DESC) AS n
+             FROM target_runs WHERE ?1 IS NULL OR target_id = ?1)
            WHERE n > CASE WHEN kind = 'check' THEN coalesce(?2, n) ELSE coalesce(?3, n) END)`,
       )
       .run(containerId, checks, others).changes;
@@ -562,7 +562,7 @@ export class ContainerStore {
   }
 
   getRun(id: number): Run | null {
-    const row = this.db.query<RunRow, [number]>('SELECT * FROM container_runs WHERE id = ?').get(id);
+    const row = this.db.query<RunRow, [number]>('SELECT * FROM target_runs WHERE id = ?').get(id);
     return row ? toRun(row) : null;
   }
 
@@ -570,8 +570,8 @@ export class ContainerStore {
   listRuns(containerId: number, limit = 20, beforeId: number | null = null): Omit<Run, 'output'>[] {
     return this.db
       .query<Omit<RunRow, 'output'>, [number, number | null, number]>(
-        `SELECT id, container_id, app_id, kind, trigger, status, started_at, finished_at, exit_code
-         FROM container_runs WHERE container_id = ?1 AND (?2 IS NULL OR id < ?2) ORDER BY id DESC LIMIT ?3`,
+        `SELECT id, target_id, app_id, kind, trigger, status, started_at, finished_at, exit_code
+         FROM target_runs WHERE target_id = ?1 AND (?2 IS NULL OR id < ?2) ORDER BY id DESC LIMIT ?3`,
       )
       .all(containerId, beforeId, limit)
       .map((r) => {
@@ -587,7 +587,7 @@ export class ContainerStore {
   failInterruptedRuns(includeResumable = false): number {
     return this.db
       .query(
-        `UPDATE container_runs SET status = 'failed', finished_at = ?, output = output || ?, resume = NULL
+        `UPDATE target_runs SET status = 'failed', finished_at = ?, output = output || ?, resume = NULL
          WHERE status = 'running'${includeResumable ? '' : ' AND resume IS NULL'}`,
       )
       .run(new Date().toISOString(), '\n[ReleaseWatcher was restarted while this was running]').changes;
@@ -600,14 +600,14 @@ export class ContainerStore {
   packFinishedOutputs(): number {
     const rows = this.db
       .query<{ id: number; output: string }, [number]>(
-        `SELECT id, output FROM container_runs
+        `SELECT id, output FROM target_runs
          WHERE status <> 'running' AND typeof(output) = 'text' AND length(output) >= ?`,
       )
       .all(PACK_OUTPUT_FROM);
     if (rows.length === 0) {
       return 0;
     }
-    const update = this.db.query('UPDATE container_runs SET output = ? WHERE id = ?');
+    const update = this.db.query('UPDATE target_runs SET output = ? WHERE id = ?');
     this.db.transaction(() => {
       for (const { id, output } of rows) {
         update.run(packOutput(output), id);

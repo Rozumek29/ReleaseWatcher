@@ -429,7 +429,7 @@ export interface AppStatus {
     withErrors: number;
     updatesAvailable: number;
   };
-  containers?: {
+  targets?: {
     total: number;
     enabled: number;
     withErrors: number;
@@ -497,7 +497,7 @@ export interface ContainerApp {
   updateAvailable: boolean | null;
 }
 
-/** An application found in a container (`POST /api/containers/:id/detect-apps`) – a suggestion, not saved. */
+/** An application found in a container (`POST /api/targets/:id/detect-apps`) – a suggestion, not saved. */
 export interface DetectedApp {
   name: string;
   /** community-scripts slug; null when found by a version file only. */
@@ -694,7 +694,7 @@ export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {
   id: number;
-  containerId: number;
+  targetId: number;
   appId: number | null;
   kind: RunKind;
   trigger: 'manual' | 'schedule';
@@ -704,7 +704,7 @@ export interface RunSummary {
   exitCode: number | null;
 }
 
-/** GET /api/containers/:id/runs – one page of the run history, newest first. */
+/** GET /api/targets/:id/runs – one page of the run history, newest first. */
 export interface RunHistoryPage {
   items: RunSummary[];
   /** Cursor of the next page, or null on the last one. */

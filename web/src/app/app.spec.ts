@@ -12,7 +12,7 @@ const status = {
   poller: { cron: '*/15 * * * *', isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   advisoryPoller: { cron: '0 */6 * * *', isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   repositories: { total: 3, enabled: 2, withErrors: 1, updatesAvailable: 2 },
-  containers: { total: 4, enabled: 4, withErrors: 1, packagesPending: 2, appUpdatesAvailable: 1 },
+  targets: { total: 4, enabled: 4, withErrors: 1, packagesPending: 2, appUpdatesAvailable: 1 },
   advisories: { total: 5, affecting: 2 },
 };
 

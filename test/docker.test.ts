@@ -348,9 +348,9 @@ describe('docker API', () => {
     ].join('\n');
     shell.on(/command -v docker/, { output: ps });
     registry.set('docker.io/vaultwarden/server', { '1.32.0': digest('a') });
-    const added = (await request('POST', '/api/containers', { vmid: 101 })).json();
+    const added = (await request('POST', '/api/targets', { vmid: 101 })).json();
     await app.containers.wait(added.id);
-    const target = (await request('GET', `/api/containers/${added.id}`)).json();
+    const target = (await request('GET', `/api/targets/${added.id}`)).json();
     assert.deepEqual(target.docker, { enabled: true, engine: 'docker 27.3.1', error: null });
     const vw = await container('vaultwarden');
     assert.deepEqual(vw.source.kind, 'target');
@@ -358,21 +358,21 @@ describe('docker API', () => {
     assert.equal(vw.installedVersion, '1.32.0');
     assert.equal(vw.registry.state, 'up-to-date');
 
-    const off = await request('PUT', `/api/containers/${added.id}`, { name: target.name, isEnabled: true, packagesEnabled: true, dockerEnabled: false });
+    const off = await request('PUT', `/api/targets/${added.id}`, { name: target.name, isEnabled: true, packagesEnabled: true, dockerEnabled: false });
     assert.equal(off.json().docker.enabled, false);
     assert.deepEqual((await overview()).containers, []);
     // Switched off: the next check does not list containers.
     shell.commands.length = 0;
-    await request('POST', `/api/containers/${added.id}/check`);
+    await request('POST', `/api/targets/${added.id}/check`);
     await app.containers.wait(added.id);
     assert.ok(!shell.commands.some((c) => c.includes('command -v docker')));
   });
 
   it('keeps a failed listing out of the target error', async () => {
     shell.on(/command -v docker/, { exitCode: 1, output: 'permission denied while trying to connect to the Docker daemon socket' });
-    const added = (await request('POST', '/api/containers', { vmid: 101 })).json();
+    const added = (await request('POST', '/api/targets', { vmid: 101 })).json();
     await app.containers.wait(added.id);
-    const target = (await request('GET', `/api/containers/${added.id}`)).json();
+    const target = (await request('GET', `/api/targets/${added.id}`)).json();
     assert.match(target.docker.error, /permission denied/);
     assert.ok(!(target.lastError ?? '').includes('Docker'));
   });

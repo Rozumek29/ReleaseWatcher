@@ -74,41 +74,41 @@ describe('several Proxmox nodes', () => {
   it('lists and adds guests per node – the same VMID on two nodes', async () => {
     const { pve1, pve2 } = await addNodes();
     assert.deepEqual(
-      (await request('GET', `/api/proxmox/containers?hostId=${pve2.id}`)).json().map((c: { name: string }) => c.name),
+      (await request('GET', `/api/proxmox/guests?hostId=${pve2.id}`)).json().map((c: { name: string }) => c.name),
       ['jellyfin'],
     );
     // Without hostId: the first node.
-    assert.equal((await request('GET', '/api/proxmox/containers')).json()[0].name, 'vaultwarden');
+    assert.equal((await request('GET', '/api/proxmox/guests')).json()[0].name, 'vaultwarden');
 
-    const first = await request('POST', '/api/containers', { vmid: 100, hostId: pve1.id });
-    const second = await request('POST', '/api/containers', { vmid: 100, hostId: pve2.id });
+    const first = await request('POST', '/api/targets', { vmid: 100, hostId: pve1.id });
+    const second = await request('POST', '/api/targets', { vmid: 100, hostId: pve2.id });
     assert.deepEqual([first.status, second.status], [201, 201]);
     assert.deepEqual([first.json().name, first.json().hostName], ['vaultwarden', 'pve1.lan']);
     assert.deepEqual([second.json().name, second.json().hostName], ['jellyfin', 'pve2.lan']);
-    assert.equal((await request('POST', '/api/containers', { vmid: 100, hostId: pve2.id })).status, 409);
+    assert.equal((await request('POST', '/api/targets', { vmid: 100, hostId: pve2.id })).status, 409);
     await app.containers.wait(first.json().id);
     await app.containers.wait(second.json().id);
     // Each check ran on its own node.
     assert.ok(shells['pve1.lan']!.commands.some((c) => c.includes('pct exec 100') || c.includes('pct status 100')));
     assert.ok(shells['pve2.lan']!.commands.some((c) => c.includes('pct status 100')));
-    const listed = (await request('GET', `/api/proxmox/containers?hostId=${pve2.id}`)).json();
+    const listed = (await request('GET', `/api/proxmox/guests?hostId=${pve2.id}`)).json();
     assert.equal(listed[0].added, true);
 
     // The node entries carry the node's own hostname.
-    const node2 = await request('POST', `/api/containers/node?hostId=${pve2.id}`);
+    const node2 = await request('POST', `/api/targets/node?hostId=${pve2.id}`);
     assert.equal(node2.json().name, 'pve2');
-    assert.equal((await request('POST', `/api/containers/node?hostId=${pve1.id}`)).json().name, 'pve1');
-    assert.equal((await request('POST', `/api/containers/node?hostId=${pve2.id}`)).status, 409);
+    assert.equal((await request('POST', `/api/targets/node?hostId=${pve1.id}`)).json().name, 'pve1');
+    assert.equal((await request('POST', `/api/targets/node?hostId=${pve2.id}`)).status, 409);
     assert.match((await request('POST', `/api/proxmox/test?hostId=${pve2.id}`)).json().output, /pve2/);
   });
 
   it('refuses unknown nodes and servers as nodes', async () => {
     await addNodes();
     const server = (await request('POST', '/api/hosts', { type: 'server', address: 'vps.lan' })).json();
-    assert.equal((await request('GET', '/api/proxmox/containers?hostId=99')).status, 404);
+    assert.equal((await request('GET', '/api/proxmox/guests?hostId=99')).status, 404);
     assert.equal((await request('GET', `/api/proxmox/storages?hostId=${server.id}`)).status, 404);
-    assert.equal((await request('POST', '/api/containers', { vmid: 100, hostId: server.id })).status, 404);
-    assert.equal((await request('GET', '/api/proxmox/containers?hostId=abc')).status, 400);
+    assert.equal((await request('POST', '/api/targets', { vmid: 100, hostId: server.id })).status, 404);
+    assert.equal((await request('GET', '/api/proxmox/guests?hostId=abc')).status, 400);
   });
 
   it('backs up to the storage of the guest’s own node', async () => {
@@ -116,15 +116,15 @@ describe('several Proxmox nodes', () => {
     await request('PUT', '/api/settings', { backupBeforeUpdate: true });
     assert.equal((await request('PUT', `/api/hosts/${pve1.id}`, { backupStorage: 'local' })).json().backupStorage, 'local');
     assert.equal((await request('PUT', `/api/hosts/${pve2.id}`, { backupStorage: 'pbs2' })).json().backupStorage, 'pbs2');
-    const ct1 = (await request('POST', '/api/containers', { vmid: 100, hostId: pve1.id })).json();
-    const ct2 = (await request('POST', '/api/containers', { vmid: 100, hostId: pve2.id })).json();
+    const ct1 = (await request('POST', '/api/targets', { vmid: 100, hostId: pve1.id })).json();
+    const ct2 = (await request('POST', '/api/targets', { vmid: 100, hostId: pve2.id })).json();
     await app.containers.wait(ct1.id);
     await app.containers.wait(ct2.id);
-    assert.equal((await request('GET', `/api/containers/${ct1.id}`)).json().backupStorage, 'local');
-    assert.equal((await request('GET', `/api/containers/${ct2.id}`)).json().backupStorage, 'pbs2');
+    assert.equal((await request('GET', `/api/targets/${ct1.id}`)).json().backupStorage, 'local');
+    assert.equal((await request('GET', `/api/targets/${ct2.id}`)).json().backupStorage, 'pbs2');
 
     shells['pve2.lan']!.on(/apt-get -y/, { output: 'Done.\n' });
-    assert.equal((await request('POST', `/api/containers/${ct2.id}/packages-upgrade`, { backup: true })).status, 202);
+    assert.equal((await request('POST', `/api/targets/${ct2.id}/packages-upgrade`, { backup: true })).status, 202);
     const run = await app.containers.wait(ct2.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.ok(shells['pve2.lan']!.detached.some((d) => d.command.includes('vzdump 100') && d.command.includes("--storage 'pbs2'")));
@@ -132,14 +132,14 @@ describe('several Proxmox nodes', () => {
 
     // A node without its own storage makes no backups (there is no global storage to fall back to).
     await request('PUT', `/api/hosts/${pve2.id}`, { backupStorage: null });
-    assert.equal((await request('GET', `/api/containers/${ct2.id}`)).json().backupStorage, null);
-    assert.equal((await request('POST', `/api/containers/${ct2.id}/packages-upgrade`, { backup: true })).status, 409);
+    assert.equal((await request('GET', `/api/targets/${ct2.id}`)).json().backupStorage, null);
+    assert.equal((await request('POST', `/api/targets/${ct2.id}/packages-upgrade`, { backup: true })).status, 409);
   });
 
   it('restarts one node while another one is busy', async () => {
     const { pve1, pve2 } = await addNodes();
-    const node1 = (await request('POST', `/api/containers/node?hostId=${pve1.id}`)).json();
-    const node2 = (await request('POST', `/api/containers/node?hostId=${pve2.id}`)).json();
+    const node1 = (await request('POST', `/api/targets/node?hostId=${pve1.id}`)).json();
+    const node2 = (await request('POST', `/api/targets/node?hostId=${pve2.id}`)).json();
     await app.containers.wait(node1.id);
     await app.containers.wait(node2.id);
     let release!: () => void;
@@ -148,10 +148,10 @@ describe('several Proxmox nodes', () => {
       await gate;
       return { output: '' };
     });
-    assert.equal((await request('POST', `/api/containers/${node2.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${node2.id}/packages-upgrade`)).status, 202);
     shells['pve1.lan']!.on(/systemctl reboot$/, { output: '' }).on(/^true$/, { output: '' });
-    assert.equal((await request('POST', `/api/containers/${node1.id}/restart`)).status, 202);
-    assert.equal((await request('POST', `/api/containers/${node2.id}/restart`)).status, 409);
+    assert.equal((await request('POST', `/api/targets/${node1.id}/restart`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${node2.id}/restart`)).status, 409);
     release();
     await app.containers.wait(node1.id);
     await app.containers.wait(node2.id);

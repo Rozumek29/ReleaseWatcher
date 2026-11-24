@@ -28,7 +28,7 @@ describe('RunLogDialog', () => {
 
     http.expectOne('/api/runs/4').flush({
       id: 4,
-      containerId: 1,
+      targetId: 1,
       appId: 7,
       kind: 'app-update',
       trigger: 'manual',
@@ -60,7 +60,7 @@ describe('RunLogDialog', () => {
     try {
       const running = {
         id: 4,
-        containerId: 1,
+        targetId: 1,
         appId: null,
         kind: 'packages-upgrade',
         trigger: 'manual',
@@ -104,11 +104,11 @@ describe('RunLogDialog', () => {
     fixture.componentRef.setInput('target', { container: container(), runId: null });
     await settle(fixture);
 
-    http.expectOne('/api/containers/1/runs').flush({
+    http.expectOne('/api/targets/1/runs').flush({
       items: [
         {
           id: 3,
-          containerId: 1,
+          targetId: 1,
           appId: null,
           kind: 'check',
           trigger: 'schedule',
@@ -129,7 +129,7 @@ describe('RunLogDialog', () => {
     row.click();
     http.expectOne('/api/runs/3').flush({
       id: 3,
-      containerId: 1,
+      targetId: 1,
       appId: null,
       kind: 'check',
       trigger: 'schedule',
@@ -152,7 +152,7 @@ describe('RunLogDialog', () => {
     await settle(fixture);
     const summary = (id: number): RunSummary => ({
       id,
-      containerId: 1,
+      targetId: 1,
       appId: null,
       kind: id % 2 ? 'check' : 'packages-upgrade',
       trigger: 'manual',
@@ -163,7 +163,7 @@ describe('RunLogDialog', () => {
     });
 
     http
-      .expectOne('/api/containers/1/runs')
+      .expectOne('/api/targets/1/runs')
       .flush({ items: [summary(5), summary(4)], nextCursor: '4' } satisfies RunHistoryPage);
     await settle(fixture);
     const el = fixture.nativeElement as HTMLElement;
@@ -174,7 +174,7 @@ describe('RunLogDialog', () => {
     expect(more.textContent).toContain('Show older runs');
     more.click();
     http
-      .expectOne((req) => req.url === '/api/containers/1/runs' && req.params.get('cursor') === '4')
+      .expectOne((req) => req.url === '/api/targets/1/runs' && req.params.get('cursor') === '4')
       .flush({ items: [summary(3)], nextCursor: null } satisfies RunHistoryPage);
     await settle(fixture);
 

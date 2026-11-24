@@ -789,7 +789,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         withErrors: repositories.filter((r) => r.lastError).length,
         updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
-      containers: containerStatus(containerStore),
+      targets: containerStatus(containerStore),
       docker: dockerStatus(),
       advisories: (() => {
         impacts.refresh();

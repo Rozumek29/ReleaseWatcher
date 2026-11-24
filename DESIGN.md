@@ -18,7 +18,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  ┌────────────────────────── Bun process (src/main.ts) ──────────────────────────┐
  Browser ──HTTP──▶ app.ts  Bun.serve({ routes })  ── Basic auth guard ── /health is public      │
  (Angular UI)    │   ├─ /api/repositories, /api/settings, /api/status, /api/notifiers …           │
-                 │   ├─ proxmox/routes.ts  /api/containers…, /api/proxmox…, /api/runs/:id         │
+                 │   ├─ proxmox/routes.ts  /api/targets…, /api/proxmox…, /api/runs/:id            │
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
                  │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (per provider) ─▶ GitHub/Gitea/GitLab │
@@ -89,7 +89,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 
-- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/containers/:id/packages-upgrade`.
+- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/targets/:id/packages-upgrade`.
   Actions that do something (check, test, update) are `POST` to a verb sub-path.
 - **JSON in camelCase**, dates as ISO 8601 strings, missing values as `null` (not omitted) in responses.
 - **Status codes:** `200` read/update, `201` create, `202` background run started, `204` delete,
@@ -354,6 +354,6 @@ These exist today; do not copy them into new code:
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own
   `routes.ts` like `proxmox/routes.ts`, and repositories can be moved out the same way.
 - Unsafe requests (`POST`/`PUT`/`DELETE`) have no CSRF protection: with Basic auth enabled the browser re-sends
-  cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/packages-upgrade` accepts an empty
+  cached credentials on a cross-site form post, and e.g. `POST /api/targets/:id/packages-upgrade` accepts an empty
   body. Planned fix: reject unsafe requests whose `Sec-Fetch-Site`/`Origin` is cross-site. New endpoints must not
   rely on “nobody can reach it” as protection.

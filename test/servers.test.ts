@@ -59,9 +59,9 @@ describe('servers', () => {
     const host = (
       await request('POST', '/api/hosts', { type: 'server', name, address: `${name.replace(/\W/g, '').toLowerCase()}.example.com`, user: 'admin', sshKeyId: key?.id ?? keys[0]!.id })
     ).json();
-    const target = ((await request('GET', '/api/containers')).json() as { id: number; hostId: number }[]).find((c) => c.hostId === host.id)!;
+    const target = ((await request('GET', '/api/targets')).json() as { id: number; hostId: number }[]).find((c) => c.hostId === host.id)!;
     await app.containers.wait(target.id);
-    return { host, target: (await request('GET', `/api/containers/${target.id}`)).json() };
+    return { host, target: (await request('GET', `/api/targets/${target.id}`)).json() };
   };
 
   it('watches a server as soon as it is added – without a Proxmox node', async () => {
@@ -82,7 +82,7 @@ describe('servers', () => {
     assert.equal((await request('GET', '/api/hosts')).json()[0].targetCount, 1);
 
     // Check all works with servers only.
-    assert.deepEqual((await request('POST', '/api/containers/check-all')).json(), { queued: 1 });
+    assert.deepEqual((await request('POST', '/api/targets/check-all')).json(), { queued: 1 });
   });
 
   it('checks and upgrades a server with another package manager (dnf) and names it in notifications', async () => {
@@ -100,7 +100,7 @@ describe('servers', () => {
     assert.equal(notifier.containerSent.at(-1)?.packageManager, 'dnf');
 
     shell.on(/dnf -y upgrade/, { output: 'Complete!\n' });
-    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${target.id}/packages-upgrade`)).status, 202);
     const run = await app.containers.wait(target.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Upgrading the system packages of Hetzner VPS \(no backup\)/);
@@ -129,10 +129,10 @@ describe('servers', () => {
     assert.deepEqual(notifier.containerSent.at(-1)?.appStores, [
       { name: 'Flatpak', packages: [{ name: 'org.gnome.Calculator', currentVersion: '51.0', newVersion: '51.1' }] },
     ]);
-    assert.equal((await request('GET', '/api/status')).json().containers.appStorePending, 1);
+    assert.equal((await request('GET', '/api/status')).json().targets.appStorePending, 1);
 
     shell.on(/flatpak update -y --noninteractive/, { output: 'Updating app/org.gnome.Calculator/x86_64/stable\n' });
-    assert.equal((await request('POST', `/api/containers/${target.id}/flatpak-update`, {})).status, 202);
+    assert.equal((await request('POST', `/api/targets/${target.id}/flatpak-update`, {})).status, 202);
     const run = await app.containers.wait(target.id);
     assert.equal(run?.kind, 'flatpak-update');
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
@@ -141,9 +141,9 @@ describe('servers', () => {
 
     // A store the last check did not find cannot be updated.
     shell.on(/flatpak remote-ls --updates/, { output: '' });
-    await request('POST', `/api/containers/${target.id}/check`);
+    await request('POST', `/api/targets/${target.id}/check`);
     await app.containers.wait(target.id);
-    const missing = await request('POST', `/api/containers/${target.id}/snap-update`, {});
+    const missing = await request('POST', `/api/targets/${target.id}/snap-update`, {});
     assert.equal(missing.status, 409);
     assert.match(missing.json().title, /Snap was not found on Hetzner VPS/);
   });
@@ -157,14 +157,14 @@ describe('servers', () => {
 
   it('upgrades apt with apt-get upgrade and runs application updates on the server itself', async () => {
     const { target } = await addServer();
-    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`, { backup: true })).status, 409);
+    assert.equal((await request('POST', `/api/targets/${target.id}/packages-upgrade`, { backup: true })).status, 409);
     shell.on(/ upgrade && /, { output: 'Setting up nginx (1.26.1) ...\n' });
-    assert.equal((await request('POST', `/api/containers/${target.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${target.id}/packages-upgrade`)).status, 202);
     const apt = await app.containers.wait(target.id);
     assert.equal(apt?.status, 'succeeded', apt?.output ?? '');
     assert.equal(shell.detached.at(-1)?.command, machinePackagesUpgradeScript('server'));
 
-    const added = await request('POST', `/api/containers/${target.id}/apps`, {
+    const added = await request('POST', `/api/targets/${target.id}/apps`, {
       name: 'Gitea',
       versionCommand: 'gitea --version',
       latestSource: 'command',
@@ -176,11 +176,11 @@ describe('servers', () => {
     shell.on(/gitea --version/, { output: '1.22.0\n' }).on(/echo 1\.23\.0/, { output: '1.23.0\n' });
     shell.on(/update-gitea/, { output: 'Updated.\n' });
     shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
-    await request('POST', `/api/containers/${target.id}/check`);
+    await request('POST', `/api/targets/${target.id}/check`);
     await app.containers.wait(target.id);
-    const updateAll = await request('POST', '/api/containers/update-all', {});
+    const updateAll = await request('POST', '/api/targets/update-all', {});
     assert.equal(updateAll.status, 202);
-    assert.deepEqual(updateAll.json(), { containers: 1, updates: 1 });
+    assert.deepEqual(updateAll.json(), { targets: 1, updates: 1 });
     for (let i = 0; i < 50 && !shell.detached.some((d) => d.command.includes('update-gitea')); i++) await Bun.sleep(10);
     await app.updater.idle();
     const update = shell.detached.find((d) => d.command.includes('update-gitea'))!;
@@ -193,7 +193,7 @@ describe('servers', () => {
     const { target } = await addServer();
     shell.on(/systemd-run .*systemctl reboot/, { output: '' });
     shell.commands.length = 0;
-    assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${target.id}/restart`)).status, 202);
     const run = await app.containers.wait(target.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Restart scheduled – Hetzner VPS is unavailable[\s\S]*Hetzner VPS is back[\s\S]*Checking Hetzner VPS again/);
@@ -206,14 +206,14 @@ describe('servers', () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
-    const node = (await request('POST', '/api/containers/node')).json();
+    const node = (await request('POST', '/api/targets/node')).json();
     await app.containers.wait(node.id);
     shell.on(/dist-upgrade/, async () => {
       await gate;
       return { output: '' };
     });
-    assert.equal((await request('POST', `/api/containers/${node.id}/packages-upgrade`)).status, 202);
-    assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${node.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${target.id}/restart`)).status, 202);
     release();
     await app.containers.wait(node.id);
     await app.containers.wait(target.id);
@@ -229,7 +229,7 @@ describe('servers', () => {
 
   it('keeps a server without a key until one is chosen', async () => {
     const host = (await request('POST', '/api/hosts', { type: 'server', address: 'vps.example.com' })).json();
-    const [target] = (await request('GET', '/api/containers')).json();
+    const [target] = (await request('GET', '/api/targets')).json();
     assert.equal(target.hostId, host.id);
     assert.equal(target.name, 'vps.example.com');
     assert.equal(target.kind, 'server');
@@ -241,17 +241,17 @@ describe('servers', () => {
   it('renames the server with its host and removes both together', async () => {
     const { host, target } = await addServer();
     await request('PUT', `/api/hosts/${host.id}`, { name: 'Web server' });
-    assert.equal((await request('GET', `/api/containers/${target.id}`)).json().name, 'Web server');
+    assert.equal((await request('GET', `/api/targets/${target.id}`)).json().name, 'Web server');
     // A name changed on the target itself is kept when the host is renamed again.
-    await request('PUT', `/api/containers/${target.id}`, { ...target, name: 'nginx box' });
+    await request('PUT', `/api/targets/${target.id}`, { ...target, name: 'nginx box' });
     await request('PUT', `/api/hosts/${host.id}`, { name: 'Web' });
-    assert.equal((await request('GET', `/api/containers/${target.id}`)).json().name, 'nginx box');
+    assert.equal((await request('GET', `/api/targets/${target.id}`)).json().name, 'nginx box');
 
-    assert.equal((await request('DELETE', `/api/containers/${target.id}`)).status, 204);
+    assert.equal((await request('DELETE', `/api/targets/${target.id}`)).status, 204);
     assert.equal((await request('GET', `/api/hosts/${host.id}`)).status, 404);
 
     const second = await addServer('Mail');
     assert.equal((await request('DELETE', `/api/hosts/${second.host.id}`)).status, 204);
-    assert.equal((await request('GET', `/api/containers/${second.target.id}`)).status, 404);
+    assert.equal((await request('GET', `/api/targets/${second.target.id}`)).status, 404);
   });
 });

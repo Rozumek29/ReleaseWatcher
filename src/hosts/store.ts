@@ -180,7 +180,7 @@ export class HostStore {
   targetCounts(): Map<number, number> {
     const rows = this.db
       .query<{ host_id: number; count: number }, []>(
-        'SELECT host_id, count(*) AS count FROM containers WHERE host_id IS NOT NULL GROUP BY host_id',
+        'SELECT host_id, count(*) AS count FROM targets WHERE host_id IS NOT NULL GROUP BY host_id',
       )
       .all();
     return new Map(rows.map((r) => [r.host_id, r.count]));
@@ -192,7 +192,7 @@ export class HostStore {
 
   /** Assigns targets saved before hosts existed to `hostId`; returns how many. */
   adoptUnassignedTargets(hostId: number): number {
-    return this.db.query('UPDATE containers SET host_id = ? WHERE host_id IS NULL').run(hostId).changes;
+    return this.db.query('UPDATE targets SET host_id = ? WHERE host_id IS NULL').run(hostId).changes;
   }
 
   readMeta(key: string): string | null {

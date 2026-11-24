@@ -442,12 +442,12 @@ export class ContainersPage {
     }
     this.updatingAll.set(true);
     try {
-      const { containers, updates } = await firstValueFrom(
+      const { targets, updates } = await firstValueFrom(
         this.api.updateAllContainers(this.backupFirst() && this.headerStorage() !== null, ids),
       );
       this.toast.info(
-        containers > 0
-          ? `Updating ${containers} container(s) one after another – ${updates} update(s).`
+        targets > 0
+          ? `Updating ${targets} container(s) one after another – ${updates} update(s).`
           : 'No container has pending updates.',
       );
       // Queued containers report isBusy, so the list keeps refreshing until all updates finished.
@@ -610,7 +610,7 @@ export class ContainersPage {
    */
   private followNextRun(finished: Run): void {
     const target = this.runTarget();
-    const container = this.containers().find((c) => c.id === finished.containerId);
+    const container = this.containers().find((c) => c.id === finished.targetId);
     const next = container?.activeRunId ?? null;
     if (container && target?.runId === finished.id && next !== null && next !== finished.id) {
       this.runTarget.set({ container, runId: next });

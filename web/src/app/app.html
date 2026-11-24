@@ -44,7 +44,7 @@
               <span class="count">{{ d.total }}</span>
             }
           }
-          @if (item.path === '/machines' && statusService.status()?.containers; as c) {
+          @if (item.path === '/machines' && statusService.status()?.targets; as c) {
             @if (c.total > 0) {
               <span class="count">{{ c.total }}</span>
             }
@@ -81,7 +81,7 @@
         @if (s.repositories.withErrors > 0) {
           <div class="poller-meta warn-text">{{ s.repositories.withErrors }} repo(s) with errors</div>
         }
-        @if (s.containers; as c) {
+        @if (s.targets; as c) {
           @if (c.packagesPending + (c.appStorePending ?? 0) + c.appUpdatesAvailable > 0) {
             <a class="poller-meta update-link containers-link" routerLink="/machines">
               {{ c.packagesPending + (c.appStorePending ?? 0) + c.appUpdatesAvailable }} container update(s) waiting

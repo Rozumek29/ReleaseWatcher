@@ -144,7 +144,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   `lxc-info` / `lxc-attach` directly and falls back to `pct` only when they fail; keep frequent work in as few `pct`/`qm`
   calls as possible. Node
   commands that differ per guest kind take a `GuestTarget` (`{ kind, vmid }`) and use `guestCli()` (`pct`/`qm`). `ContainerService` allows one task per container
-  and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
+  and runs checks/updates in the background, writing output to `target_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
 - What a target kind supports (backups, start/stop, resources, applications, Home Assistant, "update all", how it
   restarts) is described once in `TARGET_CAPABILITIES` (`src/proxmox/domain.ts`) and sent to the UI as

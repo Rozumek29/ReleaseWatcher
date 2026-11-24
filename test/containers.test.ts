@@ -86,7 +86,7 @@ describe('containers API', () => {
 
   /** Adds CT 101 and waits for its initial check. */
   const addContainer = async () => {
-    const response = await request('POST', '/api/containers', { vmid: 101 });
+    const response = await request('POST', '/api/targets', { vmid: 101 });
     assert.equal(response.status, 201);
     const container = response.json();
     await app.containers.wait(container.id);
@@ -99,13 +99,6 @@ describe('containers API', () => {
       .all()
       .map((r) => r.name);
     assert.deepEqual(indexes, [
-      'idx_container_apps_container',
-      'idx_container_apps_repository',
-      'idx_container_runs_app',
-      'idx_container_runs_container',
-      'idx_container_runs_running',
-      'idx_containers_enabled',
-      'idx_containers_host_vmid',
       'idx_docker_containers_endpoint',
       'idx_docker_containers_label_repository',
       'idx_docker_containers_repository',
@@ -114,6 +107,13 @@ describe('containers API', () => {
       'idx_hosts_ssh_key',
       'idx_repository_advisories_page',
       'idx_sessions_expires',
+      'idx_target_apps_repository',
+      'idx_target_apps_target',
+      'idx_target_runs_app',
+      'idx_target_runs_running',
+      'idx_target_runs_target',
+      'idx_targets_enabled',
+      'idx_targets_host_vmid',
       'idx_watched_repositories_enabled',
       'idx_watched_repositories_full_name',
       'idx_watched_repositories_installed_app',
@@ -123,7 +123,7 @@ describe('containers API', () => {
 
   it('lists containers on the node and marks added ones', async () => {
     await addContainer();
-    const response = await request('GET', '/api/proxmox/containers');
+    const response = await request('GET', '/api/proxmox/guests');
     assert.deepEqual(response.json(), [
       { kind: 'lxc', vmid: 101, status: 'running', name: 'vaultwarden', added: true },
       { kind: 'lxc', vmid: 102, status: 'stopped', name: 'old', added: false },
@@ -134,7 +134,7 @@ describe('containers API', () => {
   it('checks, updates and restarts a virtual machine through the QEMU guest agent', async () => {
     shell.on(/^qm status 137$/, { output: 'status: running\n' });
     shell.on(/^qm guest exec 137 -- sh -lc .*reboot-required/, { output: 'kernel 6.12.48-amd64 6.12.57-amd64\nstale sshd\n' });
-    const response = await request('POST', '/api/containers', { vmid: 137 });
+    const response = await request('POST', '/api/targets', { vmid: 137 });
     assert.equal(response.status, 201);
     const vm = response.json();
     assert.equal(vm.kind, 'vm');
@@ -143,7 +143,7 @@ describe('containers API', () => {
     await app.containers.wait(vm.id);
 
     // One batched `qm guest exec`, decoded from its JSON – no pct at all.
-    let dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${vm.id}`)).json();
     assert.equal(dto.lastError, null);
     assert.deepEqual(dto.packageUpdates, [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }]);
     assert.deepEqual(dto.restartReasons, [
@@ -156,7 +156,7 @@ describe('containers API', () => {
     // apt upgrade runs detached on the node through the agent; the log shows the command's output, not the JSON.
     shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('Setting up curl (8.1) ...\n', 0) });
     shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
-    assert.equal((await request('POST', `/api/containers/${vm.id}/packages-upgrade`, { backup: false })).status, 202);
+    assert.equal((await request('POST', `/api/targets/${vm.id}/packages-upgrade`, { backup: false })).status, 202);
     let run = await app.containers.wait(vm.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /QEMU guest agent – the output appears when the command has finished/);
@@ -166,7 +166,7 @@ describe('containers API', () => {
 
     // The exit code comes from the JSON, not from `qm` (which succeeds even when the command fails).
     shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('E: Unable to lock\n', 100) });
-    await request('POST', `/api/containers/${vm.id}/packages-upgrade`, { backup: false });
+    await request('POST', `/api/targets/${vm.id}/packages-upgrade`, { backup: false });
     run = await app.containers.wait(vm.id);
     assert.equal(run?.status, 'failed');
     assert.equal(run?.exitCode, 100);
@@ -174,7 +174,7 @@ describe('containers API', () => {
 
     // Restart with `qm reboot`, waiting for the agent again.
     shell.on(/^qm reboot 137 /, { output: '' });
-    assert.equal((await request('POST', `/api/containers/${vm.id}/restart`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${vm.id}/restart`)).status, 202);
     run = await app.containers.wait(vm.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /VM 137 restarted/);
@@ -182,27 +182,27 @@ describe('containers API', () => {
 
     // Without a running agent the check reports it once and keeps the previous results.
     shell.guestAgentDown = true;
-    await request('POST', `/api/containers/${vm.id}/check`);
+    await request('POST', `/api/targets/${vm.id}/check`);
     await app.containers.wait(vm.id);
-    dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    dto = (await request('GET', `/api/targets/${vm.id}`)).json();
     assert.match(dto.lastError, /^The QEMU guest agent did not run the commands \(QEMU guest agent is not running\)/);
 
     // Virtual machines are not resized and not added by "Add all".
-    const saved = await request('PUT', `/api/containers/${vm.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
+    const saved = await request('PUT', `/api/targets/${vm.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
     assert.deepEqual([saved.json().updateCores, saved.json().updateMemoryMb], [null, null]);
-    await request('DELETE', `/api/containers/${vm.id}`);
-    const added = (await request('POST', '/api/containers/add-all')).json();
+    await request('DELETE', `/api/targets/${vm.id}`);
+    const added = (await request('POST', '/api/targets/add-all')).json();
     assert.deepEqual(added.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['lxc:101', 'lxc:102']);
   });
 
   it('finds Home Assistant OS in a virtual machine and installs its updates', async () => {
     shell.on(/^qm status 137$/, { output: 'status: running\n' });
     shell.on(/^qm guest exec 137 -- sh -lc .*ID=haos/, { output: HAOS_PROBE_OUTPUT });
-    const vm = (await request('POST', '/api/containers', { vmid: 137, name: 'ha' })).json();
+    const vm = (await request('POST', '/api/targets', { vmid: 137, name: 'ha' })).json();
     await app.containers.wait(vm.id);
 
     // Without a token: Supervisor components live, integrations from the saved states; HAOS has no apt.
-    let dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${vm.id}`)).json();
     assert.equal(dto.lastError, null);
     assert.equal(dto.packagesEnabled, false);
     assert.deepEqual(dto.packageUpdates, []);
@@ -213,14 +213,14 @@ describe('containers API', () => {
     // Check-only by default: nothing is installed from ReleaseWatcher, "update all" leaves Home Assistant out.
     assert.equal(dto.homeAssistant.installEnabled, false);
     assert.ok(dto.homeAssistant.updates.every((u: { installBlocker: string | null }) => /switched off/.test(u.installBlocker ?? '')));
-    let started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { backup: false });
+    let started = await request('POST', `/api/targets/${vm.id}/home-assistant-update`, { backup: false });
     assert.equal(started.status, 409);
     assert.match(started.json().title, /switched off/);
-    assert.deepEqual((await request('POST', `/api/containers/${vm.id}/update-all`, { backup: false })).json(), {
-      containers: 0,
+    assert.deepEqual((await request('POST', `/api/targets/${vm.id}/update-all`, { backup: false })).json(), {
+      targets: 0,
       updates: 0,
     });
-    dto = (await request('PUT', `/api/containers/${vm.id}`, { ...dto, homeAssistantInstall: true })).json();
+    dto = (await request('PUT', `/api/targets/${vm.id}`, { ...dto, homeAssistantInstall: true })).json();
     assert.equal(dto.homeAssistant.installEnabled, true);
     assert.deepEqual(
       dto.homeAssistant.updates.map((u: { id: string; installBlocker: string | null }) => [u.id, u.installBlocker !== null]),
@@ -236,20 +236,20 @@ describe('containers API', () => {
       ['Mosquitto broker 7.2.0', 'Dahua 3.1.0', 'Frigate Server 0.18.3'],
     );
     const status = (await request('GET', '/api/status')).json();
-    assert.equal(status.containers.homeAssistantUpdatesAvailable, 3);
+    assert.equal(status.targets.homeAssistantUpdatesAvailable, 3);
 
     // Integrations need the token; the operating system and unknown updates are refused.
-    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.dahua_update'], backup: false });
+    started = await request('POST', `/api/targets/${vm.id}/home-assistant-update`, { ids: ['update.dahua_update'], backup: false });
     assert.equal(started.status, 409);
     assert.match(started.json().title, /access token/);
-    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.nope'], backup: false });
+    started = await request('POST', `/api/targets/${vm.id}/home-assistant-update`, { ids: ['update.nope'], backup: false });
     assert.equal(started.status, 409);
-    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { ids: ['update.frigate_server'], backup: false });
+    started = await request('POST', `/api/targets/${vm.id}/home-assistant-update`, { ids: ['update.frigate_server'], backup: false });
     assert.match(started.json().title, /only announces/);
 
     // The token is stored encrypted and never returned; a URL is required with it.
-    assert.equal((await request('PUT', `/api/containers/${vm.id}`, { ...dto, homeAssistantToken: 'secret-ha-token' })).status, 400);
-    const saved = await request('PUT', `/api/containers/${vm.id}`, {
+    assert.equal((await request('PUT', `/api/targets/${vm.id}`, { ...dto, homeAssistantToken: 'secret-ha-token' })).status, 400);
+    const saved = await request('PUT', `/api/targets/${vm.id}`, {
       ...dto,
       homeAssistantUrl: 'https://ha.example.com:8123/',
       homeAssistantToken: 'secret-ha-token',
@@ -258,10 +258,10 @@ describe('containers API', () => {
     assert.doesNotMatch(saved.text, /secret-ha-token/);
     assert.equal(saved.json().homeAssistant.url, 'https://ha.example.com:8123');
     assert.equal(saved.json().homeAssistant.hasToken, true);
-    const raw = store.database.query<{ t: string }, []>('SELECT home_assistant_token AS t FROM containers').get()!.t;
+    const raw = store.database.query<{ t: string }, []>('SELECT home_assistant_token AS t FROM targets').get()!.t;
     assert.match(raw, /^enc:v1:/);
     // Omitted keeps the token (the UI never sends it back).
-    assert.equal((await request('PUT', `/api/containers/${vm.id}`, saved.json())).json().homeAssistant.hasToken, true);
+    assert.equal((await request('PUT', `/api/targets/${vm.id}`, saved.json())).json().homeAssistant.hasToken, true);
 
     // With the token the integrations are read live.
     const requests: { method: string; url: string; auth: string | null; body: string | null }[] = [];
@@ -278,9 +278,9 @@ describe('containers API', () => {
       if (url.endsWith('/api/states/update.dahua_update')) return Response.json(dahua);
       return Response.json([dahua, haState('update.places_update', 'off', 'v3.0.3', 'v3.0.3')]);
     };
-    await request('POST', `/api/containers/${vm.id}/check`);
+    await request('POST', `/api/targets/${vm.id}/check`);
     await app.containers.wait(vm.id);
-    dto = (await request('GET', `/api/containers/${vm.id}`)).json();
+    dto = (await request('GET', `/api/targets/${vm.id}`)).json();
     assert.equal(dto.lastError, null);
     assert.equal(dto.homeAssistant.entitiesSavedAt, null);
     assert.equal(requests[0]!.url, 'https://ha.example.com:8123/api/states');
@@ -294,7 +294,7 @@ describe('containers API', () => {
       return { output: guestJson('Command completed successfully.\n', 0) };
     });
     requests.length = 0;
-    started = await request('POST', `/api/containers/${vm.id}/home-assistant-update`, { backup: false });
+    started = await request('POST', `/api/targets/${vm.id}/home-assistant-update`, { backup: false });
     assert.equal(started.status, 202);
     const run = await app.containers.wait(vm.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
@@ -313,37 +313,37 @@ describe('containers API', () => {
   });
 
   it('rejects containers that do not exist and duplicates', async () => {
-    assert.equal((await request('POST', '/api/containers', { vmid: 999 })).status, 400);
+    assert.equal((await request('POST', '/api/targets', { vmid: 999 })).status, 400);
     await addContainer();
-    assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);
+    assert.equal((await request('POST', '/api/targets', { vmid: 101 })).status, 409);
   });
 
   it('checks the linked containers when a manual repository check finds a new release', async () => {
     const container = await addContainer();
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
-    await request('POST', `/api/containers/${container.id}/apps`, {
+    await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
       latestSource: 'repository',
       repositoryId: repo.id,
     });
     // A disabled container with a linked app is left alone.
-    const other = (await request('POST', '/api/containers', { vmid: 102 })).json();
+    const other = (await request('POST', '/api/targets', { vmid: 102 })).json();
     await app.containers.wait(other.id);
-    await request('POST', `/api/containers/${other.id}/apps`, {
+    await request('POST', `/api/targets/${other.id}/apps`, {
       name: 'Widget',
       versionCommand: 'cat /opt/widget_version',
       latestSource: 'repository',
       repositoryId: repo.id,
     });
-    await request('PUT', `/api/containers/${other.id}`, { name: 'old', isEnabled: false, packagesEnabled: true });
+    await request('PUT', `/api/targets/${other.id}`, { name: 'old', isEnabled: false, packagesEnabled: true });
 
     // An app never checked is behind the repository's baseline: the repository check brings it up to date.
     const first = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
     assert.equal(first.containerChecks, 1);
     await app.scheduler.idle();
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion, 'v1.32.0');
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().apps[0].latestVersion, 'v1.32.0');
 
     // Nothing new → no container check.
     const unchanged = (await request('POST', `/api/repositories/${repo.id}/check`)).json();
@@ -354,23 +354,23 @@ describe('containers API', () => {
     assert.equal(checked.containerChecks, 1);
     await app.scheduler.idle();
 
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.apps[0].latestVersion, 'v1.33.0');
     assert.equal(dto.apps[0].updateAvailable, true);
-    assert.equal((await request('GET', `/api/containers/${other.id}`)).json().apps[0].latestVersion, null);
+    assert.equal((await request('GET', `/api/targets/${other.id}`)).json().apps[0].latestVersion, null);
   });
 
   it('checks the linked containers after a run of all repositories (scheduled, startup, check all)', async () => {
     const container = await addContainer();
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
-    await request('POST', `/api/containers/${container.id}/apps`, {
+    await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
       latestSource: 'repository',
       repositoryId: repo.id,
     });
-    const latest = async () => (await request('GET', `/api/containers/${container.id}`)).json().apps[0].latestVersion;
+    const latest = async () => (await request('GET', `/api/targets/${container.id}`)).json().apps[0].latestVersion;
 
     // The app was never checked, so it is behind the repository's baseline: the run brings it up to date.
     assert.equal(await latest(), null);
@@ -399,7 +399,7 @@ describe('containers API', () => {
 
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
-    const appResponse = await request('POST', `/api/containers/${container.id}/apps`, {
+    const appResponse = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
       latestSource: 'repository',
@@ -408,11 +408,11 @@ describe('containers API', () => {
     });
     assert.equal(appResponse.status, 201);
 
-    const run = (await request('POST', `/api/containers/${container.id}/check`)).json();
+    const run = (await request('POST', `/api/targets/${container.id}/check`)).json();
     assert.equal(run.status, 'running');
     await app.containers.wait(container.id);
 
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.status, 'running');
     assert.deepEqual(dto.packageUpdates, [{ name: 'curl', newVersion: '8.1', currentVersion: '8.0' }]);
     assert.equal(dto.apps[0].installedVersion, '1.30.0');
@@ -429,7 +429,7 @@ describe('containers API', () => {
 
     // The application inherits the custom icon of its repository.
     await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, icon: 'https://img.test/vw.png' });
-    const withIcon = (await request('GET', `/api/containers/${container.id}`)).json();
+    const withIcon = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.deepEqual(withIcon.apps[0].iconUrls, ['https://img.test/vw.png']);
 
     // First check (on add) notified about apt; the app update is new → one more notification.
@@ -442,14 +442,14 @@ describe('containers API', () => {
     assert.equal(notifier.containerSent.length, 2);
 
     const status = (await request('GET', '/api/status')).json();
-    assert.deepEqual(status.containers, { total: 1, enabled: 1, withErrors: 0, packagesPending: 1, appStorePending: 0, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
+    assert.deepEqual(status.targets, { total: 1, enabled: 1, withErrors: 0, packagesPending: 1, appStorePending: 0, appUpdatesAvailable: 1, homeAssistantUpdatesAvailable: 0 });
   });
 
   it('takes the installed version of an app without a version command by hand and marks the latest as installed', async () => {
     const container = await addContainer();
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Widget',
       latestSource: 'repository',
       repositoryId: repo.id,
@@ -460,21 +460,21 @@ describe('containers API', () => {
     assert.equal(created.json().installedVersion, '1.30.0');
 
     // A check keeps the version entered by hand and compares it with the latest.
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
-    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.apps[0].installedVersion, '1.30.0');
     assert.equal(dto.apps[0].updateAvailable, true);
     // The repository's vulnerabilities are compared with it too.
     assert.deepEqual((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersions, ['1.30.0']);
 
-    const marked = await request('POST', `/api/containers/${container.id}/apps/${appId}/mark-installed`);
+    const marked = await request('POST', `/api/targets/${container.id}/apps/${appId}/mark-installed`);
     assert.equal(marked.status, 200);
     assert.equal(marked.json().installedVersion, 'v1.32.0');
     assert.equal(marked.json().updateAvailable, false);
 
     // Only without a version command.
-    const both = await request('PUT', `/api/containers/${container.id}/apps/${appId}`, {
+    const both = await request('PUT', `/api/targets/${container.id}/apps/${appId}`, {
       name: 'Widget',
       latestSource: 'repository',
       repositoryId: repo.id,
@@ -483,15 +483,15 @@ describe('containers API', () => {
     });
     assert.equal(both.status, 400);
     assert.ok(both.json().errors.installedVersion);
-    await request('PUT', `/api/containers/${container.id}/apps/${appId}`, {
+    await request('PUT', `/api/targets/${container.id}/apps/${appId}`, {
       name: 'Widget',
       latestSource: 'repository',
       repositoryId: repo.id,
       versionCommand: 'cat /opt/vw_version.txt',
     });
-    const withCommand = await request('POST', `/api/containers/${container.id}/apps/${appId}/mark-installed`);
+    const withCommand = await request('POST', `/api/targets/${container.id}/apps/${appId}/mark-installed`);
     assert.equal(withCommand.status, 409);
-    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.apps[0].installedVersion, null); // the command reads it from now on
   });
 
@@ -506,7 +506,7 @@ describe('containers API', () => {
 
     // Linked on the machine side: an app that reports its version becomes the source of the installed version.
     const vaultwarden = (
-      await request('POST', `/api/containers/${container.id}/apps`, {
+      await request('POST', `/api/targets/${container.id}/apps`, {
         name: 'Vaultwarden',
         versionCommand: 'cat /opt/vw_version.txt',
         latestSource: 'repository',
@@ -518,7 +518,7 @@ describe('containers API', () => {
     assert.deepEqual(repo.installedVersionApp, { kind: 'app', id: vaultwarden.id, name: 'Vaultwarden', machine: 'vaultwarden' });
     assert.equal(repo.installedVersion, '1.0.0'); // not checked yet
 
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
     assert.equal(repo.installedVersion, '1.30.0');
@@ -531,7 +531,7 @@ describe('containers API', () => {
 
     // Apps on machines to choose from; choosing one in the repository links it.
     const widget = (
-      await request('POST', `/api/containers/${container.id}/apps`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' })
+      await request('POST', `/api/targets/${container.id}/apps`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' })
     ).json();
     const machines = (await request('GET', '/api/machine-apps')).json();
     assert.deepEqual(machines, [
@@ -549,15 +549,15 @@ describe('containers API', () => {
     assert.equal((await put({ installedVersionApp: { kind: 'app', id: 9999 } })).status, 400);
     repo = (await put({ installedVersionApp: { kind: 'app', id: widget.id } })).json();
     assert.equal(repo.installedVersionApp.name, 'Widget');
-    let apps = (await request('GET', `/api/containers/${container.id}`)).json().apps;
+    let apps = (await request('GET', `/api/targets/${container.id}`)).json().apps;
     assert.equal(apps.find((a: { id: number }) => a.id === widget.id).repositoryId, repo.id);
     assert.equal(apps.find((a: { id: number }) => a.id === widget.id).latestSource, 'repository');
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     assert.equal((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersion, '2.0.0');
 
     // Unlinked on the machine side: the last version stays, entered by hand, and the repository says why.
-    await request('PUT', `/api/containers/${container.id}/apps/${widget.id}`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' });
+    await request('PUT', `/api/targets/${container.id}/apps/${widget.id}`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' });
     repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
     assert.equal(repo.installedVersionSource, 'manual');
     assert.equal(repo.installedVersion, '2.0.0');
@@ -568,7 +568,7 @@ describe('containers API', () => {
     assert.equal(repo.installedVersionError, null);
 
     // Removed with the machine.
-    assert.equal((await request('DELETE', `/api/containers/${container.id}`)).status, 204);
+    assert.equal((await request('DELETE', `/api/targets/${container.id}`)).status, 204);
     repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
     assert.equal(repo.installedVersionSource, 'manual');
     assert.equal(repo.installedVersion, '1.30.0');
@@ -582,7 +582,7 @@ describe('containers API', () => {
     const container = await addContainer();
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repoId = (await request('GET', '/api/repositories')).json()[0].id;
-    await request('POST', `/api/containers/${container.id}/apps`, {
+    await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
       latestSource: 'repository',
@@ -603,7 +603,7 @@ describe('containers API', () => {
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
     const addApp = (name: string, repositoryId: number | null, versionCommand: string | null = 'cat /opt/vw_version.txt') =>
-      request('POST', `/api/containers/${container.id}/apps`, { name, versionCommand, latestSource: repositoryId ? 'repository' : 'none', repositoryId });
+      request('POST', `/api/targets/${container.id}/apps`, { name, versionCommand, latestSource: repositoryId ? 'repository' : 'none', repositoryId });
 
     // An app without a version (no command, none entered) is not a source.
     await addApp('No version', repo.id, null);
@@ -627,11 +627,11 @@ describe('containers API', () => {
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
 
-    const response = await request('POST', `/api/containers/${container.id}/packages-upgrade`);
+    const response = await request('POST', `/api/targets/${container.id}/packages-upgrade`);
     assert.equal(response.status, 202);
     // A second task in the same container is refused while the first one runs.
-    assert.equal((await request('POST', `/api/containers/${container.id}/check`)).status, 409);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    assert.equal((await request('POST', `/api/targets/${container.id}/check`)).status, 409);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().isBusy, true);
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     const run = await app.containers.wait(container.id);
 
@@ -640,7 +640,7 @@ describe('containers API', () => {
     assert.equal(shell.commands[0], 'pct status 101');
     assert.match(shell.commands[1]!, /vzdump 101 --storage 'pbs' --mode snapshot/);
     assert.ok(shell.commands[2]!.includes('apt-get -y'));
-    assert.deepEqual((await request('GET', `/api/containers/${container.id}`)).json().packageUpdates, []);
+    assert.deepEqual((await request('GET', `/api/targets/${container.id}`)).json().packageUpdates, []);
     assert.match(run?.output ?? '', /Backing up CT 101 to storage "pbs"/);
   });
 
@@ -648,12 +648,12 @@ describe('containers API', () => {
     const container = await addContainer();
     shell.on(/apt-get -y/, { output: 'E: Could not get lock\n', exitCode: 100 });
 
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`, { backup: false });
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`, { backup: false });
     await app.containers.wait(container.id);
     assert.equal(notifier.resultsSent.length, 0); // off by default
 
     await request('PUT', '/api/settings', { notifyUpdateFailed: true, notifyUpdateSucceeded: true });
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`, { backup: false });
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`, { backup: false });
     await app.containers.wait(container.id);
     assert.equal(notifier.resultsSent.length, 1);
     assert.deepEqual(
@@ -663,19 +663,19 @@ describe('containers API', () => {
     assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
 
     shell.on(/apt-get -y/, { output: 'done\n' });
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`, { backup: false });
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`, { backup: false });
     await app.containers.wait(container.id);
     assert.deepEqual([notifier.resultsSent[1]?.succeeded, notifier.resultsSent[1]?.detail], [true, null]);
   });
 
   it('chooses whether to back up: per update, per container, then the global default', async () => {
     const container = await addContainer();
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.backupBeforeUpdate, null);
     assert.equal(dto.effectiveBackupBeforeUpdate, false);
     const upgrade = async (body?: unknown) => {
       shell.commands.length = 0;
-      const response = await request('POST', `/api/containers/${container.id}/packages-upgrade`, body);
+      const response = await request('POST', `/api/targets/${container.id}/packages-upgrade`, body);
       if (response.status === 202) {
         await app.containers.wait(container.id);
       }
@@ -691,7 +691,7 @@ describe('containers API', () => {
     assert.deepEqual(await upgrade({ backup: false }), { status: 202, backedUp: false });
 
     // The container overrides the global default; a single update overrides the container.
-    const updated = await request('PUT', `/api/containers/${container.id}`, { ...dto, backupBeforeUpdate: false });
+    const updated = await request('PUT', `/api/targets/${container.id}`, { ...dto, backupBeforeUpdate: false });
     assert.equal(updated.json().effectiveBackupBeforeUpdate, false);
     assert.deepEqual(await upgrade(), { status: 202, backedUp: false });
     assert.deepEqual(await upgrade({ backup: true }), { status: 202, backedUp: true });
@@ -703,7 +703,7 @@ describe('containers API', () => {
     shell.on(/vzdump/, { exitCode: 255, output: 'ERROR: Backup of VM 101 failed - no space left\n' });
     shell.commands.length = 0;
 
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`);
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`);
     const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
     assert.match(run?.output ?? '', /Backup failed – update not started/);
@@ -728,7 +728,7 @@ describe('containers API', () => {
   it('runs an application update and marks failures', async () => {
     const container = await addContainer();
     const app1 = (
-      await request('POST', `/api/containers/${container.id}/apps`, {
+      await request('POST', `/api/targets/${container.id}/apps`, {
         name: 'Custom',
         latestSource: 'none',
         updateCommand: 'cd /opt/app && ./pull.sh',
@@ -737,30 +737,30 @@ describe('containers API', () => {
     ).json();
     shell.on(/pull\.sh/, { exitCode: 2, output: 'git: merge conflict\n' });
 
-    const response = await request('POST', `/api/containers/${container.id}/apps/${app1.id}/update`);
+    const response = await request('POST', `/api/targets/${container.id}/apps/${app1.id}/update`);
     assert.equal(response.status, 202);
     const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
     assert.equal(run?.exitCode, 2);
     assert.match(run?.output ?? '', /merge conflict/);
 
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
+    const runs = (await request('GET', `/api/targets/${container.id}/runs`)).json().items;
     assert.equal(runs[0].kind, 'app-update');
     assert.equal('output' in runs[0], false);
   });
 
   it('runs updates detached on the node, with a pseudo-terminal only when asked', async () => {
     const container = await addContainer();
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Custom',
       latestSource: 'none',
       updateCommand: 'update',
       useTty: true,
     });
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
-    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    await request('POST', `/api/targets/${container.id}/apps/${created.json().id}/update`);
     assert.equal((await app.containers.wait(container.id))?.status, 'succeeded');
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`);
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`);
     await app.containers.wait(container.id);
 
     assert.deepEqual(
@@ -775,14 +775,14 @@ describe('containers API', () => {
 
   it('runs application updates non-interactively (PHS_SILENT=1 for community-scripts)', async () => {
     const container = await addContainer();
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       latestSource: 'none',
       updateCommand: 'update',
       useTty: true,
     });
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
-    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    await request('POST', `/api/targets/${container.id}/apps/${created.json().id}/update`);
     assert.equal((await app.containers.wait(container.id))?.status, 'succeeded');
 
     assert.match(shell.detached[0]?.command ?? '', /\nexport PHS_SILENT=1 DEBIAN_FRONTEND=noninteractive\nupdate'$/);
@@ -790,7 +790,7 @@ describe('containers API', () => {
 
   it('stops an update that waits at an interactive menu instead of running into its timeout', async () => {
     const container = await addContainer();
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       latestSource: 'none',
       updateCommand: 'update',
@@ -804,7 +804,7 @@ describe('containers API', () => {
     shell.hangUntilStopped = true;
 
     const started = Date.now();
-    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    await request('POST', `/api/targets/${container.id}/apps/${created.json().id}/update`);
     const run = await app.containers.wait(container.id);
 
     assert.ok(Date.now() - started < 5000, 'stopped long before the 30-minute timeout');
@@ -817,7 +817,7 @@ describe('containers API', () => {
 
   it('keeps an update running when the SSH connection drops and reads its output again', async () => {
     const container = await addContainer();
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       latestSource: 'none',
       updateCommand: 'update',
@@ -825,7 +825,7 @@ describe('containers API', () => {
     shell.on(/\nupdate'$/, { output: 'Compiling vaultwarden\nUpdated to 1.32.0\n' });
     shell.dropFollows = 2;
 
-    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    await request('POST', `/api/targets/${container.id}/apps/${created.json().id}/update`);
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
@@ -840,33 +840,33 @@ describe('containers API', () => {
 
   it('raises CPU and memory for updates and restores them afterwards, also after a failure', async () => {
     const container = await addContainer();
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
-    assert.equal((await request('PUT', `/api/containers/${container.id}`, { ...dto, updateCores: 0 })).status, 400);
-    assert.equal((await request('PUT', `/api/containers/${container.id}`, { ...dto, updateMemoryMb: 10 })).status, 400);
-    const saved = await request('PUT', `/api/containers/${container.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
+    assert.equal((await request('PUT', `/api/targets/${container.id}`, { ...dto, updateCores: 0 })).status, 400);
+    assert.equal((await request('PUT', `/api/targets/${container.id}`, { ...dto, updateMemoryMb: 10 })).status, 400);
+    const saved = await request('PUT', `/api/targets/${container.id}`, { ...dto, updateCores: 4, updateMemoryMb: 4096 });
     assert.deepEqual([saved.json().updateCores, saved.json().updateMemoryMb, saved.json().resourcesRaised], [4, 4096, false]);
     // Omitted = keep.
     const { updateCores: _c, updateMemoryMb: _m, ...withoutResources } = saved.json();
-    assert.equal((await request('PUT', `/api/containers/${container.id}`, withoutResources)).json().updateCores, 4);
+    assert.equal((await request('PUT', `/api/targets/${container.id}`, withoutResources)).json().updateCores, 4);
 
     shell.on(/^pct config 101$/, { output: 'arch: amd64\ncores: 1\nmemory: 1024\n' });
     shell.on(/^pct set 101 /, { output: '' });
     // Proxmox applies the cpuset of a running container only in pvestatd's next cycle.
     let nprocCalls = 0;
     shell.on(/^pct exec 101 -- nproc$/, () => ({ output: ++nprocCalls < 3 ? '1\n' : '4\n' }));
-    const created = await request('POST', `/api/containers/${container.id}/apps`, {
+    const created = await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       latestSource: 'none',
       updateCommand: 'cargo build',
     });
     let raisedDuringUpdate: boolean | null = null;
     shell.on(/cargo build/, async () => {
-      raisedDuringUpdate = (await request('GET', `/api/containers/${container.id}`)).json().resourcesRaised;
+      raisedDuringUpdate = (await request('GET', `/api/targets/${container.id}`)).json().resourcesRaised;
       return { exitCode: 101, output: 'error: could not compile\n' };
     });
     shell.commands.length = 0;
 
-    await request('POST', `/api/containers/${container.id}/apps/${created.json().id}/update`);
+    await request('POST', `/api/targets/${container.id}/apps/${created.json().id}/update`);
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'failed');
@@ -885,7 +885,7 @@ describe('containers API', () => {
     assert.match(run?.output ?? '', /Waiting for Proxmox to apply the CPU cores \(CT 101 sees 1\)…/);
     assert.match(run?.output ?? '', /CT 101 now sees 4 CPU cores/);
     assert.match(run?.output ?? '', /Restoring resources: 1 cores, 1024 MiB memory/);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().resourcesRaised, false);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().resourcesRaised, false);
   });
 
   it('re-attaches to an update still running on the node after a restart and restores resources', async () => {
@@ -930,30 +930,30 @@ describe('containers API', () => {
 
   it('validates applications and container settings', async () => {
     const container = await addContainer();
-    const bad = await request('POST', `/api/containers/${container.id}/apps`, { name: 'X', latestSource: 'repository' });
+    const bad = await request('POST', `/api/targets/${container.id}/apps`, { name: 'X', latestSource: 'repository' });
     assert.equal(bad.status, 400);
     assert.ok(bad.json().errors.repositoryId);
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
-    const cron = await request('PUT', `/api/containers/${container.id}`, { ...dto, checkCron: '99 * * * *' });
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
+    const cron = await request('PUT', `/api/targets/${container.id}`, { ...dto, checkCron: '99 * * * *' });
     assert.equal(cron.status, 400);
-    const ok = await request('PUT', `/api/containers/${container.id}`, { ...dto, checkCron: '30 4 * * *' });
+    const ok = await request('PUT', `/api/targets/${container.id}`, { ...dto, checkCron: '30 4 * * *' });
     assert.equal(ok.json().checkCron, '30 4 * * *');
   });
 
   it('skips stopped containers without an error, keeps their last results and never starts them', async () => {
     const container = await addContainer();
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().packageUpdates.length, 1);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().packageUpdates.length, 1);
     const sent = notifier.containerSent.length;
 
     shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
     shell.commands.length = 0;
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
     assert.match(run?.output ?? '', /stopped – package and application checks skipped/);
     assert.equal(shell.commands.some((c) => c.startsWith('pct exec') || c.startsWith('pct start')), false);
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.status, 'stopped');
     assert.equal(dto.lastError, null);
     assert.equal(dto.packageUpdates.length, 1, 'results of the last check are kept');
@@ -966,12 +966,12 @@ describe('containers API', () => {
     shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
     shell.commands.length = 0;
 
-    assert.equal((await request('POST', `/api/containers/${container.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${container.id}/packages-upgrade`)).status, 202);
     const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
     assert.match(run?.output ?? '', /CT 101 is stopped – start it, then run the update again/);
     assert.deepEqual(shell.commands, ['pct status 101'], 'no backup, no update');
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().status, 'stopped');
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().status, 'stopped');
   });
 
   /** Makes CT 101 stopped; `pct start`/`pct shutdown` change its state like on a real node. */
@@ -988,8 +988,8 @@ describe('containers API', () => {
         state = 'stopped';
         return { output: '' };
       });
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
-    const saved = await request('PUT', `/api/containers/${container.id}`, { ...dto, startWhenStopped: true });
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
+    const saved = await request('PUT', `/api/targets/${container.id}`, { ...dto, startWhenStopped: true });
     assert.equal(saved.json().startWhenStopped, true);
     shell.commands.length = 0;
     return { container, state: () => state };
@@ -999,7 +999,7 @@ describe('containers API', () => {
     const { container, state } = await stoppableContainer();
     shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
 
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
@@ -1010,7 +1010,7 @@ describe('containers API', () => {
     // It waits for the network inside the container (apt needs it).
     assert.match(shell.commands[started]!, /\/proc\/net\/route/);
     assert.equal(state(), 'stopped');
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.status, 'stopped');
     assert.deepEqual(dto.packageUpdates, [], 'fresh results from the temporary start');
     assert.equal(dto.lastError, null);
@@ -1021,7 +1021,7 @@ describe('containers API', () => {
     await setBackupStorage('local', true);
     shell.on(/apt-get -y/, { output: 'Setting up curl (8.1) ...\n' });
 
-    assert.equal((await request('POST', `/api/containers/${container.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${container.id}/packages-upgrade`)).status, 202);
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
@@ -1036,7 +1036,7 @@ describe('containers API', () => {
   it('leaves a running container running when the option is on', async () => {
     const { container, state } = await stoppableContainer();
     shell.on(/^pct status 101$/, { output: 'status: running\n' });
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     assert.equal(shell.commands.some((c) => /^pct (start|shutdown)/.test(c)), false);
     assert.equal(state(), 'stopped', 'the fake state was never touched');
@@ -1045,7 +1045,7 @@ describe('containers API', () => {
   it('fails the update when the container cannot be started', async () => {
     const { container } = await stoppableContainer();
     shell.on(/^pct start 101/, { exitCode: 255, output: 'startup for container 101 failed\n' });
-    await request('POST', `/api/containers/${container.id}/packages-upgrade`);
+    await request('POST', `/api/targets/${container.id}/packages-upgrade`);
     const run = await app.containers.wait(container.id);
     assert.equal(run?.status, 'failed');
     assert.match(run?.output ?? '', /Starting CT 101 failed/);
@@ -1054,28 +1054,28 @@ describe('containers API', () => {
 
   it('checks and upgrades apt on the Proxmox host itself', async () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
-    const response = await request('POST', '/api/containers/node');
+    const response = await request('POST', '/api/targets/node');
     assert.equal(response.status, 201);
     const node = response.json();
     assert.equal(node.kind, 'node');
     assert.deepEqual(node.capabilities, capabilities('node'));
     assert.equal(node.name, 'pve');
-    assert.equal((await request('POST', '/api/containers/node')).status, 409);
+    assert.equal((await request('POST', '/api/targets/node')).status, 409);
     await app.containers.wait(node.id);
 
     // The apt check ran directly on the node – no pct status/exec.
     assert.ok(shell.commands.some((c) => c.includes('apt list --upgradable') && !c.startsWith('pct')));
     assert.equal(shell.commands.some((c) => c.startsWith('pct')), false);
-    let dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${node.id}`)).json();
     assert.equal(dto.status, 'running');
     assert.equal(dto.packageUpdates.length, 1);
     assert.equal(dto.effectiveBackupBeforeUpdate, false);
     assert.equal(notifier.containerSent.at(-1)?.targetKind, 'node');
 
     // The host has no applications, backups or temporary starts.
-    const app1 = await request('POST', `/api/containers/${node.id}/apps`, { name: 'x', latestSource: 'none' });
+    const app1 = await request('POST', `/api/targets/${node.id}/apps`, { name: 'x', latestSource: 'none' });
     assert.equal(app1.status, 409);
-    const saved = await request('PUT', `/api/containers/${node.id}`, {
+    const saved = await request('PUT', `/api/targets/${node.id}`, {
       ...dto,
       packagesEnabled: false,
       startWhenStopped: true,
@@ -1086,42 +1086,42 @@ describe('containers API', () => {
       [true, false, null],
     );
     await setBackupStorage('local', true);
-    assert.equal((await request('POST', `/api/containers/${node.id}/packages-upgrade`, { backup: true })).status, 409);
+    assert.equal((await request('POST', `/api/targets/${node.id}/packages-upgrade`, { backup: true })).status, 409);
 
     // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
     shell.on(/dist-upgrade/, { output: 'Setting up pve-manager (9.1.2) ...\n' });
     shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     shell.commands.length = 0;
-    assert.equal((await request('POST', `/api/containers/${node.id}/packages-upgrade`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${node.id}/packages-upgrade`)).status, 202);
     const run = await app.containers.wait(node.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(shell.commands[0]!, /^export DEBIAN_FRONTEND=noninteractive && apt-get update && apt-get -y .* dist-upgrade && apt-get -y autoremove$/);
     assert.equal(shell.commands.some((c) => c.includes('vzdump') || c.startsWith('pct')), false);
-    dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    dto = (await request('GET', `/api/targets/${node.id}`)).json();
     assert.deepEqual(dto.packageUpdates, []);
 
     // Listed first; "add all" does not add it again and the vmid of a real container is unaffected.
-    await request('POST', '/api/containers/add-all');
-    const list = (await request('GET', '/api/containers')).json();
+    await request('POST', '/api/targets/add-all');
+    const list = (await request('GET', '/api/targets')).json();
     assert.deepEqual(list.map((c: { kind: string; vmid: number }) => `${c.kind}:${c.vmid}`), ['node:0', 'lxc:101', 'lxc:102']);
   });
 
   it('adds all containers of the node at once and checks them', async () => {
     await addContainer();
-    const response = await request('POST', '/api/containers/add-all');
+    const response = await request('POST', '/api/targets/add-all');
     assert.equal(response.status, 201);
     assert.deepEqual(
       response.json().map((c: { vmid: number; name: string }) => [c.vmid, c.name]),
       [[102, 'old']],
     );
     await app.scheduler.idle();
-    const list = (await request('GET', '/api/containers')).json();
+    const list = (await request('GET', '/api/targets')).json();
     assert.deepEqual(list.map((c: { vmid: number }) => c.vmid), [101, 102]);
     assert.equal(list[1].status, 'stopped');
     assert.ok(list[1].lastCheckedAt);
 
     // Nothing left to add.
-    const again = await request('POST', '/api/containers/add-all');
+    const again = await request('POST', '/api/targets/add-all');
     assert.equal(again.status, 200);
     assert.deepEqual(again.json(), []);
   });
@@ -1129,10 +1129,10 @@ describe('containers API', () => {
   it('keeps as many runs as the run history settings allow', async () => {
     const container = await addContainer();
     for (let i = 0; i < 3; i++) {
-      await request('POST', `/api/containers/${container.id}/check`);
+      await request('POST', `/api/targets/${container.id}/check`);
       await app.containers.wait(container.id);
     }
-    const runs = async () => (await request('GET', `/api/containers/${container.id}/runs`)).json().items as { id: number }[];
+    const runs = async () => (await request('GET', `/api/targets/${container.id}/runs`)).json().items as { id: number }[];
     assert.equal((await runs()).length, 4); // the check after adding + 3
 
     const proxmox = async () => (await request('GET', '/api/settings')).json().proxmox;
@@ -1150,7 +1150,7 @@ describe('containers API', () => {
     // null goes back to the default: no limit, new runs are kept again.
     assert.equal((await request('PUT', '/api/settings', { runHistoryChecks: null })).status, 200);
     assert.equal((await proxmox()).runHistoryChecks, null);
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     assert.equal((await runs()).length, 3);
   });
@@ -1163,7 +1163,7 @@ describe('containers API', () => {
       containerStore.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: '' });
     }
     const page = async (query: string) => {
-      const response = await request('GET', `/api/containers/${container.id}/runs${query}`);
+      const response = await request('GET', `/api/targets/${container.id}/runs${query}`);
       return { status: response.status, body: response.json() };
     };
     const all = (await page('')).body as { items: { id: number }[]; nextCursor: string | null };
@@ -1187,7 +1187,7 @@ describe('containers API', () => {
       output: `${PCT_LIST}103        running                 a\n104        running                 b\n`,
     });
     for (const vmid of [101, 103, 104]) {
-      const response = await request('POST', '/api/containers', { vmid });
+      const response = await request('POST', '/api/targets', { vmid });
       await app.containers.wait(response.json().id);
     }
     assert.equal((await request('PUT', '/api/settings', { containerCheckConcurrency: 2 })).status, 200);
@@ -1205,7 +1205,7 @@ describe('containers API', () => {
     shell.commands.length = 0;
     shell.connections = 0;
 
-    assert.equal((await request('POST', '/api/containers/check-all')).status, 202);
+    assert.equal((await request('POST', '/api/targets/check-all')).status, 202);
     await app.scheduler.idle();
 
     assert.equal(maxRunning, 2);
@@ -1216,8 +1216,8 @@ describe('containers API', () => {
 
   it('runs scheduled checks only for due containers', async () => {
     const container = await addContainer();
-    const dto = (await request('GET', `/api/containers/${container.id}`)).json();
-    await request('PUT', `/api/containers/${container.id}`, { ...dto, checkCron: '30 4 * * *' });
+    const dto = (await request('GET', `/api/targets/${container.id}`)).json();
+    await request('PUT', `/api/targets/${container.id}`, { ...dto, checkCron: '30 4 * * *' });
     shell.commands.length = 0;
     await app.scheduler.tick(new Date(2026, 10, 16, 4, 29));
     assert.equal(shell.commands.length, 0);
@@ -1237,14 +1237,14 @@ describe('containers API', () => {
     const container = await addContainer();
     await request('POST', '/api/repositories', { repository: 'acme/widget' });
     const repo = (await request('GET', '/api/repositories')).json()[0];
-    await request('POST', `/api/containers/${container.id}/apps`, {
+    await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Vaultwarden',
       versionCommand: 'cat /opt/vw_version.txt',
       latestSource: 'repository',
       repositoryId: repo.id,
       updateCommand: 'update',
     });
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     return container;
   };
@@ -1252,7 +1252,7 @@ describe('containers API', () => {
   it('updates all containers one after another: apt, then applications, without the host', async () => {
     const container = await addContainerWithUpdates();
     shell.on(/^hostname$/, { output: 'pve\n' });
-    const node = (await request('POST', '/api/containers/node')).json();
+    const node = (await request('POST', '/api/targets/node')).json();
     await app.containers.wait(node.id);
     await setBackupStorage('pbs', true);
     const upgrade = Promise.withResolvers<{ output: string }>();
@@ -1260,11 +1260,11 @@ describe('containers API', () => {
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     shell.commands.length = 0;
 
-    const response = await request('POST', '/api/containers/update-all', { backup: true });
+    const response = await request('POST', '/api/targets/update-all', { backup: true });
     assert.equal(response.status, 202);
-    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
-    assert.equal((await request('POST', '/api/containers/update-all')).status, 409);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    assert.deepEqual(response.json(), { targets: 1, updates: 2 });
+    assert.equal((await request('POST', '/api/targets/update-all')).status, 409);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().isBusy, true);
     upgrade.resolve({ output: 'Setting up curl (8.1) ...\n' });
     await app.updater.idle();
 
@@ -1273,12 +1273,12 @@ describe('containers API', () => {
     assert.match(updates[0]!, /vzdump 101/, 'backed up once, before the first update');
     assert.ok(updates[1]!.includes('apt-get -y'));
     assert.match(updates[2]!, /pct exec 101 [\s\S]*\nupdate'$/);
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
+    const runs = (await request('GET', `/api/targets/${container.id}/runs`)).json().items;
     assert.deepEqual(runs.slice(0, 2).map((r: { kind: string; status: string }) => [r.kind, r.status]), [
       ['app-update', 'succeeded'],
       ['packages-upgrade', 'succeeded'],
     ]);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, false);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().isBusy, false);
   });
 
   it('updates only the containers chosen with ids', async () => {
@@ -1287,20 +1287,20 @@ describe('containers API', () => {
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     shell.commands.length = 0;
 
-    assert.equal((await request('POST', '/api/containers/update-all', { ids: ['x'] })).status, 400);
-    assert.deepEqual((await request('POST', '/api/containers/update-all', { backup: false, ids: [] })).json(), {
-      containers: 0,
+    assert.equal((await request('POST', '/api/targets/update-all', { ids: ['x'] })).status, 400);
+    assert.deepEqual((await request('POST', '/api/targets/update-all', { backup: false, ids: [] })).json(), {
+      targets: 0,
       updates: 0,
     });
-    assert.deepEqual((await request('POST', '/api/containers/update-all', { ids: [container.id + 1] })).json(), {
-      containers: 0,
+    assert.deepEqual((await request('POST', '/api/targets/update-all', { ids: [container.id + 1] })).json(), {
+      targets: 0,
       updates: 0,
     });
     assert.equal(shell.commands.some((c) => c.includes('apt-get -y')), false);
 
-    const response = await request('POST', '/api/containers/update-all', { backup: false, ids: [container.id] });
+    const response = await request('POST', '/api/targets/update-all', { backup: false, ids: [container.id] });
     assert.equal(response.status, 202);
-    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
+    assert.deepEqual(response.json(), { targets: 1, updates: 2 });
     await app.updater.idle();
     assert.ok(shell.commands.some((c) => c.includes('apt-get -y')));
   });
@@ -1311,12 +1311,12 @@ describe('containers API', () => {
     shell.on(/apt-get -y/, { exitCode: 100, output: 'E: Could not get lock\n' });
     shell.commands.length = 0;
 
-    assert.equal((await request('POST', '/api/containers/update-all', { backup: false })).status, 202);
+    assert.equal((await request('POST', '/api/targets/update-all', { backup: false })).status, 202);
     await app.updater.idle();
 
     assert.equal(shell.commands.some((c) => c.includes('vzdump')), false);
     assert.equal(shell.commands.some((c) => /\nupdate'$/.test(c)), false);
-    const runs = (await request('GET', `/api/containers/${container.id}/runs`)).json().items;
+    const runs = (await request('GET', `/api/targets/${container.id}/runs`)).json().items;
     assert.equal(runs[0].kind, 'packages-upgrade');
     assert.equal(runs[0].status, 'failed');
   });
@@ -1329,17 +1329,17 @@ describe('containers API', () => {
     shell.on(/\nupdate'$/, { output: 'Updated.\n' });
     shell.commands.length = 0;
 
-    const response = await request('POST', `/api/containers/${container.id}/update-all`, { backup: true });
+    const response = await request('POST', `/api/targets/${container.id}/update-all`, { backup: true });
     assert.equal(response.status, 202);
-    assert.deepEqual(response.json(), { containers: 1, updates: 2 });
+    assert.deepEqual(response.json(), { targets: 1, updates: 2 });
     // Queued already – by itself and by the global "update all".
-    assert.equal((await request('POST', `/api/containers/${container.id}/update-all`)).status, 409);
-    assert.equal((await request('POST', '/api/containers/update-all')).status, 409);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().isBusy, true);
+    assert.equal((await request('POST', `/api/targets/${container.id}/update-all`)).status, 409);
+    assert.equal((await request('POST', '/api/targets/update-all')).status, 409);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().isBusy, true);
     // The run in progress is exposed, so the UI can show its live log.
     let activeRunId: number | null = null;
     for (let i = 0; i < 50 && activeRunId === null; i++) {
-      activeRunId = (await request('GET', `/api/containers/${container.id}`)).json().activeRunId;
+      activeRunId = (await request('GET', `/api/targets/${container.id}`)).json().activeRunId;
       await Bun.sleep(5);
     }
     assert.notEqual(activeRunId, null);
@@ -1357,28 +1357,28 @@ describe('containers API', () => {
     const done = (await request('GET', `/api/runs/${activeRunId}?after=${encodeURIComponent(active.outputCursor)}`)).json();
     assert.deepEqual([done.status, done.outputAppend, done.outputCursor], ['succeeded', false, null]);
     assert.match(done.output, /Setting up curl/);
-    assert.equal((await request('GET', `/api/containers/${container.id}`)).json().activeRunId, null);
+    assert.equal((await request('GET', `/api/targets/${container.id}`)).json().activeRunId, null);
 
     const updates = shell.commands.filter((c) => /vzdump|apt-get -y|\nupdate'$/.test(c));
     assert.equal(updates.length, 3, updates.join('\n'));
     assert.match(updates[0]!, /vzdump 101 .*pbs/);
     assert.ok(updates[1]!.includes('apt-get -y'));
     assert.match(updates[2]!, /pct exec 101 [\s\S]*\nupdate'$/);
-    assert.equal((await request('POST', '/api/containers/999/update-all')).status, 404);
+    assert.equal((await request('POST', '/api/targets/999/update-all')).status, 404);
   });
 
   it('queues a container while "update all" of another one runs', async () => {
     const first = await addContainerWithUpdates();
     shell.on(/^pct status 102$/, { output: 'status: running\n' });
-    const second = (await request('POST', '/api/containers', { vmid: 102 })).json();
+    const second = (await request('POST', '/api/targets', { vmid: 102 })).json();
     await app.containers.wait(second.id);
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/pct exec 101 [\s\S]*apt-get -y/, () => upgrade.promise);
     shell.commands.length = 0;
 
-    assert.equal((await request('POST', `/api/containers/${first.id}/update-all`, { backup: false })).status, 202);
-    assert.equal((await request('POST', `/api/containers/${second.id}/update-all`, { backup: false })).status, 202);
-    assert.equal((await request('GET', `/api/containers/${second.id}`)).json().isBusy, true);
+    assert.equal((await request('POST', `/api/targets/${first.id}/update-all`, { backup: false })).status, 202);
+    assert.equal((await request('POST', `/api/targets/${second.id}/update-all`, { backup: false })).status, 202);
+    assert.equal((await request('GET', `/api/targets/${second.id}`)).json().isBusy, true);
     upgrade.resolve({ output: 'done\n' });
     await app.updater.idle();
     assert.ok(shell.commands.some((c) => /pct exec 102 [\s\S]*apt-get -y/.test(c)), shell.commands.join('\n'));
@@ -1387,9 +1387,9 @@ describe('containers API', () => {
   it('lists applications in alphabetical order', async () => {
     const container = await addContainer();
     for (const name of ['ViaVersion', 'bluemap', 'Purpur']) {
-      await request('POST', `/api/containers/${container.id}/apps`, { name, latestSource: 'none' });
+      await request('POST', `/api/targets/${container.id}/apps`, { name, latestSource: 'none' });
     }
-    const apps = (await request('GET', `/api/containers/${container.id}`)).json().apps;
+    const apps = (await request('GET', `/api/targets/${container.id}`)).json().apps;
     assert.deepEqual(apps.map((a: { name: string }) => a.name), ['bluemap', 'Purpur', 'ViaVersion']);
   });
 
@@ -1398,16 +1398,16 @@ describe('containers API', () => {
     shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     await app.scheduler.checkAll();
     shell.commands.length = 0;
-    const response = await request('POST', '/api/containers/update-all');
+    const response = await request('POST', '/api/targets/update-all');
     assert.equal(response.status, 200);
-    assert.deepEqual(response.json(), { containers: 0, updates: 0 });
+    assert.deepEqual(response.json(), { targets: 0, updates: 0 });
     assert.equal(shell.commands.length, 0);
   });
 
   it('flags a container that needs a restart and restarts it', async () => {
     shell.on(/reboot-required/, { output: 'file libc6\nstale nginx\nstale sshd\n' });
     const container = await addContainer();
-    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.deepEqual(dto.restartReasons, ['Requested by package libc6', 'Processes use upgraded files: nginx, sshd']);
     // Not an error and not an update.
     assert.equal(dto.lastError, null);
@@ -1415,7 +1415,7 @@ describe('containers API', () => {
 
     shell.on(/^pct reboot 101 /, { output: '' });
     shell.on(/reboot-required/, { output: '' });
-    const response = await request('POST', `/api/containers/${container.id}/restart`);
+    const response = await request('POST', `/api/targets/${container.id}/restart`);
     assert.equal(response.status, 202);
     assert.equal(response.json().kind, 'restart');
     const run = await app.containers.wait(container.id);
@@ -1424,21 +1424,21 @@ describe('containers API', () => {
     // Detached, so it completes even when ReleaseWatcher runs in this container.
     assert.equal(shell.detached.at(-1)?.unit, `releasewatcher-run-${run?.id}-restart`);
     assert.match(shell.detached.at(-1)?.command ?? '', /^pct reboot 101 --timeout 120/);
-    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.deepEqual(dto.restartReasons, []);
     assert.equal(notifier.resultsSent.length, 0);
 
     // A stopped container has nothing to restart; its reasons are cleared by the next check.
     shell.on(/reboot-required/, { output: 'file\n' });
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
     shell.on(/^pct status 101$/, { output: 'status: stopped\n' });
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     await app.containers.wait(container.id);
-    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.deepEqual(dto.restartReasons, []);
-    assert.equal((await request('POST', `/api/containers/${container.id}/restart`)).status, 409);
-    assert.equal((await request('POST', '/api/containers/999/restart')).status, 404);
+    assert.equal((await request('POST', `/api/targets/${container.id}/restart`)).status, 409);
+    assert.equal((await request('POST', '/api/targets/999/restart')).status, 404);
   });
 
   it('reads the operating system and keeps it when a later probe fails', async () => {
@@ -1446,17 +1446,17 @@ describe('containers API', () => {
       output: 'PRETTY_NAME="Debian GNU/Linux 12 (bookworm)"\nNAME="Debian GNU/Linux"\nVERSION_ID="12"\nVERSION_CODENAME=bookworm\nID=debian\nRW_DEBIAN_VERSION=12.8\n',
     });
     const container = await addContainer();
-    let dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    let dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.os.label, 'Debian 12.8 (bookworm)');
     assert.equal(dto.os.versionId, '12');
     assert.equal(dto.os.pointVersion, '12.8');
     assert.equal(dto.lastError, null);
 
     shell.on(/debian_version/, { output: 'no os-release file\n', exitCode: 1 });
-    await request('POST', `/api/containers/${container.id}/check`);
+    await request('POST', `/api/targets/${container.id}/check`);
     const run = await app.containers.wait(container.id);
     assert.match(run?.output ?? '', /Could not read the operating system/);
-    dto = (await request('GET', `/api/containers/${container.id}`)).json();
+    dto = (await request('GET', `/api/targets/${container.id}`)).json();
     assert.equal(dto.os.label, 'Debian 12.8 (bookworm)');
     assert.equal(dto.lastError, null);
   });
@@ -1464,9 +1464,9 @@ describe('containers API', () => {
   it('schedules a restart of the Proxmox host only while nothing else runs', async () => {
     shell.on(/^hostname$/, { output: 'pve\n' });
     shell.on(/uname -r/, { output: 'kernel 6.8.12-4-pve 6.8.12-5-pve\n' });
-    const node = (await request('POST', '/api/containers/node')).json();
+    const node = (await request('POST', '/api/targets/node')).json();
     await app.containers.wait(node.id);
-    const dto = (await request('GET', `/api/containers/${node.id}`)).json();
+    const dto = (await request('GET', `/api/targets/${node.id}`)).json();
     assert.deepEqual(dto.restartReasons, ['Kernel 6.8.12-5-pve is installed, 6.8.12-4-pve is running']);
 
     // A check of another container is running → 409.
@@ -1477,15 +1477,15 @@ describe('containers API', () => {
       await gate;
       return { output: 'status: running\n' };
     });
-    await request('POST', `/api/containers/${container.id}/check`);
-    assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 409);
+    await request('POST', `/api/targets/${container.id}/check`);
+    assert.equal((await request('POST', `/api/targets/${node.id}/restart`)).status, 409);
     release();
     await app.containers.wait(container.id);
 
     shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
     shell.on(/^true$/, { output: '' });
     shell.commands.length = 0;
-    assert.equal((await request('POST', `/api/containers/${node.id}/restart`)).status, 202);
+    assert.equal((await request('POST', `/api/targets/${node.id}/restart`)).status, 202);
     const run = await app.containers.wait(node.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Restart scheduled/);
@@ -1500,7 +1500,7 @@ describe('containers API', () => {
 
   it('refuses container actions until the node is configured', async () => {
     shell.isConfigured = false;
-    assert.equal((await request('POST', '/api/containers', { vmid: 101 })).status, 409);
+    assert.equal((await request('POST', '/api/targets', { vmid: 101 })).status, 409);
   });
 
 });
@@ -1555,7 +1555,7 @@ describe('application detection API', () => {
   afterEach(() => app.close());
 
   const addContainer = async (vmid: number) => {
-    const container = (await request('POST', '/api/containers', { vmid })).json() as { id: number };
+    const container = (await request('POST', '/api/targets', { vmid })).json() as { id: number };
     await app.containers.wait(container.id);
     return container;
   };
@@ -1564,7 +1564,7 @@ describe('application detection API', () => {
     shell.on(/\/usr\/bin\/update/, { output: 'update\tct/vaultwarden.sh\nfile\t/root/.vaultwarden\t1.34.3\n' });
     const container = await addContainer(101);
 
-    let detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    let detected = await request('POST', `/api/targets/${container.id}/detect-apps`);
     assert.equal(detected.status, 200);
     assert.deepEqual(detected.json(), [
       {
@@ -1581,16 +1581,16 @@ describe('application detection API', () => {
     assert.deepEqual(fetchedSlugs, [], 'known applications need no download');
 
     const repo = (await request('POST', '/api/repositories', { repository: 'dani-garcia/vaultwarden' })).json();
-    detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    detected = await request('POST', `/api/targets/${container.id}/detect-apps`);
     assert.equal(detected.json()[0].repositoryId, repo.id);
     assert.equal(detected.json()[0].alreadyAdded, false);
 
-    await request('POST', `/api/containers/${container.id}/apps`, {
+    await request('POST', `/api/targets/${container.id}/apps`, {
       name: 'Password manager',
       latestSource: 'repository',
       repositoryId: repo.id,
     });
-    detected = await request('POST', `/api/containers/${container.id}/detect-apps`);
+    detected = await request('POST', `/api/targets/${container.id}/detect-apps`);
     assert.equal(detected.json()[0].alreadyAdded, true, 'the same repository counts as added under another name');
   });
 
@@ -1599,7 +1599,7 @@ describe('application detection API', () => {
     scripts.set('someapp', '# Source: https://github.com/acme/some-app\nAPP="SomeApp"\n');
     const container = await addContainer(101);
 
-    const detected = (await request('POST', `/api/containers/${container.id}/detect-apps`)).json();
+    const detected = (await request('POST', `/api/targets/${container.id}/detect-apps`)).json();
     assert.deepEqual(fetchedSlugs, ['someapp']);
     assert.equal(detected[0].name, 'SomeApp');
     assert.equal(detected[0].repository, 'acme/some-app');
@@ -1608,21 +1608,21 @@ describe('application detection API', () => {
 
   it('refuses stopped containers and the host, and reports node failures', async () => {
     const stopped = await addContainer(102);
-    const response = await request('POST', `/api/containers/${stopped.id}/detect-apps`);
+    const response = await request('POST', `/api/targets/${stopped.id}/detect-apps`);
     assert.equal(response.status, 409);
     assert.match(response.json().title, /stopped – start it/);
 
     shell.on(/pveversion|hostname/, { output: 'pve\n' });
-    const node = (await request('POST', '/api/containers/node')).json() as { id: number };
+    const node = (await request('POST', '/api/targets/node')).json() as { id: number };
     await app.containers.wait(node.id);
-    assert.equal((await request('POST', `/api/containers/${node.id}/detect-apps`)).status, 409);
+    assert.equal((await request('POST', `/api/targets/${node.id}/detect-apps`)).status, 409);
 
     const running = await addContainer(101);
     shell.on(/\/usr\/bin\/update/, { exitCode: 1, output: 'boom' });
-    const failed = await request('POST', `/api/containers/${running.id}/detect-apps`);
+    const failed = await request('POST', `/api/targets/${running.id}/detect-apps`);
     assert.equal(failed.status, 502);
     assert.match(failed.json().detail, /boom/);
 
-    assert.equal((await request('POST', '/api/containers/999/detect-apps')).status, 404);
+    assert.equal((await request('POST', '/api/targets/999/detect-apps')).status, 404);
   });
 });

@@ -189,7 +189,7 @@ describe('hosts API', () => {
     const key = await addKey(h);
     const host = (await h.request('POST', '/api/hosts', { type: 'proxmox', address: 'pve.lan', sshKeyId: key.id })).json();
     h.shell.on(/^hostname$/, { output: 'pve\n' });
-    assert.equal((await h.request('POST', '/api/containers/node')).status, 201);
+    assert.equal((await h.request('POST', '/api/targets/node')).status, 201);
     assert.equal((await h.request('GET', '/api/hosts')).json()[0].targetCount, 1);
     const response = await h.request('DELETE', `/api/hosts/${host.id}`);
     assert.equal(response.status, 409);
@@ -217,7 +217,7 @@ describe('hosts API', () => {
 
   it('needs a Proxmox host before guests can be added', async () => {
     const h = await start();
-    const response = await h.request('POST', '/api/containers', { vmid: 101 });
+    const response = await h.request('POST', '/api/targets', { vmid: 101 });
     assert.equal(response.status, 409);
     assert.equal((await h.request('GET', '/api/settings')).json().proxmox.configured, false);
   });
@@ -231,8 +231,8 @@ describe('moving the Proxmox settings into a host', () => {
     store.writeSetting('proxmoxPort', '2222');
     store.writeSetting('proxmoxUser', 'admin');
     store.writeSetting('proxmoxSshKey', TEST_PRIVATE_KEY);
-    store.database.run("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('lxc', 101, 'vw', 'x')");
-    store.database.run("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('node', 0, 'pve', 'x')");
+    store.database.run("INSERT INTO targets (kind, vmid, name, created_at) VALUES ('lxc', 101, 'vw', 'x')");
+    store.database.run("INSERT INTO targets (kind, vmid, name, created_at) VALUES ('node', 0, 'pve', 'x')");
     return store;
   };
 
@@ -248,13 +248,13 @@ describe('moving the Proxmox settings into a host', () => {
     assert.equal(store.readSettings()['proxmoxSshKey'], undefined);
     assert.equal(store.readSettings()['proxmoxHost'], undefined);
     assert.ok(new HostStore(store.database, store.secretBox).readMeta(PROXMOX_SEEDED_META));
-    const containers = (await h.request('GET', '/api/containers')).json();
+    const containers = (await h.request('GET', '/api/targets')).json();
     assert.ok(containers.every((c: { hostId?: number }) => c.hostId === undefined || c.hostId === hosts[0].id));
     assert.equal((await h.request('GET', '/api/settings')).json().proxmox.configured, true);
 
     // A host removed later is not created again on the next start.
-    await h.request('DELETE', `/api/containers/${containers[0].id}`);
-    await h.request('DELETE', `/api/containers/${containers[1].id}`);
+    await h.request('DELETE', `/api/targets/${containers[0].id}`);
+    await h.request('DELETE', `/api/targets/${containers[1].id}`);
     assert.equal((await h.request('DELETE', `/api/hosts/${hosts[0].id}`)).status, 204);
     await h.app.close();
     const again = await start({ store });
@@ -269,9 +269,9 @@ describe('moving the Proxmox settings into a host', () => {
 
     const store = new RepositoryStore(':memory:');
     const first = await start({ store });
-    store.database.run("INSERT INTO containers (kind, vmid, name, created_at) VALUES ('lxc', 105, 'cloud', 'x')");
+    store.database.run("INSERT INTO targets (kind, vmid, name, created_at) VALUES ('lxc', 105, 'cloud', 'x')");
     const host = (await first.request('POST', '/api/hosts', { type: 'proxmox', address: 'pve.lan' })).json();
-    const row = store.database.query<{ host_id: number }, []>('SELECT host_id FROM containers').get()!;
+    const row = store.database.query<{ host_id: number }, []>('SELECT host_id FROM targets').get()!;
     assert.equal(row.host_id, host.id);
   });
 });

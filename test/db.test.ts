@@ -264,7 +264,7 @@ describe('RepositoryStore installed version from machines', () => {
 
     // save() never overwrites the version read from the app with an older copy.
     const stale = repo(1);
-    store.database.exec("UPDATE container_apps SET installed_version = '1.3.0' WHERE id = 2");
+    store.database.exec("UPDATE target_apps SET installed_version = '1.3.0' WHERE id = 2");
     store.save(stale);
     assert.equal(repo(1).installedVersion, '1.3.0');
     store.close();
@@ -342,7 +342,7 @@ describe('Renamed columns', () => {
   });
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it('keeps tokens, package updates, app sources, runs and settings of older databases', () => {
+  it('keeps tokens, package updates, app sources, runs, settings and triggers of older databases', () => {
     const path = join(dir, 'old.db');
     const before = MIGRATIONS.findIndex((m) => m.includes('RENAME COLUMN github_token TO access_token'));
     const old = new Database(path);
@@ -357,6 +357,7 @@ describe('Renamed columns', () => {
       INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id) VALUES (1, 1, 'App', '${now}', 'github', 1);
       INSERT INTO container_runs (container_id, kind, trigger, status, started_at) VALUES (1, 'apt-upgrade', 'manual', 'success', '${now}');
       INSERT INTO settings (key, value) VALUES ('notifyAptUpdates', 'false');
+      UPDATE watched_repositories SET installed_app_id = 1 WHERE id = 1;
     `);
     old.close();
 
@@ -371,6 +372,9 @@ describe('Renamed columns', () => {
     assert.equal(containers.listApps(1)[0]!.latestSource, 'repository');
     assert.equal(containers.listRuns(1)[0]!.kind, 'packages-upgrade');
     assert.equal(store.readSettings()['notifyPackageUpdates'], 'false');
+    // The tables were renamed to targets, target_apps and target_runs; the triggers follow them.
+    store.database.exec("UPDATE target_apps SET installed_version = '9.0.0' WHERE id = 1");
+    assert.equal(store.get(1)!.installedVersion, '9.0.0');
     store.close();
   });
 });
@@ -382,7 +386,7 @@ describe('ContainerStore run output', () => {
     const container = containers.add(addProxmoxHost(store).id, 101, 'web');
     const log = Array.from({ length: 200 }, (_, i) => `Setting up package-${i} (1.${i}) …`).join('\n');
     const storedType = (id: number) =>
-      (store.database.query('SELECT typeof(output) AS t FROM container_runs WHERE id = ?').get(id) as { t: string }).t;
+      (store.database.query('SELECT typeof(output) AS t FROM target_runs WHERE id = ?').get(id) as { t: string }).t;
 
     const run = containers.startRun(container.id, null, 'packages-upgrade', 'manual');
     containers.saveRunOutput(run.id, log);
@@ -394,8 +398,8 @@ describe('ContainerStore run output', () => {
     // A run finished before compression existed is packed at startup; short output stays text.
     const old = containers.startRun(container.id, null, 'check', 'manual');
     const short = containers.startRun(container.id, null, 'check', 'manual');
-    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = ? WHERE id = ?`, [log, old.id]);
-    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = 'ok' WHERE id = ?`, [short.id]);
+    store.database.run(`UPDATE target_runs SET status = 'succeeded', output = ? WHERE id = ?`, [log, old.id]);
+    store.database.run(`UPDATE target_runs SET status = 'succeeded', output = 'ok' WHERE id = ?`, [short.id]);
     assert.equal(containers.packFinishedOutputs(), 1);
     assert.equal(storedType(old.id), 'blob');
     assert.equal(containers.getRun(old.id)?.output, log);

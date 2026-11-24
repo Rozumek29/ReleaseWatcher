@@ -64,7 +64,7 @@ export interface WatchedRepository extends RepositoryRef {
   icon: string | null;
 }
 
-/** An app on a machine: an application of a target (`container_apps`) or a Docker container (`docker_containers`). */
+/** An app on a machine: an application of a target (`target_apps`) or a Docker container (`docker_containers`). */
 export interface MachineAppRef {
   kind: 'app' | 'docker';
   id: number;

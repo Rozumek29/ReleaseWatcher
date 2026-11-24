@@ -271,7 +271,7 @@ export class ApiService {
 
   /** Guests of a Proxmox node (null = the default node). */
   discoverContainers(hostId: number | null = null): Observable<DiscoveredContainer[]> {
-    return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/containers${hostQuery(hostId)}`);
+    return this.http.get<DiscoveredContainer[]>(`${this.baseUrl}/proxmox/guests${hostQuery(hostId)}`);
   }
 
   /** Storages of a Proxmox node that accept backups (null = the default node). */
@@ -280,37 +280,37 @@ export class ApiService {
   }
 
   getContainers(): Observable<Container[]> {
-    return this.http.get<Container[]>(`${this.baseUrl}/containers`);
+    return this.http.get<Container[]>(`${this.baseUrl}/targets`);
   }
 
   getContainer(id: number): Observable<Container> {
-    return this.http.get<Container>(`${this.baseUrl}/containers/${id}`);
+    return this.http.get<Container>(`${this.baseUrl}/targets/${id}`);
   }
 
   addContainer(vmid: number, name: string | null = null, hostId: number | null = null): Observable<Container> {
-    return this.http.post<Container>(`${this.baseUrl}/containers`, hostId === null ? { vmid, name } : { vmid, name, hostId });
+    return this.http.post<Container>(`${this.baseUrl}/targets`, hostId === null ? { vmid, name } : { vmid, name, hostId });
   }
 
   updateContainer(id: number, request: UpdateContainerRequest): Observable<Container> {
-    return this.http.put<Container>(`${this.baseUrl}/containers/${id}`, request);
+    return this.http.put<Container>(`${this.baseUrl}/targets/${id}`, request);
   }
 
   deleteContainer(id: number): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/containers/${id}`);
+    return this.http.delete<void>(`${this.baseUrl}/targets/${id}`);
   }
 
   /** Adds the Proxmox host itself as a target (apt check and dist-upgrade). */
   addNode(hostId: number | null = null): Observable<Container> {
-    return this.http.post<Container>(`${this.baseUrl}/containers/node${hostQuery(hostId)}`, {});
+    return this.http.post<Container>(`${this.baseUrl}/targets/node${hostQuery(hostId)}`, {});
   }
 
   /** Adds every container of the node that has not been added yet; returns the added ones. */
   addAllContainers(hostId: number | null = null): Observable<Container[]> {
-    return this.http.post<Container[]>(`${this.baseUrl}/containers/add-all${hostQuery(hostId)}`, {});
+    return this.http.post<Container[]>(`${this.baseUrl}/targets/add-all${hostQuery(hostId)}`, {});
   }
 
   checkAllContainers(): Observable<{ queued: number }> {
-    return this.http.post<{ queued: number }>(`${this.baseUrl}/containers/check-all`, {});
+    return this.http.post<{ queued: number }>(`${this.baseUrl}/targets/check-all`, {});
   }
 
   /**
@@ -318,9 +318,9 @@ export class ApiService {
    * `backup: false` skips backups; `true` backs up the containers set to back up before updates.
    */
   /** Updates the containers in `ids` (omitted = every container with pending updates) one after another. */
-  updateAllContainers(backup: boolean, ids?: number[]): Observable<{ containers: number; updates: number }> {
-    return this.http.post<{ containers: number; updates: number }>(
-      `${this.baseUrl}/containers/update-all`,
+  updateAllContainers(backup: boolean, ids?: number[]): Observable<{ targets: number; updates: number }> {
+    return this.http.post<{ targets: number; updates: number }>(
+      `${this.baseUrl}/targets/update-all`,
       ids ? { backup, ids } : { backup },
     );
   }
@@ -332,30 +332,30 @@ export class ApiService {
   runContainerUpdates(
     id: number,
     backup: boolean,
-  ): Observable<{ containers: number; updates: number }> {
-    return this.http.post<{ containers: number; updates: number }>(
-      `${this.baseUrl}/containers/${id}/update-all`,
+  ): Observable<{ targets: number; updates: number }> {
+    return this.http.post<{ targets: number; updates: number }>(
+      `${this.baseUrl}/targets/${id}/update-all`,
       { backup },
     );
   }
 
   checkContainer(id: number): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/check`, {});
+    return this.http.post<Run>(`${this.baseUrl}/targets/${id}/check`, {});
   }
 
   /** Restarts a container, or schedules a restart of the Proxmox host. */
   restartContainer(id: number): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/restart`, {});
+    return this.http.post<Run>(`${this.baseUrl}/targets/${id}/restart`, {});
   }
 
   /** Updates every Flatpak / Snap application of a machine; `backup` decides about a backup (vzdump) first. */
   updateAppStore(id: number, store: AppStore, backup: boolean): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/${store}-update`, { backup });
+    return this.http.post<Run>(`${this.baseUrl}/targets/${id}/${store}-update`, { backup });
   }
 
   /** `backup` decides about a backup (vzdump) before this update. */
   upgradePackages(id: number, backup: boolean): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/packages-upgrade`, { backup });
+    return this.http.post<Run>(`${this.baseUrl}/targets/${id}/packages-upgrade`, { backup });
   }
 
   /**
@@ -363,7 +363,7 @@ export class ApiService {
    * that can be installed from here). `backup` decides about a backup (vzdump) first.
    */
   updateHomeAssistant(id: number, backup: boolean, ids?: string[]): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${id}/home-assistant-update`, {
+    return this.http.post<Run>(`${this.baseUrl}/targets/${id}/home-assistant-update`, {
       backup,
       ...(ids ? { ids } : {}),
     });
@@ -371,11 +371,11 @@ export class ApiService {
 
   /** Applications found in a running container with their GitHub repository (suggestions, nothing is saved). */
   detectContainerApps(containerId: number): Observable<DetectedApp[]> {
-    return this.http.post<DetectedApp[]>(`${this.baseUrl}/containers/${containerId}/detect-apps`, {});
+    return this.http.post<DetectedApp[]>(`${this.baseUrl}/targets/${containerId}/detect-apps`, {});
   }
 
   addContainerApp(containerId: number, request: ContainerAppRequest): Observable<ContainerApp> {
-    return this.http.post<ContainerApp>(`${this.baseUrl}/containers/${containerId}/apps`, request);
+    return this.http.post<ContainerApp>(`${this.baseUrl}/targets/${containerId}/apps`, request);
   }
 
   updateContainerApp(
@@ -384,7 +384,7 @@ export class ApiService {
     request: ContainerAppRequest,
   ): Observable<ContainerApp> {
     return this.http.put<ContainerApp>(
-      `${this.baseUrl}/containers/${containerId}/apps/${appId}`,
+      `${this.baseUrl}/targets/${containerId}/apps/${appId}`,
       request,
     );
   }
@@ -392,18 +392,18 @@ export class ApiService {
   /** Sets the installed version of an app without a version command to its latest version. */
   markAppInstalled(containerId: number, appId: number): Observable<ContainerApp> {
     return this.http.post<ContainerApp>(
-      `${this.baseUrl}/containers/${containerId}/apps/${appId}/mark-installed`,
+      `${this.baseUrl}/targets/${containerId}/apps/${appId}/mark-installed`,
       {},
     );
   }
 
   deleteContainerApp(containerId: number, appId: number): Observable<void> {
-    return this.http.delete<void>(`${this.baseUrl}/containers/${containerId}/apps/${appId}`);
+    return this.http.delete<void>(`${this.baseUrl}/targets/${containerId}/apps/${appId}`);
   }
 
   /** `backup` decides about a backup (vzdump) before this update. */
   updateApp(containerId: number, appId: number, backup: boolean): Observable<Run> {
-    return this.http.post<Run>(`${this.baseUrl}/containers/${containerId}/apps/${appId}/update`, {
+    return this.http.post<Run>(`${this.baseUrl}/targets/${containerId}/apps/${appId}/update`, {
       backup,
     });
   }
@@ -411,7 +411,7 @@ export class ApiService {
   /** `cursor` = `nextCursor` of the previous page (null for the newest runs). */
   getContainerRuns(containerId: number, cursor: string | null = null): Observable<RunHistoryPage> {
     return this.http.get<RunHistoryPage>(
-      `${this.baseUrl}/containers/${containerId}/runs`,
+      `${this.baseUrl}/targets/${containerId}/runs`,
       cursor ? { params: { cursor } } : {},
     );
   }
