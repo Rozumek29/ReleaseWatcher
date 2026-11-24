@@ -515,6 +515,9 @@ export interface TargetCapabilities {
 }
 
 /** Operating system of a target, from `/etc/os-release`. */
+/** apt (Debian, Ubuntu), dnf/yum (Fedora, RHEL family), zypper (openSUSE), apk (Alpine), pacman (Arch). */
+export type PackageManager = 'apt' | 'dnf' | 'yum' | 'zypper' | 'apk' | 'pacman';
+
 export interface OsRelease {
   /** debian, ubuntu, alpine, haos… */
   id: string | null;
@@ -567,6 +570,8 @@ export interface Container {
   nextCheckAt: string | null;
   status: string | null;
   aptUpgradable: AptPackage[];
+  /** Package manager found by the last check; null = not checked yet (or none found). */
+  packageManager: PackageManager | null;
   /** Why a restart is needed (last check); empty = none. */
   restartReasons: string[];
   /** Operating system read by the last check; null = not read yet. */

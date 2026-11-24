@@ -5,7 +5,7 @@ export const TARGET_KINDS = ['lxc', 'vm', 'node', 'server'] as const;
 /**
  * `lxc` = a container managed through `pct exec`; `vm` = a virtual machine reached through the QEMU guest agent
  * (`qm guest exec`); `node` = the Proxmox host itself (apt only); `server` = a plain Linux machine reached over SSH
- * (apt and applications, commands run directly).
+ * (system packages and applications, commands run directly).
  */
 export type TargetKind = (typeof TARGET_KINDS)[number];
 export const GUEST_KINDS = ['lxc', 'vm'] as const satisfies readonly TargetKind[];
@@ -23,7 +23,7 @@ export interface TargetCapabilities {
   backup: 'vzdump' | null;
   /** The target can be started and shut down (status checks, "start when stopped"). */
   power: boolean;
-  /** apt can be switched off (false = the entry exists for apt, so apt is always on). */
+  /** The system packages can be switched off (false = the entry exists for them, so they are always checked). */
   aptOptional: boolean;
   /** CPU cores and memory can be raised for updates (`pct set`). */
   updateResources: boolean;
@@ -109,8 +109,10 @@ export interface Container {
   name: string;
   /** Disabled containers are skipped by scheduled checks. */
   isEnabled: boolean;
-  /** Check (and allow upgrading) apt packages. */
+  /** Check (and allow upgrading) the system packages (apt, dnf, zypper, apk, pacman …). */
   aptEnabled: boolean;
+  /** Package manager found by the last package check; null = not checked yet (or none found). */
+  packageManager: PackageManager | null;
   /** Back up (vzdump) before updates by default; null = use the global setting. */
   backupBeforeUpdate: boolean | null;
   /** Start the container for checks and updates when it is stopped, and shut it down again afterwards. */
@@ -392,18 +394,36 @@ const base64 = (text: string): string => Buffer.from(text, 'utf8').toString('bas
  * {@link detachedFollowCommand} reads its output (again, after a reconnect). Output goes to `<dir>/log`, the exit
  * code to `<dir>/rc`. With `tty` the command runs in a pseudo-terminal (`script` from util-linux) for interactive
  * scripts that write to /dev/tty. systemd stops it after `timeoutSeconds`. Directories older than a week are pruned.
+ * A machine without systemd (e.g. an Alpine server with OpenRC) starts it in a session of its own (`setsid`) under
+ * a small supervisor whose process ID goes to `<dir>/pid`: like systemd it stops the whole process group after
+ * `timeoutSeconds` and, when the command has finished, whatever it left running.
  */
 export function detachedStartCommand(unit: string, command: string, options: { tty: boolean; timeoutSeconds: number }): string {
   const dir = `${DETACHED_DIR}/${unit}`;
+  const seconds = Math.max(1, Math.round(options.timeoutSeconds));
   const run = options.tty ? `script -qefc 'sh ${dir}/command' /dev/null` : `sh ${dir}/command`;
   const wrapper = [`${run} </dev/null >${dir}/log 2>&1`, `echo $? >${dir}/rc.tmp && mv ${dir}/rc.tmp ${dir}/rc`].join('\n');
+  // `$$` is the supervisor, the leader of the process group setsid created.
+  const supervisor = [
+    `/bin/sh ${dir}/run &`,
+    'r=$!',
+    `(sleep ${seconds}; kill -TERM -$$) 2>/dev/null &`,
+    'wait "$r"',
+    'kill -TERM -$$ 2>/dev/null',
+  ].join('\n');
   return [
     `# releasewatcher detached ${unit}`,
     `find ${DETACHED_DIR} -mindepth 1 -maxdepth 1 -mtime +7 -exec rm -rf {} + 2>/dev/null`,
     `mkdir -p ${dir} && : >${dir}/log && rm -f ${dir}/rc || exit $?`,
     `printf %s '${base64(command)}' | base64 -d >${dir}/command || exit $?`,
     `printf %s '${base64(wrapper)}' | base64 -d >${dir}/run || exit $?`,
-    `systemd-run --quiet --collect --unit=${unit} -p RuntimeMaxSec=${Math.max(1, Math.round(options.timeoutSeconds))} /bin/sh ${dir}/run`,
+    `if [ -d /run/systemd/system ]; then`,
+    `  systemd-run --quiet --collect --unit=${unit} -p RuntimeMaxSec=${seconds} /bin/sh ${dir}/run`,
+    `else`,
+    `  printf %s '${base64(supervisor)}' | base64 -d >${dir}/supervise || exit $?`,
+    `  setsid /bin/sh ${dir}/supervise </dev/null >/dev/null 2>&1 &`,
+    `  echo $! >${dir}/pid`,
+    `fi`,
   ].join('\n');
 }
 
@@ -418,14 +438,23 @@ export function detachedFollowCommand(unit: string, token: string): string {
     `# releasewatcher follow ${unit}`,
     `[ -d ${dir} ] || { printf '\\n%s missing\\n' '${token}'; exit 0; }`,
     `pid=$(systemctl show -p MainPID --value ${unit} 2>/dev/null)`,
-    `if [ "\${pid:-0}" != 0 ]; then tail -c +1 -f --pid="$pid" ${dir}/log; else cat ${dir}/log; fi`,
+    // Started without systemd: the process ID from the pid file, while the process runs.
+    `if [ "\${pid:-0}" = 0 ] && [ -f ${dir}/pid ]; then pid=$(cat ${dir}/pid); kill -0 "$pid" 2>/dev/null || pid=0; fi`,
+    `if [ "\${pid:-0}" = 0 ]; then cat ${dir}/log`,
+    `elif tail --pid=1 -c 0 /dev/null >/dev/null 2>&1; then tail -c +1 -f --pid="$pid" ${dir}/log`,
+    // BusyBox tail cannot follow until a process ends: wait for it, then print the whole output.
+    `else while kill -0 "$pid" 2>/dev/null; do sleep 1; done; cat ${dir}/log; fi`,
     `if [ -f ${dir}/rc ]; then printf '\\n%s exit %s\\n' '${token}' "$(cat ${dir}/rc)"; else printf '\\n%s exit lost\\n' '${token}'; fi`,
   ].join('\n');
 }
 
-/** Node command stopping a detached unit (e.g. one stuck at an interactive prompt); its output stays readable. */
+/**
+ * Node command stopping a detached unit (e.g. one stuck at an interactive prompt); its output stays readable. Without
+ * systemd the session started by `setsid` is stopped (its whole process group).
+ */
 export const detachedStopCommand = (unit: string): string =>
-  `# releasewatcher stop ${unit}\nsystemctl stop ${unit} 2>/dev/null; true`;
+  `# releasewatcher stop ${unit}\nsystemctl stop ${unit} 2>/dev/null\n` +
+  `if [ -f ${DETACHED_DIR}/${unit}/pid ]; then kill -TERM "-$(cat ${DETACHED_DIR}/${unit}/pid)" 2>/dev/null; fi\ntrue`;
 
 /**
  * Environment set before every application update command so that scripts take their non-interactive path:
@@ -656,6 +685,22 @@ export const NODE_RESTART_COMMAND =
   '--timer-property=AccuracySec=1s systemctl reboot';
 
 /**
+ * Schedules a restart of a server: like {@link NODE_RESTART_COMMAND} with systemd, otherwise (e.g. Alpine with OpenRC)
+ * `reboot` after the same delay in a session of its own.
+ */
+export const MACHINE_RESTART_COMMAND = [
+  'if [ -d /run/systemd/system ]; then',
+  `  ${NODE_RESTART_COMMAND}`,
+  'else',
+  `  setsid sh -c 'sleep ${NODE_RESTART_DELAY_SECONDS}; reboot' </dev/null >/dev/null 2>&1 &`,
+  'fi',
+].join('\n');
+
+/** The command scheduling the restart of a target that restarts itself (`restart: 'machine'`). */
+export const machineRestartCommand = (kind: TargetKind): string =>
+  kind === 'node' ? NODE_RESTART_COMMAND : MACHINE_RESTART_COMMAND;
+
+/**
  * Node command backing up a guest with vzdump (snapshot mode – vzdump falls back to suspend mode when the
  * volumes cannot be snapshotted). zstd compression except on Proxmox Backup Server, which compresses itself.
  * Retention follows the prune settings of the storage.
@@ -721,16 +766,71 @@ export function parseDiscoverOutput(output: string): DiscoveredContainer[] {
 /** Parses `pct status <vmid>` ("status: running"). */
 export const parsePctStatus = (output: string): string | null => output.match(/status:\s*(\S+)/)?.[1] ?? null;
 
-/** Marker separating `apt-get update` noise from the package list. */
-export const APT_LIST_MARKER = '---releasewatcher-apt---';
+export const PACKAGE_MANAGERS = ['apt', 'dnf', 'yum', 'zypper', 'apk', 'pacman'] as const;
+/**
+ * Package manager of a target's system: `apt` (Debian, Ubuntu, Proxmox VE), `dnf` / `yum` (Fedora, RHEL, Rocky,
+ * AlmaLinux, CentOS), `zypper` (openSUSE, SLES), `apk` (Alpine) or `pacman` (Arch).
+ */
+export type PackageManager = (typeof PACKAGE_MANAGERS)[number];
+export const isPackageManager = (value: unknown): value is PackageManager =>
+  (PACKAGE_MANAGERS as readonly unknown[]).includes(value);
 
-export const APT_CHECK_SCRIPT = [
-  'command -v apt-get >/dev/null 2>&1 || { echo "apt-get is not available here (no Debian or Ubuntu)" >&2; exit 127; }',
-  'export DEBIAN_FRONTEND=noninteractive',
-  'apt-get -qq update',
-  `echo '${APT_LIST_MARKER}'`,
-  'apt list --upgradable 2>/dev/null',
-].join('\n');
+/** Name of the system packages of a target in labels: the package manager, or "System packages" before a check. */
+export const packageManagerLabel = (manager: PackageManager | null): string => manager ?? 'System packages';
+
+/**
+ * Marker separating the noise of refreshing the package lists from the list itself; the check prints it followed by
+ * the package manager (`<marker> apt`). dnf/yum print a second one (`<marker> installed`) before the installed versions.
+ */
+export const PACKAGE_LIST_MARKER = '---releasewatcher-packages---';
+
+const NO_PACKAGE_MANAGER = 'echo "No supported package manager found (apt, dnf, yum, zypper, apk or pacman)" >&2; exit 127';
+
+/** Sets `dup` on openSUSE Tumbleweed and Slowroll, which are upgraded with `zypper dup` instead of `zypper update`. */
+const ZYPPER_DUP = `dup=; case "$(. /etc/os-release 2>/dev/null; echo "$ID")" in *tumbleweed*|*slowroll*) dup=--dup ;; esac`;
+
+/**
+ * Finds the package manager, refreshes its package lists and prints the upgradable packages after
+ * {@link PACKAGE_LIST_MARKER} ({@link parsePackageCheck}). pacman refreshes a copy of its databases (like
+ * `checkupdates`), so the check never leaves the system in a partial upgrade.
+ */
+export const PACKAGES_CHECK_SCRIPT = String.raw`export LC_ALL=C
+if command -v apt-get >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get -qq update
+  echo '${PACKAGE_LIST_MARKER} apt'
+  apt list --upgradable 2>/dev/null
+elif command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+  if command -v dnf >/dev/null 2>&1; then pm=dnf; refresh=--refresh; else pm=yum; refresh=; fi
+  list=$($pm -q $refresh check-update); rc=$?
+  if [ "$rc" -ne 0 ] && [ "$rc" -ne 100 ]; then exit "$rc"; fi
+  echo "${PACKAGE_LIST_MARKER} $pm"
+  printf '%s\n' "$list"
+  echo '${PACKAGE_LIST_MARKER} installed'
+  printf '%s\n' "$list" | awk 'NF == 3 && index($1, ".") > 1 { print $1 }' |
+    xargs -r rpm -q --qf '%{NAME}.%{ARCH} %|EPOCH?{%{EPOCH}:}:{}|%{VERSION}-%{RELEASE}\n' 2>/dev/null
+  true
+elif command -v zypper >/dev/null 2>&1; then
+  zypper -n -q refresh >/dev/null || exit $?
+  ${ZYPPER_DUP}
+  echo '${PACKAGE_LIST_MARKER} zypper'
+  if [ -n "$dup" ]; then zypper -n -q list-updates --all; else zypper -n -q list-updates; fi
+elif command -v apk >/dev/null 2>&1; then
+  apk -q update >/dev/null || exit $?
+  echo '${PACKAGE_LIST_MARKER} apk'
+  apk version -l '<'
+elif command -v pacman >/dev/null 2>&1; then
+  db=$(mktemp -d) || exit $?
+  mkdir -p "$db/sync" && ln -s /var/lib/pacman/local "$db/local" && cp -p /var/lib/pacman/sync/*.db "$db/sync/" 2>/dev/null
+  pacman -Sy --dbpath "$db" --logfile /dev/null >/dev/null; rc=$?
+  if [ "$rc" -ne 0 ]; then rm -rf "$db"; exit "$rc"; fi
+  echo '${PACKAGE_LIST_MARKER} pacman'
+  pacman -Qu --dbpath "$db" 2>/dev/null
+  rm -rf "$db"
+  true
+else
+  ${NO_PACKAGE_MANAGER}
+fi`;
 
 /**
  * Upgrade of the Proxmox host. Proxmox VE must be upgraded with `dist-upgrade` (= `full-upgrade`): a plain
@@ -758,9 +858,13 @@ const STALE_PROCESSES_CHECK = String.raw`for d in /proc/[0-9]*; do
   fi
 done | sort -u`;
 
-/** Prints `kernel <running> <newest>` when a newer kernel than the running one is installed in /boot. */
+/**
+ * Prints `kernel <running> <newest>` when a newer kernel than the running one is installed in /boot. Only kernels
+ * named by their version count – Alpine (`vmlinuz-lts`) and Arch (`vmlinuz-linux`) name the file by flavour, Fedora
+ * adds a rescue kernel (`vmlinuz-0-rescue-…`).
+ */
 const KERNEL_CHECK = String.raw`running=$(uname -r)
-newest=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | sort -V | tail -n 1)
+newest=$(ls -1 /boot/vmlinuz-* 2>/dev/null | sed 's|^/boot/vmlinuz-||' | grep '^[0-9]' | grep -v rescue | sort -V | tail -n 1)
 if [ -n "$newest" ] && [ "$newest" != "$running" ]; then echo "kernel $running $newest"; fi`;
 
 export const RESTART_CHECK_SCRIPT = `${REBOOT_REQUIRED_FILE_CHECK}\n${STALE_PROCESSES_CHECK}\ntrue`;
@@ -910,9 +1014,12 @@ export const targetTitle = (c: Pick<Container, 'kind' | 'vmid' | 'name'>): strin
   return c.kind === 'server' ? label : label.charAt(0).toUpperCase() + label.slice(1);
 };
 
-/** apt upgrade run directly on a machine: `dist-upgrade` on a Proxmox node (required there), `upgrade` elsewhere. */
-export const machineAptUpgradeScript = (kind: TargetKind): string =>
-  kind === 'node' ? NODE_APT_UPGRADE_SCRIPT : APT_UPGRADE_SCRIPT;
+/**
+ * Package upgrade run directly on a machine: apt `dist-upgrade` on a Proxmox node (required there), otherwise the
+ * upgrade of the package manager found on the machine ({@link PACKAGES_UPGRADE_SCRIPT}).
+ */
+export const machinePackagesUpgradeScript = (kind: TargetKind): string =>
+  kind === 'node' ? NODE_APT_UPGRADE_SCRIPT : PACKAGES_UPGRADE_SCRIPT;
 
 export const APT_UPGRADE_SCRIPT = [
   'export DEBIAN_FRONTEND=noninteractive',
@@ -921,12 +1028,40 @@ export const APT_UPGRADE_SCRIPT = [
   'apt-get -y autoremove',
 ].join(' && ');
 
+/**
+ * Upgrades every package with the package manager found on the system, without questions: apt `upgrade` (as
+ * {@link APT_UPGRADE_SCRIPT}), `dnf upgrade` / `yum update`, `zypper update` (`zypper dup` on Tumbleweed and
+ * Slowroll), `apk upgrade` or `pacman -Syu` (keyrings first, so packages signed by new keys install on a system
+ * that was not upgraded for a while). Prints the command before running it.
+ */
+export const PACKAGES_UPGRADE_SCRIPT = String.raw`run() { echo "\$ $*"; "$@"; }
+if command -v apt-get >/dev/null 2>&1; then
+  echo '$ apt-get update && apt-get upgrade && apt-get autoremove'
+  ${APT_UPGRADE_SCRIPT}
+elif command -v dnf >/dev/null 2>&1; then
+  run dnf -y upgrade --refresh
+elif command -v yum >/dev/null 2>&1; then
+  run yum -y update
+elif command -v zypper >/dev/null 2>&1; then
+  ${ZYPPER_DUP}
+  run zypper -n refresh && if [ -n "$dup" ]; then run zypper -n dup --auto-agree-with-licenses; else run zypper -n update --auto-agree-with-licenses; fi
+elif command -v apk >/dev/null 2>&1; then
+  run apk update && run apk upgrade
+elif command -v pacman >/dev/null 2>&1; then
+  keyrings=$(pacman -Qq 2>/dev/null | grep -- '-keyring$' | tr '\n' ' ')
+  if [ -n "$keyrings" ]; then
+    run pacman -Sy --needed --noconfirm $keyrings && run pacman -Su --noconfirm
+  else
+    run pacman -Syu --noconfirm
+  fi
+else
+  ${NO_PACKAGE_MANAGER}
+fi`;
+
 const APT_LINE = /^([^\s/]+)\/\S+\s+(\S+)\s+\S+(?:\s+\[upgradable from:\s*([^\]\s]+)\])?/;
 
 /** Parses `apt list --upgradable` (lines like `curl/stable 8.1 amd64 [upgradable from: 8.0]`). */
-export function parseAptUpgradable(output: string): AptPackage[] {
-  const markerAt = output.indexOf(APT_LIST_MARKER);
-  const list = markerAt === -1 ? output : output.slice(markerAt + APT_LIST_MARKER.length);
+export function parseAptUpgradable(list: string): AptPackage[] {
   const packages: AptPackage[] = [];
   for (const line of list.split('\n')) {
     const match = line.trim().match(APT_LINE);
@@ -935,6 +1070,133 @@ export function parseAptUpgradable(output: string): AptPackage[] {
     }
   }
   return packages;
+}
+
+/** Sections ending a `dnf check-update` list (obsoleted packages are upgraded together with their replacements). */
+const RPM_LIST_END = /^(Obsoleting packages|Security:)/i;
+
+/**
+ * Parses `dnf check-update` / `yum check-update` (`name.arch  version  repository`; yum wraps long names onto their
+ * own line) with the installed versions printed by `rpm -q` after the `installed` marker (`name.arch version`).
+ */
+export function parseRpmUpdates(list: string, installed: string): AptPackage[] {
+  const current = new Map<string, string>();
+  for (const line of installed.split('\n')) {
+    const [nameArch, version, ...rest] = line.trim().split(/\s+/);
+    if (nameArch && version && rest.length === 0) {
+      current.set(nameArch, version);
+    }
+  }
+  const packages: AptPackage[] = [];
+  const lines = list.split('\n').map((l) => l.trim());
+  for (let i = 0; i < lines.length; i++) {
+    if (RPM_LIST_END.test(lines[i]!)) {
+      break;
+    }
+    let tokens = lines[i]!.split(/\s+/).filter(Boolean);
+    if (tokens.length === 1) {
+      const next = (lines[i + 1] ?? '').split(/\s+/).filter(Boolean);
+      if (next.length === 2) {
+        tokens = [tokens[0]!, ...next];
+        i++;
+      }
+    }
+    const [nameArch, version, repository] = tokens;
+    const dot = nameArch?.lastIndexOf('.') ?? -1;
+    if (tokens.length !== 3 || !nameArch || !version || !repository || dot < 1 || !/\d/.test(version)) {
+      continue;
+    }
+    packages.push({ name: nameArch.slice(0, dot), newVersion: version, currentVersion: current.get(nameArch) ?? null });
+  }
+  return packages;
+}
+
+/**
+ * Parses the table of `zypper list-updates` (`S | Repository | Name | Current Version | Available Version | Arch`);
+ * the columns are found by their (English, `LC_ALL=C`) headings.
+ */
+export function parseZypperUpdates(list: string): AptPackage[] {
+  const rows = list.split('\n').map((line) => line.split('|').map((cell) => cell.trim()));
+  const header = rows.find((cells) => cells.includes('Name') && cells.includes('Available Version'));
+  if (!header) {
+    return [];
+  }
+  const column = (name: string) => header.indexOf(name);
+  const [name, current, available] = [column('Name'), column('Current Version'), column('Available Version')];
+  const packages: AptPackage[] = [];
+  for (const cells of rows) {
+    if (cells === header || cells.length !== header.length) {
+      continue;
+    }
+    const pkg = cells[name];
+    const newVersion = cells[available];
+    if (pkg && newVersion && !/^-+$/.test(pkg)) {
+      packages.push({ name: pkg, newVersion, currentVersion: (current === -1 ? null : cells[current]) || null });
+    }
+  }
+  return packages;
+}
+
+const APK_LINE = /^(\S+?)-(\d[^-\s]*-r\d+)\s+<\s+(\S+)/;
+
+/** Parses `apk version -l '<'` (lines like `busybox-1.36.1-r15   < 1.36.1-r16`). */
+export function parseApkUpdates(list: string): AptPackage[] {
+  const packages: AptPackage[] = [];
+  for (const line of list.split('\n')) {
+    const match = line.trim().match(APK_LINE);
+    if (match) {
+      packages.push({ name: match[1]!, currentVersion: match[2]!, newVersion: match[3]! });
+    }
+  }
+  return packages;
+}
+
+const PACMAN_LINE = /^(\S+)\s+(\S+)\s+->\s+(\S+)/;
+
+/** Parses `pacman -Qu` (lines like `linux 6.11.1.arch1-1 -> 6.11.2.arch1-1`). */
+export function parsePacmanUpdates(list: string): AptPackage[] {
+  const packages: AptPackage[] = [];
+  for (const line of list.split('\n')) {
+    const match = line.trim().match(PACMAN_LINE);
+    if (match) {
+      packages.push({ name: match[1]!, currentVersion: match[2]!, newVersion: match[3]! });
+    }
+  }
+  return packages;
+}
+
+/** Result of {@link PACKAGES_CHECK_SCRIPT}. */
+export interface PackageCheck {
+  manager: PackageManager;
+  packages: AptPackage[];
+}
+
+/**
+ * Parses the output of {@link PACKAGES_CHECK_SCRIPT}: the package manager named by the marker line and its
+ * upgradable packages. Null when the output has no marker (the script did not get that far).
+ */
+export function parsePackageCheck(output: string): PackageCheck | null {
+  const markers = [...output.matchAll(new RegExp(`^${PACKAGE_LIST_MARKER} (\\S+)\\s*$`, 'gm'))];
+  const first = markers[0];
+  const manager = first?.[1];
+  if (!first || !isPackageManager(manager)) {
+    return null;
+  }
+  const start = first.index + first[0].length;
+  const installedMarker = markers.find((m) => m[1] === 'installed');
+  const list = output.slice(start, installedMarker?.index ?? output.length);
+  const installed = installedMarker ? output.slice(installedMarker.index + installedMarker[0].length) : '';
+  const packages =
+    manager === 'apt'
+      ? parseAptUpgradable(list)
+      : manager === 'dnf' || manager === 'yum'
+        ? parseRpmUpdates(list, installed)
+        : manager === 'zypper'
+          ? parseZypperUpdates(list)
+          : manager === 'apk'
+            ? parseApkUpdates(list)
+            : parsePacmanUpdates(list);
+  return { manager, packages };
 }
 
 /** First non-empty output line – how a version command reports its result. */

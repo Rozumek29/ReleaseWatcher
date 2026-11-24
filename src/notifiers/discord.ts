@@ -18,6 +18,7 @@ import {
   severityLabel,
   type UpdateResultNotification,
   type VulnerabilityNotification,
+  packageManagerName,
 } from './notifier.ts';
 
 /** Author icon of a repository embed: its custom icon (Discord shows no SVG) or the owner's avatar. */
@@ -207,7 +208,7 @@ export function buildContainerPayload(
     if (lines.length > 0) {
       lines.push('');
     }
-    lines.push(`**apt** – ${notification.aptPackages.length} package(s):`);
+    lines.push(`**${packageManagerName(notification)}** – ${notification.aptPackages.length} package(s):`);
     for (const pkg of notification.aptPackages.slice(0, MAX_LISTED)) {
       lines.push(`• ${pkg.name} ${pkg.currentVersion ? `${pkg.currentVersion} → ` : ''}${pkg.newVersion}`);
     }
@@ -316,7 +317,7 @@ export function buildDigestPayload(
         const { updates } = event;
         const parts = [
           ...updates.apps.map((a) => `${a.name} ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`),
-          ...(updates.aptPackages.length > 0 ? [`${updates.aptPackages.length} apt package(s)`] : []),
+          ...(updates.aptPackages.length > 0 ? [`${updates.aptPackages.length} ${packageManagerName(updates)} package(s)`] : []),
         ];
         containers.push(`• **${targetName(updates)}**: ${parts.join(', ')}`);
         break;

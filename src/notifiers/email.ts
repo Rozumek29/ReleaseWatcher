@@ -18,6 +18,7 @@ import {
   severityLabel,
   type UpdateResultNotification,
   type VulnerabilityNotification,
+  packageManagerName,
 } from './notifier.ts';
 import { sendMail, type SmtpServer } from './smtp.ts';
 
@@ -216,7 +217,7 @@ function containerSection(notification: ContainerUpdatesNotification): Section {
   const appLines = notification.apps.map((a) => `${a.name}: ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`);
   const packages = notification.aptPackages.slice(0, MAX_LISTED).map((p) => `${p.name} ${p.currentVersion ? `${p.currentVersion} → ` : ''}${p.newVersion}`);
   const more = notification.aptPackages.length - packages.length;
-  const aptTitle = `apt – ${notification.aptPackages.length} package(s)`;
+  const aptTitle = `${packageManagerName(notification)} – ${notification.aptPackages.length} package(s)`;
 
   const text: string[] = [`${target}: updates available`];
   if (appLines.length > 0) text.push('', ...appLines);

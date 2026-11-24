@@ -15,6 +15,7 @@ import {
   type UpdateResultNotification,
   updateLabel,
   type VulnerabilityNotification,
+  packageManagerName,
 } from './notifier.ts';
 
 /**
@@ -133,7 +134,7 @@ function containerMessage(n: ContainerUpdatesNotification, options: MessageOptio
     const listed = n.aptPackages.slice(0, MAX_LISTED);
     const more = n.aptPackages.length - listed.length;
     sections.push({
-      heading: `apt – ${n.aptPackages.length} package(s)`,
+      heading: `${packageManagerName(n)} – ${n.aptPackages.length} package(s)`,
       lines: [
         ...listed.map((p) => ({ text: `${p.name} ${p.currentVersion ? `${p.currentVersion} → ` : ''}${p.newVersion}` })),
         ...(more > 0 ? [{ text: `… and ${more} more` }] : []),
@@ -210,7 +211,7 @@ function digestMessage(events: readonly NotificationEvent[], options: MessageOpt
         const u = event.updates;
         const parts = [
           ...u.apps.map((a) => `${a.name} ${a.installedVersion ?? '?'} → ${a.latestVersion ?? '?'}`),
-          ...(u.aptPackages.length > 0 ? [`${u.aptPackages.length} apt package(s)`] : []),
+          ...(u.aptPackages.length > 0 ? [`${u.aptPackages.length} ${packageManagerName(u)} package(s)`] : []),
         ];
         containers.push({ text: `${targetName(u)}: ${parts.join(', ')}` });
         break;

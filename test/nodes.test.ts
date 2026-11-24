@@ -4,11 +4,11 @@ import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
-import { APT_LIST_MARKER } from '../src/proxmox/domain.ts';
+import { PACKAGE_LIST_MARKER } from '../src/proxmox/domain.ts';
 import { SettingsService } from '../src/settings.ts';
 import { FakeKeyTool, FakeShell, FakeSource, RecordingNotifier, TEST_PRIVATE_KEY } from './helpers.ts';
 
-const APT_OUTPUT = `${APT_LIST_MARKER}\nListing...\ncurl/stable 8.1 amd64 [upgradable from: 8.0]\n`;
+const APT_OUTPUT = `${PACKAGE_LIST_MARKER} apt\nListing...\ncurl/stable 8.1 amd64 [upgradable from: 8.0]\n`;
 const pctList = (name: string) => `VMID       Status     Lock         Name\n100        running                 ${name}\n`;
 
 /** A fake Proxmox node: `pct list` with CT 100, its own hostname. */

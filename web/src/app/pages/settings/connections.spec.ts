@@ -134,7 +134,7 @@ describe('ConnectionsPanel', () => {
     await settle(fixture);
     // A server is the default choice.
     expect(el.querySelector('app-host-dialog h2')?.textContent).toContain('Add host');
-    expect(el.querySelector('app-host-dialog .head-text p')?.textContent).toContain('apt');
+    expect(el.querySelector('app-host-dialog .head-text p')?.textContent).toContain('system packages');
     const address = el.querySelector<HTMLInputElement>('#host-address')!;
     address.value = 'vps.example.com';
     address.dispatchEvent(new Event('input'));

@@ -24,7 +24,7 @@
           <div class="switches">
             <app-switch label="Active (scheduled checks)" [checked]="isEnabled" (toggled)="isEnabled = !isEnabled" />
             @if (c.capabilities.aptOptional) {
-              <app-switch label="apt packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
+              <app-switch label="System packages" [checked]="aptEnabled" (toggled)="aptEnabled = !aptEnabled" />
             }
             <app-switch
               label="Docker containers"
@@ -43,8 +43,8 @@
           } @else if (c.kind === 'server') {
             <p class="group-hint">
               Commands run directly on the server over SSH ({{ c.hostName }} – address and key under Settings →
-              Connections). apt is checked with <code>apt list --upgradable</code> and upgraded with
-              <code>apt-get upgrade</code>, without a backup. The server is never rebooted automatically – a restart is
+              Connections). System packages are checked and upgraded with the package manager found on it (apt, dnf,
+              yum, zypper, apk or pacman), without a backup. The server is never rebooted automatically – a restart is
               offered when one is needed.
             </p>
           } @else {

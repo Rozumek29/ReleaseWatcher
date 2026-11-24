@@ -5,11 +5,11 @@ import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
 import { targetName } from '../src/notifiers/notifier.ts';
-import { APT_LIST_MARKER, appUpdateScript, capabilities, machineAptUpgradeScript, machineExec } from '../src/proxmox/domain.ts';
+import { MACHINE_RESTART_COMMAND, PACKAGE_LIST_MARKER, PACKAGES_UPGRADE_SCRIPT, appUpdateScript, capabilities, machinePackagesUpgradeScript, machineExec } from '../src/proxmox/domain.ts';
 import { SettingsService } from '../src/settings.ts';
 import { addProxmoxHost, FakeKeyTool, FakeShell, FakeSource, RecordingNotifier, TEST_PRIVATE_KEY } from './helpers.ts';
 
-const APT_OUTPUT = `${APT_LIST_MARKER}\nListing...\nnginx/stable 1.26.1 amd64 [upgradable from: 1.26.0]\n`;
+const APT_OUTPUT = `${PACKAGE_LIST_MARKER} apt\nListing...\nnginx/stable 1.26.1 amd64 [upgradable from: 1.26.0]\n`;
 
 describe('servers', () => {
   let app: App;
@@ -85,6 +85,35 @@ describe('servers', () => {
     assert.deepEqual((await request('POST', '/api/containers/check-all')).json(), { queued: 1 });
   });
 
+  it('checks and upgrades a server with another package manager (dnf) and names it in notifications', async () => {
+    const dnf = [
+      `${PACKAGE_LIST_MARKER} dnf`,
+      '',
+      'openssl-libs.x86_64     1:3.2.4-1.fc41     updates',
+      `${PACKAGE_LIST_MARKER} installed`,
+      'openssl-libs.x86_64 1:3.2.2-9.fc41',
+    ].join('\n');
+    shell.on(/apt list --upgradable/, { output: dnf });
+    const { target } = await addServer();
+    assert.equal(target.packageManager, 'dnf');
+    assert.deepEqual(target.aptUpgradable, [{ name: 'openssl-libs', newVersion: '1:3.2.4-1.fc41', currentVersion: '1:3.2.2-9.fc41' }]);
+    assert.equal(notifier.containerSent.at(-1)?.packageManager, 'dnf');
+
+    shell.on(/dnf -y upgrade/, { output: 'Complete!\n' });
+    assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`)).status, 202);
+    const run = await app.containers.wait(target.id);
+    assert.equal(run?.status, 'succeeded', run?.output ?? '');
+    assert.match(run?.output ?? '', /Upgrading the system packages of Hetzner VPS \(no backup\)/);
+    assert.equal(shell.detached.at(-1)?.command, PACKAGES_UPGRADE_SCRIPT);
+  });
+
+  it('reports a machine without a supported package manager', async () => {
+    shell.on(/apt list --upgradable/, { exitCode: 127, output: 'No supported package manager found (apt, dnf, yum, zypper, apk or pacman)\n' });
+    const { target } = await addServer();
+    assert.equal(target.packageManager, null);
+    assert.match(target.lastError, /^System packages: .*No supported package manager found/);
+  });
+
   it('upgrades apt with apt-get upgrade and runs application updates on the server itself', async () => {
     const { target } = await addServer();
     assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`, { backup: true })).status, 409);
@@ -92,7 +121,7 @@ describe('servers', () => {
     assert.equal((await request('POST', `/api/containers/${target.id}/apt-upgrade`)).status, 202);
     const apt = await app.containers.wait(target.id);
     assert.equal(apt?.status, 'succeeded', apt?.output ?? '');
-    assert.equal(shell.detached.at(-1)?.command, machineAptUpgradeScript('server'));
+    assert.equal(shell.detached.at(-1)?.command, machinePackagesUpgradeScript('server'));
 
     const added = await request('POST', `/api/containers/${target.id}/apps`, {
       name: 'Gitea',
@@ -105,7 +134,7 @@ describe('servers', () => {
     assert.equal(added.status, 201);
     shell.on(/gitea --version/, { output: '1.22.0\n' }).on(/echo 1\.23\.0/, { output: '1.23.0\n' });
     shell.on(/update-gitea/, { output: 'Updated.\n' });
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     await request('POST', `/api/containers/${target.id}/check`);
     await app.containers.wait(target.id);
     const updateAll = await request('POST', '/api/containers/update-all', {});
@@ -121,14 +150,14 @@ describe('servers', () => {
   it('restarts a server and checks it once it answers again; tasks on other hosts do not block it', async () => {
     addProxmoxHost(store);
     const { target } = await addServer();
-    shell.on(/^systemd-run .*systemctl reboot$/, { output: '' });
+    shell.on(/systemd-run .*systemctl reboot/, { output: '' });
     shell.commands.length = 0;
     assert.equal((await request('POST', `/api/containers/${target.id}/restart`)).status, 202);
     const run = await app.containers.wait(target.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
     assert.match(run?.output ?? '', /Restart scheduled – Hetzner VPS is unavailable[\s\S]*Hetzner VPS is back[\s\S]*Checking Hetzner VPS again/);
     assert.deepEqual(shell.commands.slice(0, 2), [
-      'systemd-run --quiet --unit=releasewatcher-host-restart --on-active=15 --timer-property=AccuracySec=1s systemctl reboot',
+      MACHINE_RESTART_COMMAND,
       'true',
     ]);
 

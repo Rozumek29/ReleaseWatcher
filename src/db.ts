@@ -534,6 +534,11 @@ const MIGRATIONS: readonly string[] = [
    ALTER TABLE account ADD COLUMN oidc_subject TEXT;
    ALTER TABLE account ADD COLUMN oidc_label TEXT;
    ALTER TABLE account ADD COLUMN oidc_linked_at TEXT;`,
+  // Package manager of a target found by the last check (apt, dnf, yum, zypper, apk, pacman). Until now only apt was
+  // checked, so targets whose apt check worked use apt.
+  `ALTER TABLE containers ADD COLUMN package_manager TEXT;
+   UPDATE containers SET package_manager = 'apt'
+    WHERE apt_enabled = 1 AND last_checked_at IS NOT NULL AND (last_error IS NULL OR last_error NOT LIKE '%apt:%');`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

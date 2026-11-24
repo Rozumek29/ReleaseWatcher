@@ -49,13 +49,18 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 ### Background work
 
-- Long operations (container checks, apt upgrades, app updates) are **runs**: the endpoint starts them and
+- Long operations (container checks, package upgrades, app updates) are **runs**: the endpoint starts them and
   returns `202 Accepted` with the run DTO and a `Location: /api/runs/:id` header; the UI polls the run.
   Reuse this pattern for anything that can take more than a couple of seconds.
 - Long commands on the node (backups, upgrades, updates) run **detached** as transient systemd units
   (`detachedStartCommand` → `detachedFollowCommand` in `proxmox/domain.ts`): the SSH connection only streams their
   output, reconnects re-read it, and the step is stored on the run (`resume`) so a restarted process re-attaches
   (`ContainerService.recover()`). Use `execDetached()` for any new node command that can outlive a connection.
+  Servers without systemd (e.g. Alpine with OpenRC) get the same behaviour from a `setsid` supervisor (pid file,
+  process-group kill at the timeout), so scripts that run on a server must stay POSIX `sh` and BusyBox compatible.
+- System packages are handled by whichever package manager a check finds (`PACKAGES_CHECK_SCRIPT` /
+  `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); the API keeps the historical `apt*` names
+  (`aptEnabled`, `aptUpgradable`, `apt-upgrade`) and adds `packageManager`.
 - State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
   cleared after undoing it, so a restart can finish the job.
 - At most one task per container at a time (`ContainerService`); schedulers only check, never update.

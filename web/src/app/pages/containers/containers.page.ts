@@ -28,7 +28,7 @@ import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { AptPackages } from './apt-packages';
 import { ContainerSettingsDialog } from './container-settings.dialog';
 import { RunLogDialog, RunLogTarget } from './run-log.dialog';
-import { kindLabel, targetLabel } from './target';
+import { kindLabel, packagesLabel, targetLabel, upgradeCommand } from './target';
 
 /** How often the list is refreshed while a container reports a running task. */
 const BUSY_REFRESH_MS = 3000;
@@ -122,6 +122,8 @@ export class ContainersPage {
   /** "Add server" dialog (a new server host gets its target right away). */
   protected readonly addingServer = signal<HostDialogData | null>(null);
   protected readonly label = targetLabel;
+  protected readonly packagesLabel = packagesLabel;
+  protected readonly upgradeCommand = upgradeCommand;
   /** Containers "Update all" would update (same rules as the server: no host, no disabled or blocked ones). */
   protected readonly updatable = computed(() =>
     this.containers().filter((c) => this.pendingCount(c) > 0),

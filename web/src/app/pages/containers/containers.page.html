@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
     <h1>Machines</h1>
-    <p>Proxmox guests and servers: pending apt packages and application updates.</p>
+    <p>Proxmox guests and servers: pending system packages and application updates.</p>
   </div>
   <div class="header-actions">
     @if (picked() !== null) {
@@ -26,7 +26,7 @@
         class="btn btn-sm"
         (click)="updateAll()"
         [disabled]="pickedUpdatable().length === 0"
-        title="Updates the selected containers one after another: apt, then applications"
+        title="Updates the selected containers one after another: system packages, then applications"
       >
         <app-icon name="arrowUp" [size]="14" /> Update {{ pickedUpdatable().length }}
       </button>
@@ -40,7 +40,7 @@
         class="btn btn-secondary"
         (click)="startPicking()"
         [disabled]="updatingAll() || !anyConfigured() || updatable().length === 0"
-        [title]="updatable().length === 0 ? 'No container has pending updates' : 'Choose containers for apt upgrade and application updates (not the Proxmox host)'"
+        [title]="updatable().length === 0 ? 'No container has pending updates' : 'Choose containers for package upgrades and application updates (not the Proxmox host)'"
       >
         <app-icon [name]="updatingAll() ? 'refresh' : 'arrowUp'" [size]="16" [class.spin]="updatingAll()" />
         {{ updatingAll() ? 'Updating…' : 'Update' }}
@@ -110,7 +110,7 @@
       @if (selectedKind() === 'vm') {
         <p class="muted small vm-hint">
           Virtual machines are reached through the QEMU guest agent: install <code>qemu-guest-agent</code> in the VM and
-          enable “QEMU Guest Agent” in its Proxmox options. Appliances without apt (e.g. Home Assistant OS) only get
+          enable “QEMU Guest Agent” in its Proxmox options. Appliances without a package manager (e.g. Home Assistant OS) only get
           restarts and your own application commands.
         </p>
       }
@@ -120,7 +120,7 @@
         <span>
           <app-icon name="server" [size]="14" />
           <strong>Proxmox host</strong>
-          <span class="muted">– apt updates of the node itself (no applications)</span>
+          <span class="muted">– package updates of the node itself (no applications)</span>
         </span>
         <button type="button" class="btn btn-secondary" (click)="addNode()" [disabled]="adding()">Add host</button>
       </div>
@@ -142,7 +142,7 @@
     <span class="empty-icon"><app-icon name="box" [size]="22" /></span>
     <h2>No containers yet</h2>
     <p>
-      Add the Proxmox node under Settings → Connections and then its containers, or add a server to watch its apt
+      Add the Proxmox node under Settings → Connections and then its containers, or add a server to watch its system
       packages and applications.
     </p>
   </div>
@@ -390,7 +390,7 @@
                     class="btn btn-sm"
                     (click)="ask('update-' + c.id, c)"
                     [disabled]="isBusy(c) || !c.configured"
-                    title="apt upgrade and all application updates of this container, one after another"
+                    title="Package upgrade and all application updates of this container, one after another"
                   >
                     <app-icon name="arrowUp" [size]="14" />
                     Update all ({{ pendingCount(c) }})
@@ -428,7 +428,7 @@
                 </span>
               } @else {
                 <span>
-                  The container is stopped, so apt and applications are not checked and updates cannot run – it is not
+                  The container is stopped, so packages and applications are not checked and updates cannot run – it is not
                   started automatically. Results below are from the last check while it was running.
                   <button type="button" class="link-btn" (click)="editing.set(c)">Allow a temporary start</button>
                 </span>
@@ -476,7 +476,7 @@
             @if (c.aptEnabled) {
               <div class="item">
                 <div class="item-main">
-                  <span class="item-name"><app-icon name="download" [size]="14" /> apt</span>
+                  <span class="item-name"><app-icon name="download" [size]="14" /> {{ packagesLabel(c) }}</span>
                   @if (c.aptUpgradable.length > 0) {
                     <button type="button" class="link-btn" (click)="toggleExpanded(c.id)" [attr.aria-expanded]="expanded().has(c.id)">
                       {{ c.aptUpgradable.length }} upgradable package(s)
@@ -490,7 +490,7 @@
                     @if (confirming() === 'apt-' + c.id) {
                       <span class="confirm-text warn">Upgrade {{ c.aptUpgradable.length }} package(s)?</span>
                       @if (!c.capabilities.backup) {
-                        <span class="muted small">apt-get {{ c.kind === 'node' ? 'dist-upgrade' : 'upgrade' }}, no backup</span>
+                        <span class="muted small mono">{{ upgradeCommand(c) }}</span><span class="muted small">, no backup</span>
                       } @else {
                       <label class="backup-check" [class.disabled]="!c.backupStorage">
                       <input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" [disabled]="!c.backupStorage" />
@@ -505,7 +505,7 @@
                     <button type="button" class="btn btn-sm" (click)="upgradeApt(c)">Yes</button>
                       <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
                     } @else {
-                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : 'apt-get upgrade'">
+                      <button type="button" class="btn btn-sm btn-secondary" (click)="ask('apt-' + c.id, c)" [disabled]="isBusy(c) || !c.configured || blockedWhileStopped(c)" [title]="blockedWhileStopped(c) ? 'Start the container to upgrade it' : upgradeCommand(c)">
                         <app-icon name="arrowUp" [size]="14" /> Upgrade
                       </button>
                     }

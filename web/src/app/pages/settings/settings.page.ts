@@ -47,9 +47,9 @@ const NOTIFICATION_KINDS: { key: Exclude<keyof NotificationPreferences, 'digest'
     hint: 'A security advisory was published for a watched repository (skipped when the installed version is not affected).',
   },
   { key: 'appUpdates', label: 'Application updates', hint: 'A newer version of an application in a container.' },
-  { key: 'aptUpdates', label: 'apt package updates', hint: 'Upgradable packages in a container or on the Proxmox host.' },
-  { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or apt upgrade started here completed.' },
-  { key: 'updateFailed', label: 'Update failed', hint: 'An update or apt upgrade started here failed.' },
+  { key: 'aptUpdates', label: 'System package updates', hint: 'Upgradable packages (apt, dnf, zypper, apk, pacman …) on a machine or the Proxmox host.' },
+  { key: 'updateSucceeded', label: 'Update finished', hint: 'An update or package upgrade started here completed.' },
+  { key: 'updateFailed', label: 'Update failed', hint: 'An update or package upgrade started here failed.' },
   {
     key: 'dockerUpdates',
     label: 'New Docker images',

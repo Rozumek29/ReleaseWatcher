@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
 import {
-  APT_LIST_MARKER,
+  PACKAGE_LIST_MARKER,
   appUpdateAvailable,
   appUpdateScript,
   detectInteractivePrompt,
@@ -16,7 +16,12 @@ import {
   parsePctResources,
   pctSetResourcesCommand,
   planResourceRaise,
-  parseAptUpgradable,
+  parsePackageCheck,
+  PACKAGES_CHECK_SCRIPT,
+  PACKAGES_UPGRADE_SCRIPT,
+  MACHINE_RESTART_COMMAND,
+  machineRestartCommand,
+  detachedStopCommand,
   parsePctList,
   parsePctStatus,
   pctExec,
@@ -41,7 +46,7 @@ import {
   guestOf,
   isGuestKind,
   targetTitle,
-  machineAptUpgradeScript,
+  machinePackagesUpgradeScript,
   machineExec,
   type Container,
   type ContainerApp,
@@ -58,8 +63,8 @@ describe('target capabilities', () => {
     assert.equal(isGuestKind('server'), false);
     assert.equal(guestOf({ kind: 'server', vmid: 0 }), null);
     assert.equal(machineExec('apt list'), pctExec(101, 'apt list').replace('pct exec 101 -- ', ''));
-    assert.match(machineAptUpgradeScript('server'), / upgrade &&/);
-    assert.match(machineAptUpgradeScript('node'), / dist-upgrade &&/);
+    assert.match(machinePackagesUpgradeScript('server'), / upgrade &&/);
+    assert.match(machinePackagesUpgradeScript('node'), / dist-upgrade &&/);
   });
 
   it('describes what each kind supports', () => {
@@ -155,17 +160,114 @@ describe('proxmox domain', () => {
   it('parses apt list --upgradable after the marker', () => {
     const output = [
       'W: some warning from apt-get update',
-      APT_LIST_MARKER,
+      `${PACKAGE_LIST_MARKER} apt`,
       'Listing...',
       'curl/stable-security 7.88.1-10+deb12u8 amd64 [upgradable from: 7.88.1-10+deb12u7]',
       'libssl3/stable 3.0.15-1 amd64 [upgradable from: 3.0.14-1]',
       'newpkg/stable 1.0 all',
     ].join('\n');
-    assert.deepEqual(parseAptUpgradable(output), [
-      { name: 'curl', newVersion: '7.88.1-10+deb12u8', currentVersion: '7.88.1-10+deb12u7' },
-      { name: 'libssl3', newVersion: '3.0.15-1', currentVersion: '3.0.14-1' },
-      { name: 'newpkg', newVersion: '1.0', currentVersion: null },
-    ]);
+    assert.deepEqual(parsePackageCheck(output), {
+      manager: 'apt',
+      packages: [
+        { name: 'curl', newVersion: '7.88.1-10+deb12u8', currentVersion: '7.88.1-10+deb12u7' },
+        { name: 'libssl3', newVersion: '3.0.15-1', currentVersion: '3.0.14-1' },
+        { name: 'newpkg', newVersion: '1.0', currentVersion: null },
+      ],
+    });
+  });
+
+  // Outputs below were recorded with PACKAGES_CHECK_SCRIPT in the official container images.
+  it('parses dnf check-update with the installed versions from rpm (Fedora, Rocky, AlmaLinux)', () => {
+    const output = [
+      `${PACKAGE_LIST_MARKER} dnf`,
+      '',
+      'audit-libs.x86_64                            4.0.3-1.fc40                updates',
+      'dnf.noarch                                   4.23.0-1.fc40.1             updates',
+      'a-very-long-package-name-that-wraps.x86_64',
+      '                                             1:2.0-1.fc40                updates',
+      'Obsoleting Packages',
+      'grub2-tools.x86_64                           1:2.06-1.fc40               updates',
+      `${PACKAGE_LIST_MARKER} installed`,
+      'audit-libs.x86_64 4.0.2-1.fc40',
+      'dnf.noarch 4.22.0-1.fc40',
+      'a-very-long-package-name-that-wraps.x86_64 1:1.9-1.fc40',
+    ].join('\n');
+    assert.deepEqual(parsePackageCheck(output), {
+      manager: 'dnf',
+      packages: [
+        { name: 'audit-libs', newVersion: '4.0.3-1.fc40', currentVersion: '4.0.2-1.fc40' },
+        { name: 'dnf', newVersion: '4.23.0-1.fc40.1', currentVersion: '4.22.0-1.fc40' },
+        { name: 'a-very-long-package-name-that-wraps', newVersion: '1:2.0-1.fc40', currentVersion: '1:1.9-1.fc40' },
+      ],
+    });
+    assert.deepEqual(parsePackageCheck(`${PACKAGE_LIST_MARKER} yum\n\n${PACKAGE_LIST_MARKER} installed\n`), { manager: 'yum', packages: [] });
+  });
+
+  it('parses the zypper list-updates table (openSUSE)', () => {
+    const output = [
+      `${PACKAGE_LIST_MARKER} zypper`,
+      "Warning: Repository 'Main Update Repository' metadata expired since 2025-08-30 08:17:31 UTC.",
+      '',
+      'S  | Repository          | Name     | Current Version  | Available Version | Arch',
+      '---+---------------------+----------+------------------+-------------------+-------',
+      'v  | Main Update Repo    | aaa_base | 84.87-150300.10.20.1 | 84.87-150300.10.23.1 | x86_64',
+      'v  | Main Update Repo    | bash     | 4.4-150400.25.22 | 4.4-150400.27.3.2 | x86_64',
+    ].join('\n');
+    assert.deepEqual(parsePackageCheck(output), {
+      manager: 'zypper',
+      packages: [
+        { name: 'aaa_base', newVersion: '84.87-150300.10.23.1', currentVersion: '84.87-150300.10.20.1' },
+        { name: 'bash', newVersion: '4.4-150400.27.3.2', currentVersion: '4.4-150400.25.22' },
+      ],
+    });
+    assert.deepEqual(parsePackageCheck(`${PACKAGE_LIST_MARKER} zypper\nNo updates found.\n`), { manager: 'zypper', packages: [] });
+  });
+
+  it('parses apk version (Alpine), splitting names that contain digits correctly', () => {
+    const output = [
+      `${PACKAGE_LIST_MARKER} apk`,
+      'Installed:                                Available:',
+      'apk-tools-2.14.0-r5                     < 2.14.4-r0 ',
+      'busybox-binsh-1.36.1-r15                < 1.36.1-r21 ',
+      'py3-foo2-3d-1.0-r0                      < 1.1-r0',
+    ].join('\n');
+    assert.deepEqual(parsePackageCheck(output), {
+      manager: 'apk',
+      packages: [
+        { name: 'apk-tools', currentVersion: '2.14.0-r5', newVersion: '2.14.4-r0' },
+        { name: 'busybox-binsh', currentVersion: '1.36.1-r15', newVersion: '1.36.1-r21' },
+        { name: 'py3-foo2-3d', currentVersion: '1.0-r0', newVersion: '1.1-r0' },
+      ],
+    });
+  });
+
+  it('parses pacman -Qu (Arch, CachyOS)', () => {
+    const output = [`${PACKAGE_LIST_MARKER} pacman`, 'acl 2.3.1-3 -> 2.4.0-1', 'linux 6.11.1.arch1-1 -> 6.11.2.arch1-1 [ignored]'].join('\n');
+    assert.deepEqual(parsePackageCheck(output), {
+      manager: 'pacman',
+      packages: [
+        { name: 'acl', currentVersion: '2.3.1-3', newVersion: '2.4.0-1' },
+        { name: 'linux', currentVersion: '6.11.1.arch1-1', newVersion: '6.11.2.arch1-1' },
+      ],
+    });
+  });
+
+  it('returns null without a known package manager marker', () => {
+    assert.equal(parsePackageCheck('E: something went wrong'), null);
+    assert.equal(parsePackageCheck(`${PACKAGE_LIST_MARKER} emerge\nfoo`), null);
+  });
+
+  it('checks and upgrades with the package manager found on the machine', () => {
+    for (const manager of ['apt-get', 'dnf', 'yum', 'zypper', 'apk', 'pacman']) {
+      assert.ok(PACKAGES_CHECK_SCRIPT.includes(`command -v ${manager} `), manager);
+      assert.ok(PACKAGES_UPGRADE_SCRIPT.includes(`command -v ${manager} `), manager);
+    }
+    assert.match(PACKAGES_UPGRADE_SCRIPT, /apt-get -y .* upgrade && apt-get -y autoremove/);
+    assert.match(PACKAGES_UPGRADE_SCRIPT, /zypper -n dup --auto-agree-with-licenses/);
+    assert.match(PACKAGES_UPGRADE_SCRIPT, /pacman -Sy --needed --noconfirm \$keyrings && run pacman -Su --noconfirm/);
+    assert.match(PACKAGES_UPGRADE_SCRIPT, /No supported package manager found/);
+    // pacman never syncs the real databases during a check (no partial upgrades).
+    assert.match(PACKAGES_CHECK_SCRIPT, /pacman -Sy --dbpath "\$db"/);
   });
 
   it('quotes scripts for pct exec', () => {
@@ -214,6 +316,24 @@ describe('proxmox domain', () => {
     const follow = detachedFollowCommand(unit, '@@RW-1@@');
     assert.match(follow, /tail -c \+1 -f --pid="\$pid"/);
     assert.match(follow, /printf '\\n%s exit %s\\n' '@@RW-1@@'/);
+  });
+
+  it('starts detached commands under a supervisor on machines without systemd', () => {
+    const unit = detachedUnit(7, 'update');
+    const dir = `/var/tmp/releasewatcher/${unit}`;
+    const start = detachedStartCommand(unit, 'apk upgrade', { tty: false, timeoutSeconds: 90 });
+    // systemd must run the machine, not only be installed (e.g. Fedora in a container has systemd-run).
+    assert.match(start, /^if \[ -d \/run\/systemd\/system \]; then$/m);
+    assert.ok(start.includes(`setsid /bin/sh ${dir}/supervise </dev/null >/dev/null 2>&1 &\n  echo $! >${dir}/pid`), start);
+    const supervisor = [...start.matchAll(/printf %s '([A-Za-z0-9+/=]+)' \| base64 -d/g)].map((m) => Buffer.from(m[1]!, 'base64').toString())[2]!;
+    // Stops the whole process group at the timeout and after the command, like systemd.
+    assert.equal(supervisor, [`/bin/sh ${dir}/run &`, 'r=$!', '(sleep 90; kill -TERM -$$) 2>/dev/null &', 'wait "$r"', 'kill -TERM -$$ 2>/dev/null'].join('\n'));
+
+    const follow = detachedFollowCommand(unit, '@@T@@');
+    assert.ok(follow.includes(`pid=$(cat ${dir}/pid); kill -0 "$pid"`), follow);
+    // BusyBox tail has no --pid: wait for the process, then print the output.
+    assert.match(follow, /while kill -0 "\$pid" 2>\/dev\/null; do sleep 1; done; cat /);
+    assert.ok(detachedStopCommand(unit).includes(`kill -TERM "-$(cat ${dir}/pid)"`));
   });
 
   it('parses the output of a followed detached command', () => {
@@ -441,6 +561,11 @@ describe('proxmox domain', () => {
     assert.equal(shutdownGuestCommand({ kind: 'vm', vmid: 137 }), 'qm shutdown 137 --timeout 120 --forceStop 1');
     assert.equal(shutdownGuestCommand({ kind: 'lxc', vmid: 105 }), 'pct shutdown 105 --timeout 120 --forceStop 1');
     assert.match(NODE_RESTART_COMMAND, /^systemd-run .*--on-active=15 .*systemctl reboot$/);
+    assert.equal(machineRestartCommand('node'), NODE_RESTART_COMMAND);
+    assert.equal(machineRestartCommand('server'), MACHINE_RESTART_COMMAND);
+    // A server without systemd (e.g. Alpine with OpenRC) reboots after the same delay.
+    assert.ok(MACHINE_RESTART_COMMAND.includes(NODE_RESTART_COMMAND));
+    assert.match(MACHINE_RESTART_COMMAND, /setsid sh -c 'sleep 15; reboot'/);
   });
 
   it('lists containers and virtual machines of the node', () => {

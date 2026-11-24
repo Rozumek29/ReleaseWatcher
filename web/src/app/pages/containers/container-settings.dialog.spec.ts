@@ -155,7 +155,7 @@ describe('ContainerSettingsDialog', () => {
     expect(el.querySelector('#ct-backup')).toBeNull();
     expect(el.querySelector('#ct-update-cores')).toBeNull();
     expect(el.querySelector('[aria-label="Start temporarily when stopped"]')).toBeNull();
-    expect(el.querySelector('[aria-label="apt packages"]')).toBeNull();
+    expect(el.querySelector('[aria-label="System packages"]')).toBeNull();
     expect(el.textContent).not.toContain('Add application');
     expect(el.textContent).toContain('dist-upgrade');
   });

@@ -65,6 +65,20 @@ describe('ContainersPage', () => {
     expect(el.querySelector('app-apt-packages')?.textContent).toContain('libssl3');
   });
 
+  it('names the package manager of a machine and its upgrade command', async () => {
+    const { fixture, el } = await create([container({ kind: 'server', packageManager: 'apk', capabilities: { ...container().capabilities, backup: null } })]);
+    expect(el.querySelector('.item-name')?.textContent).toContain('apk');
+
+    [...el.querySelectorAll<HTMLButtonElement>('.item button')].find((b) => b.textContent?.trim() === 'Upgrade')!.click();
+    await settle(fixture);
+    expect(el.textContent).toContain('apk upgrade, no backup');
+  });
+
+  it('calls the packages of a machine not checked yet "System packages"', async () => {
+    const { el } = await create([container({ packageManager: null, aptUpgradable: [], lastCheckedAt: null })]);
+    expect(el.querySelector('.item-name')?.textContent).toContain('System packages');
+  });
+
   it('shows the Docker containers found on a machine', async () => {
     const { fixture, el } = await create([container({ docker: { enabled: true, engine: 'docker 27.3.1', error: null } })]);
     http.expectOne('/api/docker').flush(dockerOverview({ containers: [dockerContainer({ source: { kind: 'target', id: 1, name: 'vaultwarden' } })] }));
@@ -466,7 +480,7 @@ describe('ContainersPage', () => {
     await settle(fixture);
     expect(detail().textContent).toContain('Working…');
     expect(detailButton('Update all')!.disabled).toBe(true);
-    expect(el.querySelector('.run-dialog h2')?.textContent).toContain('apt upgrade');
+    expect(el.querySelector('.run-dialog h2')?.textContent).toContain('Package upgrade');
   });
 
   it('opens the live log from the "Working…" badge and follows the next update of "Update all"', async () => {
@@ -482,7 +496,7 @@ describe('ContainersPage', () => {
       await vi.advanceTimersByTimeAsync(0);
       http.expectOne('/api/runs/9').flush(run({ kind: 'apt-upgrade', status: 'running', finishedAt: null, exitCode: null }));
       await vi.advanceTimersByTimeAsync(0);
-      expect(el.querySelector('.run-dialog h2')?.textContent).toContain('apt upgrade');
+      expect(el.querySelector('.run-dialog h2')?.textContent).toContain('Package upgrade');
 
       // The apt upgrade finishes; the application update starts as the next run.
       await vi.advanceTimersByTimeAsync(1000);

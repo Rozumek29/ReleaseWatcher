@@ -3,8 +3,10 @@ import type { Logger } from '../log.ts';
 import { DOCKER_LIST_SCRIPT } from '../docker/domain.ts';
 import type { NotificationDispatcher } from '../notifiers/dispatcher.ts';
 import {
-  APT_CHECK_SCRIPT,
-  APT_UPGRADE_SCRIPT,
+  PACKAGES_CHECK_SCRIPT,
+  PACKAGES_UPGRADE_SCRIPT,
+  packageManagerLabel,
+  parsePackageCheck,
   appUpdateAvailable,
   type Container,
   type ContainerApp,
@@ -29,12 +31,10 @@ import {
   newCheckToken,
   parseCheckOutput,
   type StepResult,
-  parseAptUpgradable,
   parseDiscoverOutput,
   DISCOVER_COMMAND,
   parsePctStatus,
   parsePvesmStatus,
-  NODE_RESTART_COMMAND,
   NODE_RESTART_DELAY_SECONDS,
   parseGuestExecResult,
   parseRestartCheck,
@@ -55,7 +55,8 @@ import {
   guestCli,
   guestOf,
   guestExec,
-  machineAptUpgradeScript,
+  machinePackagesUpgradeScript,
+  machineRestartCommand,
   machineExec,
   hasHomeAssistantApi,
   homeAssistantInstallContext,
@@ -514,9 +515,12 @@ export class ContainerService {
   startAptUpgrade(container: Container, backupStorage: string | null): Run {
     if (!guestOf(container)) {
       return this.start(container, null, 'apt-upgrade', 'manual', async (log) => {
-        const upgrade = container.kind === 'node' ? 'dist-upgrade' : 'upgrade';
-        log.note(`apt-get update && apt-get ${upgrade} on ${targetLabel(container)} (no backup)`);
-        const result = await this.execDetached(this.shellFor(container), log, 'update', machineAptUpgradeScript(container.kind), {
+        log.note(
+          container.kind === 'node'
+            ? `apt-get update && apt-get dist-upgrade on ${targetLabel(container)} (no backup)`
+            : `Upgrading the system packages of ${targetLabel(container)} (no backup)`,
+        );
+        const result = await this.execDetached(this.shellFor(container), log, 'update', machinePackagesUpgradeScript(container.kind), {
           timeoutMs: APT_UPGRADE_TIMEOUT_MS,
           startedContainer: false,
         });
@@ -525,10 +529,10 @@ export class ContainerService {
     }
     return this.start(container, null, 'apt-upgrade', 'manual', (log) =>
       this.whileRunning(container, log, async (startedContainer) => {
-        await this.backupFirst(container, backupStorage, log, 'apt upgrade', startedContainer);
+        await this.backupFirst(container, backupStorage, log, 'package upgrade', startedContainer);
         const result = await this.withUpdateResources(container, log, () => {
-          log.note(`apt-get update && apt-get upgrade in ${targetLabel(container)}`);
-          return this.execInGuest(log, container, APT_UPGRADE_SCRIPT, {
+          log.note(`Upgrading the system packages in ${targetLabel(container)}`);
+          return this.execInGuest(log, container, PACKAGES_UPGRADE_SCRIPT, {
             timeoutMs: APT_UPGRADE_TIMEOUT_MS,
             startedContainer,
           });
@@ -719,7 +723,7 @@ export class ContainerService {
     if (capabilities(container.kind).restart === 'machine') {
       return this.start(container, null, 'restart', 'manual', async (log) => {
         log.note(`Scheduling a restart of ${targetLabel(container)} in ${NODE_RESTART_DELAY_SECONDS} s`);
-        const result = await this.shellFor(container).run(NODE_RESTART_COMMAND, {
+        const result = await this.shellFor(container).run(machineRestartCommand(container.kind), {
           timeoutMs: NODE_TIMEOUT_MS,
           onOutput: (chunk) => log.write(chunk),
         });
@@ -897,6 +901,7 @@ export class ContainerService {
       appName: app?.name ?? (run.kind === 'home-assistant-update' ? 'Home Assistant' : null),
       succeeded: run.status === 'succeeded',
       detail: lastNote(run.output, run.status === 'succeeded'),
+      packageManager: container.packageManager,
     });
   }
 
@@ -1300,7 +1305,7 @@ export class ContainerService {
     // Everything is read with one SSH connection and one `pct exec` / `qm guest exec` (see buildCheckScript).
     const steps: CheckStep[] = [];
     if (container.aptEnabled) {
-      steps.push({ id: 'apt', script: APT_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
+      steps.push({ id: 'apt', script: PACKAGES_CHECK_SCRIPT, timeoutSeconds: APT_CHECK_TIMEOUT_SECONDS });
     }
     steps.push({ id: 'restart', script: restartCheckScript(container.kind), timeoutSeconds: RESTART_CHECK_TIMEOUT_SECONDS });
     steps.push({ id: 'os', script: OS_CHECK_SCRIPT, timeoutSeconds: OS_CHECK_TIMEOUT_SECONDS });
@@ -1341,7 +1346,7 @@ export class ContainerService {
     const stopped = container.status === 'stopped';
     if (stopped) {
       // Not an error: a stopped container is skipped, never started. Results of the last check are kept.
-      log.note(`${targetLabel(container)} is stopped – apt and application checks skipped (it is not started automatically)`);
+      log.note(`${targetLabel(container)} is stopped – package and application checks skipped (it is not started automatically)`);
       container.restartReasons = []; // it starts fresh anyway
     } else if (container.status !== 'running') {
       errors.push(`${targetLabel(container)} is ${container.status ?? 'in an unknown state'} – start it to check for updates.`);
@@ -1353,15 +1358,19 @@ export class ContainerService {
       const isHomeAssistant = capabilities(container.kind).homeAssistant && (await this.applyHomeAssistant(container, batch.steps, errors, log));
       if (container.aptEnabled && !isHomeAssistant) {
         const apt = batch.steps.get('apt');
-        if (apt?.exitCode === 0) {
-          container.aptUpgradable = parseAptUpgradable(apt.output);
-          log.note(`apt: ${container.aptUpgradable.length} upgradable package(s)`);
-          for (const pkg of container.aptUpgradable) {
+        const packages = apt?.exitCode === 0 ? parsePackageCheck(apt.output) : null;
+        if (packages) {
+          container.packageManager = packages.manager;
+          container.aptUpgradable = packages.packages;
+          log.note(`${packages.manager}: ${packages.packages.length} upgradable package(s)`);
+          for (const pkg of packages.packages) {
             log.write(`   ${pkg.name} ${pkg.currentVersion ?? '?'} → ${pkg.newVersion}\n`);
           }
         } else {
-          errors.push(`apt: ${describeStep(apt)}`);
-          log.note(`apt check failed: ${describeStep(apt)}`);
+          const label = packageManagerLabel(container.packageManager);
+          const detail = apt?.exitCode === 0 ? 'the list of packages could not be read' : describeStep(apt);
+          errors.push(`${label}: ${detail}`);
+          log.note(`${label} check failed: ${detail}`);
         }
       } else {
         container.aptUpgradable = [];
@@ -1440,7 +1449,7 @@ export class ContainerService {
     if (!container.homeAssistant && container.aptEnabled) {
       container.aptEnabled = false;
       container.aptUpgradable = [];
-      log.note('Home Assistant OS found – apt checks switched off (it has no apt)');
+      log.note('Home Assistant OS found – package checks switched off (it has no package manager)');
     }
     let problems = [...probe.errors];
     let entities: UpdateEntity[] | null = probe.savedEntities;
@@ -1549,6 +1558,7 @@ export class ContainerService {
       targetKind: container.kind,
       containerName: container.name,
       aptPackages: container.aptUpgradable,
+      packageManager: container.packageManager,
       apps: [
         ...apps
           .filter((a) => appUpdateAvailable(a))

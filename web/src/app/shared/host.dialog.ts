@@ -27,7 +27,7 @@ export interface HostDialogData {
 
 /** Choices of the type picker. */
 export const HOST_TYPE_CHOICES: readonly { type: HostType; label: string; icon: IconName; hint: string }[] = [
-  { type: 'server', label: 'Server', icon: 'server', hint: 'A VPS or any Linux machine – apt and your update commands.' },
+  { type: 'server', label: 'Server', icon: 'server', hint: 'A VPS or any Linux machine – system packages and your update commands.' },
   { type: 'proxmox', label: 'Proxmox node', icon: 'box', hint: 'Its containers and VMs – pct and qm on the node.' },
 ];
 

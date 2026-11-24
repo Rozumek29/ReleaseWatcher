@@ -5,7 +5,7 @@
         <app-icon name="server" [size]="22" />
         <div class="head-text">
           <h2 id="host-dialog-title">{{ title(d) }}</h2>
-          <p>{{ type() === 'proxmox' ? 'ReleaseWatcher runs pct and qm on the node over SSH.' : 'ReleaseWatcher runs apt and your update commands over SSH.' }}</p>
+          <p>{{ type() === 'proxmox' ? 'ReleaseWatcher runs pct and qm on the node over SSH.' : 'ReleaseWatcher checks the system packages and runs your update commands over SSH.' }}</p>
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
           <app-icon name="close" />

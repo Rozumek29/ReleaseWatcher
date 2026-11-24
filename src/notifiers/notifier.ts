@@ -32,8 +32,10 @@ export interface ContainerUpdatesNotification {
   /** What the target is: a container, a virtual machine or the Proxmox host. */
   targetKind: TargetKind;
   containerName: string;
-  /** Upgradable apt packages (all of them, not only new ones). */
+  /** Upgradable system packages (all of them, not only new ones). */
   aptPackages: { name: string; currentVersion: string | null; newVersion: string }[];
+  /** Package manager of the target (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
+  packageManager?: string | null;
   /** Applications with a newer version available. */
   apps: { name: string; installedVersion: string | null; latestVersion: string | null }[];
 }
@@ -49,6 +51,8 @@ export interface UpdateResultNotification {
   succeeded: boolean;
   /** Last line of the run log, e.g. "Update failed – exit code 1". */
   detail: string | null;
+  /** Package manager of the target for `apt-upgrade` (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
+  packageManager?: string | null;
 }
 
 /** Newer images were pushed for the tags Docker/Podman containers run (each new image is reported once). */
@@ -89,9 +93,12 @@ const TARGET_PREFIX: Readonly<Record<Exclude<TargetKind, 'server'>, (vmid: numbe
   node: () => 'Proxmox host',
 };
 
-/** "apt upgrade", "update of Nextcloud" or "update of Home Assistant". */
+/** Name of the package manager in notifications ("apt", "dnf" …). */
+export const packageManagerName = (n: { packageManager?: string | null }): string => n.packageManager ?? 'apt';
+
+/** "apt upgrade", "dnf upgrade", "update of Nextcloud" or "update of Home Assistant". */
 export const updateLabel = (n: UpdateResultNotification): string =>
-  n.kind === 'apt-upgrade' ? 'apt upgrade' : `update of ${n.appName ?? 'the application'}`;
+  n.kind === 'apt-upgrade' ? `${packageManagerName(n)} upgrade` : `update of ${n.appName ?? 'the application'}`;
 
 /** Short heading of a digest, e.g. "2 new releases, 1 container with updates". */
 export function digestSummary(events: readonly NotificationEvent[]): string {

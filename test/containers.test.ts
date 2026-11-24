@@ -4,7 +4,7 @@ import { buildApp, type App } from '../src/app.ts';
 import { loadConfig } from '../src/config.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { silentLogger } from '../src/log.ts';
-import { APT_LIST_MARKER, capabilities } from '../src/proxmox/domain.ts';
+import { PACKAGE_LIST_MARKER, capabilities } from '../src/proxmox/domain.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { SettingsService } from '../src/settings.ts';
 import { addProxmoxHost, FakeShell, FakeSource, guestJson, HAOS_PROBE_OUTPUT, haState, RecordingNotifier, release } from './helpers.ts';
@@ -14,7 +14,7 @@ const QM_LIST =
   '      VMID NAME                 STATUS     MEM(MiB)   BOOTDISK(GiB) PID\n       137 debian               running    4096              32.00 1667\n';
 /** Output of DISCOVER_COMMAND: `pct list`, a marker, `qm list`. */
 const discovered = (pct = PCT_LIST) => `${pct}---releasewatcher-qm---\n${QM_LIST}`;
-const APT_OUTPUT = `${APT_LIST_MARKER}\nListing...\ncurl/stable 8.1 amd64 [upgradable from: 8.0]\n`;
+const APT_OUTPUT = `${PACKAGE_LIST_MARKER} apt\nListing...\ncurl/stable 8.1 amd64 [upgradable from: 8.0]\n`;
 
 describe('containers API', () => {
   let app: App;
@@ -152,7 +152,7 @@ describe('containers API', () => {
 
     // apt upgrade runs detached on the node through the agent; the log shows the command's output, not the JSON.
     shell.on(/^qm guest exec 137 --timeout 3600 -- sh -c /, { output: guestJson('Setting up curl (8.1) ...\n', 0) });
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     assert.equal((await request('POST', `/api/containers/${vm.id}/apt-upgrade`, { backup: false })).status, 202);
     let run = await app.containers.wait(vm.id);
     assert.equal(run?.status, 'succeeded', run?.output ?? '');
@@ -501,7 +501,7 @@ describe('containers API', () => {
     const container = await addContainer();
     await setBackupStorage('pbs', true);
     shell.commands.length = 0;
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     const upgrade = Promise.withResolvers<{ output: string }>();
     shell.on(/apt-get -y/, () => upgrade.promise);
 
@@ -536,7 +536,7 @@ describe('containers API', () => {
     assert.equal(notifier.resultsSent.length, 1);
     assert.deepEqual(
       { ...notifier.resultsSent[0], detail: undefined },
-      { vmid: 101, targetKind: 'lxc', containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined },
+      { vmid: 101, targetKind: 'lxc', containerName: container.name, kind: 'apt-upgrade', appName: null, succeeded: false, detail: undefined, packageManager: 'apt' },
     );
     assert.match(notifier.resultsSent[0]?.detail ?? '', /^Update failed/);
 
@@ -829,7 +829,7 @@ describe('containers API', () => {
     const run = await app.containers.wait(container.id);
 
     assert.equal(run?.status, 'succeeded');
-    assert.match(run?.output ?? '', /stopped – apt and application checks skipped/);
+    assert.match(run?.output ?? '', /stopped – package and application checks skipped/);
     assert.equal(shell.commands.some((c) => c.startsWith('pct exec') || c.startsWith('pct start')), false);
     const dto = (await request('GET', `/api/containers/${container.id}`)).json();
     assert.equal(dto.status, 'stopped');
@@ -875,7 +875,7 @@ describe('containers API', () => {
 
   it('starts a stopped container temporarily for a check when allowed and shuts it down again', async () => {
     const { container, state } = await stoppableContainer();
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
 
     await request('POST', `/api/containers/${container.id}/check`);
     const run = await app.containers.wait(container.id);
@@ -968,7 +968,7 @@ describe('containers API', () => {
 
     // Proxmox VE is upgraded with dist-upgrade, without vzdump and directly on the node.
     shell.on(/dist-upgrade/, { output: 'Setting up pve-manager (9.1.2) ...\n' });
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     shell.commands.length = 0;
     assert.equal((await request('POST', `/api/containers/${node.id}/apt-upgrade`)).status, 202);
     const run = await app.containers.wait(node.id);
@@ -1273,7 +1273,7 @@ describe('containers API', () => {
 
   it('starts nothing when no container has pending updates', async () => {
     await addContainer();
-    shell.on(/apt list --upgradable/, { output: `${APT_LIST_MARKER}\nListing...\n` });
+    shell.on(/apt list --upgradable/, { output: `${PACKAGE_LIST_MARKER} apt\nListing...\n` });
     await app.scheduler.checkAll();
     shell.commands.length = 0;
     const response = await request('POST', '/api/containers/update-all');

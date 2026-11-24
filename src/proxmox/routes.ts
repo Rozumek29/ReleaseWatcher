@@ -313,6 +313,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
       aptUpgradable: c.aptUpgradable,
+      packageManager: c.packageManager,
       /** Why a restart is needed (last check); empty = none. */
       restartReasons: c.restartReasons,
       /** Operating system read by the last check (`label` for display); null = not read yet. */
@@ -710,7 +711,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
             return problem(404, 'Container not found.');
           }
           if (!container.aptEnabled) {
-            return problem(409, 'apt is disabled for this container.');
+            return problem(409, 'System packages are disabled for this container.');
           }
           const backup = resolveBackup(container, options.backup);
           return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
