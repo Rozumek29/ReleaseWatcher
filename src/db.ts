@@ -10,7 +10,7 @@ import {
   type AdvisoryVulnerability,
   type SecurityAdvisory,
 } from './advisories.ts';
-import type { MachineAppRef, RepositoryGroup, WatchedRepository } from './domain.ts';
+import { fullName, PROVIDERS, type MachineAppRef, type RepositoryGroup, type RepositoryProvider, type RepositoryRef, type WatchedRepository } from './domain.ts';
 import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -37,13 +37,15 @@ const KEY_CHECK_VALUE = 'releasewatcher';
 
 interface Row {
   id: number;
+  provider: string;
+  host: string | null;
   owner: string;
   name: string;
   include_prereleases: number;
   is_enabled: number;
   last_seen_tag: string | null;
   last_seen_published_at: string | null;
-  etag: string | null;
+  releases_etag: string | null;
   last_checked_at: string | null;
   last_error: string | null;
   created_at: string;
@@ -55,7 +57,7 @@ interface Row {
   installed_version_error: string | null;
   installed_app_id: number | null;
   installed_docker_id: number | null;
-  github_token: string | null;
+  access_token: string | null;
   advisories_etag: string | null;
   advisories_checked_at: string | null;
   advisories_error: string | null;
@@ -100,15 +102,21 @@ function parseVulnerabilities(json: string): AdvisoryVulnerability[] {
   return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
 }
 
+/** Provider of a row; an unknown value (written by a newer version) is read as GitHub's without a host. */
+const toProvider = (provider: string, host: string | null): RepositoryProvider =>
+  (PROVIDERS as readonly string[]).includes(provider) ? (provider as RepositoryProvider) : host === null ? 'github' : 'gitea';
+
 const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   id: r.id,
+  provider: toProvider(r.provider, r.host),
+  host: r.host,
   owner: r.owner,
   name: r.name,
   includePrereleases: r.include_prereleases === 1,
   isEnabled: r.is_enabled === 1,
   lastSeenTag: r.last_seen_tag,
   lastSeenPublishedAt: r.last_seen_published_at,
-  etag: r.etag,
+  releasesEtag: r.releases_etag,
   lastCheckedAt: r.last_checked_at,
   lastError: r.last_error,
   createdAt: r.created_at,
@@ -124,7 +132,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
       : r.installed_docker_id !== null
         ? { kind: 'docker', id: r.installed_docker_id }
         : null,
-  githubToken: secrets.decryptNullable(r.github_token),
+  accessToken: secrets.decryptNullable(r.access_token),
   advisoriesEtag: r.advisories_etag,
   advisoriesCheckedAt: r.advisories_checked_at,
   advisoriesError: r.advisories_error,
@@ -146,6 +154,8 @@ interface PageRow extends AdvisoryRow {
   impact: number | null;
   severity_rank: number;
   affected_versions: string;
+  provider: string;
+  host: string | null;
   owner: string;
   name: string;
   installed_version: string | null;
@@ -173,7 +183,7 @@ export interface AdvisoryCursor {
 
 export interface AdvisoryPageRow {
   advisory: SecurityAdvisory;
-  repository: { id: number; owner: string; name: string; installedVersion: string | null; icon: string | null };
+  repository: RepositoryRef & { id: number; installedVersion: string | null; icon: string | null };
   affects: boolean | null;
   affectedVersions: string[];
   cursor: AdvisoryCursor;
@@ -213,7 +223,7 @@ function advisoryWhere(filter: AdvisoryFilter): { where: string[]; params: SQLQu
   if (query) {
     const pattern = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     const like = (column: string) => `${column} LIKE ? ESCAPE '\\'`;
-    where.push(`(${['a.summary', 'a.advisory_id', 'a.cve_id', 'a.aliases', "(r.owner || '/' || r.name)"].map(like).join(' OR ')})`);
+    where.push(`(${['a.summary', 'a.advisory_id', 'a.cve_id', 'a.aliases', 'r.full_name'].map(like).join(' OR ')})`);
     params.push(pattern, pattern, pattern, pattern, pattern);
   }
   return { where, params };
@@ -623,6 +633,146 @@ export const MIGRATIONS: readonly string[] = [
    UPDATE watched_repositories
       SET installed_version = d.installed_version, installed_version_checked_at = d.last_seen_at, installed_version_error = NULL
      FROM docker_containers d WHERE d.id = watched_repositories.installed_docker_id;`,
+  // Repositories on Gitea/Forgejo and GitLab instances: `provider` says which API to ask, `host` names the instance
+  // (NULL on GitHub). The table is rebuilt because the old UNIQUE (owner, name) cannot hold the host; `full_name` (the
+  // lower-case `fullName()`, unique) replaces it and is what Docker labels are matched by. The triggers that read the
+  // table are recreated around the rebuild. Runs with foreign keys off (see migrate()), so dropping the old table does
+  // not touch the apps, Docker containers and advisories that reference it.
+  `DROP TRIGGER container_app_installed_version;
+   DROP TRIGGER container_app_installed_version_removed;
+   DROP TRIGGER docker_container_installed_version;
+   DROP TRIGGER docker_container_installed_version_removed;
+
+   CREATE TABLE watched_repositories_new (
+     id                           INTEGER PRIMARY KEY AUTOINCREMENT,
+     provider                     TEXT    NOT NULL DEFAULT 'github',
+     host                         TEXT    COLLATE NOCASE,
+     owner                        TEXT    NOT NULL COLLATE NOCASE,
+     name                         TEXT    NOT NULL COLLATE NOCASE,
+     include_prereleases          INTEGER NOT NULL DEFAULT 0,
+     is_enabled                   INTEGER NOT NULL DEFAULT 1,
+     last_seen_tag                TEXT,
+     last_seen_published_at       TEXT,
+     etag                         TEXT,
+     last_checked_at              TEXT,
+     last_error                   TEXT,
+     created_at                   TEXT    NOT NULL,
+     installed_version_url        TEXT,
+     installed_version_field      TEXT,
+     installed_version            TEXT,
+     installed_version_checked_at TEXT,
+     installed_version_error      TEXT,
+     installed_version_headers    TEXT,
+     github_token                 TEXT,
+     advisories_etag              TEXT,
+     advisories_checked_at        TEXT,
+     advisories_error             TEXT,
+     osv_ecosystem                TEXT,
+     osv_package                  TEXT,
+     advisory_baselines           TEXT,
+     icon                         TEXT,
+     installed_app_id             INTEGER REFERENCES container_apps (id) ON DELETE SET NULL,
+     installed_docker_id          INTEGER REFERENCES docker_containers (id) ON DELETE SET NULL,
+     full_name                    TEXT    GENERATED ALWAYS AS (lower(coalesce(host || '/', '') || owner || '/' || name)) VIRTUAL,
+     CHECK ((provider = 'github') = (host IS NULL))
+   );
+   INSERT INTO watched_repositories_new (
+     id, owner, name, include_prereleases, is_enabled, last_seen_tag, last_seen_published_at, etag, last_checked_at,
+     last_error, created_at, installed_version_url, installed_version_field, installed_version,
+     installed_version_checked_at, installed_version_error, installed_version_headers, github_token, advisories_etag,
+     advisories_checked_at, advisories_error, osv_ecosystem, osv_package, advisory_baselines, icon, installed_app_id,
+     installed_docker_id)
+   SELECT
+     id, owner, name, include_prereleases, is_enabled, last_seen_tag, last_seen_published_at, etag, last_checked_at,
+     last_error, created_at, installed_version_url, installed_version_field, installed_version,
+     installed_version_checked_at, installed_version_error, installed_version_headers, github_token, advisories_etag,
+     advisories_checked_at, advisories_error, osv_ecosystem, osv_package, advisory_baselines, icon, installed_app_id,
+     installed_docker_id
+   FROM watched_repositories;
+   DROP TABLE watched_repositories;
+   ALTER TABLE watched_repositories_new RENAME TO watched_repositories;
+   CREATE UNIQUE INDEX idx_watched_repositories_full_name ON watched_repositories (full_name);
+   CREATE INDEX idx_watched_repositories_enabled ON watched_repositories (is_enabled, id);
+   CREATE INDEX idx_watched_repositories_installed_app ON watched_repositories (installed_app_id) WHERE installed_app_id IS NOT NULL;
+   CREATE INDEX idx_watched_repositories_installed_docker ON watched_repositories (installed_docker_id) WHERE installed_docker_id IS NOT NULL;
+
+   CREATE TRIGGER container_app_installed_version AFTER UPDATE OF repository_id, installed_version, checked_at, error ON container_apps
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_app_id = NULL,
+            installed_version_error = 'The app on the machine is no longer linked to this repository, so its last version is kept as entered by hand.'
+      WHERE installed_app_id = NEW.id AND id IS NOT NEW.repository_id;
+     UPDATE watched_repositories
+        SET installed_version = coalesce(NEW.installed_version, installed_version),
+            installed_version_checked_at = NEW.checked_at,
+            installed_version_error = NEW.error
+      WHERE installed_app_id = NEW.id;
+   END;
+   CREATE TRIGGER container_app_installed_version_removed BEFORE DELETE ON container_apps
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_app_id = NULL,
+            installed_version_error = 'The app was removed from the machine, so its last version is kept as entered by hand.'
+      WHERE installed_app_id = OLD.id;
+   END;
+   CREATE TRIGGER docker_container_installed_version
+   AFTER UPDATE OF installed_version, present, ignored, link_auto, repository_id, label_repository, last_seen_at ON docker_containers
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_docker_id = NULL,
+            installed_version_error = 'The Docker container is hidden or no longer linked to this repository, so its last version is kept as entered by hand.'
+      WHERE installed_docker_id = NEW.id
+        AND (NEW.ignored = 1 OR id IS NOT IIF(NEW.link_auto = 1,
+              (SELECT r.id FROM watched_repositories r WHERE r.full_name = NEW.label_repository),
+              NEW.repository_id));
+     UPDATE watched_repositories
+        SET installed_version = coalesce(NEW.installed_version, installed_version),
+            installed_version_checked_at = NEW.last_seen_at,
+            installed_version_error = IIF(NEW.present = 1, NULL, 'The Docker container was not found by the last check.')
+      WHERE installed_docker_id = NEW.id;
+   END;
+   CREATE TRIGGER docker_container_installed_version_removed BEFORE DELETE ON docker_containers
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_docker_id = NULL,
+            installed_version_error = 'The Docker container was removed, so its last version is kept as entered by hand.'
+      WHERE installed_docker_id = OLD.id;
+   END;`,
+  // Names that outgrew GitHub and apt: a repository's own token is sent to any provider, the package columns hold
+  // updates of every package manager, the latest version of an app comes from any watched repository, and the
+  // releases ETag is named like the advisories one. Stored values follow (run kind, notification setting, the
+  // signature of notified packages), so nothing is reported twice.
+  `ALTER TABLE watched_repositories RENAME COLUMN github_token TO access_token;
+   ALTER TABLE watched_repositories RENAME COLUMN etag TO releases_etag;
+   ALTER TABLE containers RENAME COLUMN apt_enabled TO packages_enabled;
+   ALTER TABLE containers RENAME COLUMN apt_upgradable TO package_updates;
+   UPDATE containers SET notified_signature = substr(replace('|' || notified_signature, '|apt:', '|pkg:'), 2)
+    WHERE notified_signature IS NOT NULL;
+   UPDATE container_apps SET latest_source = 'repository' WHERE latest_source = 'github';
+   UPDATE container_runs SET kind = 'packages-upgrade' WHERE kind = 'apt-upgrade';
+   UPDATE settings SET key = 'notifyPackageUpdates' WHERE key = 'notifyAptUpdates';`,
+  // `containers` holds every target (containers, virtual machines, Proxmox nodes, servers): renamed with its apps and
+  // runs. SQLite updates the foreign keys, indexes and triggers that refer to them; the indexes get matching names.
+  `ALTER TABLE containers RENAME TO targets;
+   ALTER TABLE container_apps RENAME TO target_apps;
+   ALTER TABLE container_runs RENAME TO target_runs;
+   ALTER TABLE target_apps RENAME COLUMN container_id TO target_id;
+   ALTER TABLE target_runs RENAME COLUMN container_id TO target_id;
+
+   DROP INDEX idx_containers_enabled;
+   DROP INDEX idx_containers_host_vmid;
+   DROP INDEX idx_container_apps_container;
+   DROP INDEX idx_container_apps_repository;
+   DROP INDEX idx_container_runs_container;
+   DROP INDEX idx_container_runs_app;
+   DROP INDEX idx_container_runs_running;
+   CREATE INDEX idx_targets_enabled ON targets (is_enabled, vmid);
+   CREATE UNIQUE INDEX idx_targets_host_vmid ON targets (host_id, kind, vmid);
+   CREATE INDEX idx_target_apps_target ON target_apps (target_id, id);
+   CREATE INDEX idx_target_apps_repository ON target_apps (repository_id) WHERE repository_id IS NOT NULL;
+   CREATE INDEX idx_target_runs_target ON target_runs (target_id, id DESC);
+   CREATE INDEX idx_target_runs_app ON target_runs (app_id) WHERE app_id IS NOT NULL;
+   CREATE INDEX idx_target_runs_running ON target_runs (status) WHERE status = 'running';`,
   // Custom groups of repositories on the Repositories page (name + icon). A group lives as long as it has repositories:
   // the triggers remove it when its last repository leaves it or is removed, whichever code path does that.
   `CREATE TABLE repository_groups (
@@ -766,17 +916,28 @@ export class RepositoryStore {
     return row ? toEntity(row, this.secrets) : null;
   }
 
-  /** Case-insensitive lookup (columns use NOCASE collation). */
-  exists(owner: string, name: string): boolean {
-    return this.db.query('SELECT 1 FROM watched_repositories WHERE owner = ? AND name = ?').get(owner, name) !== null;
+  /** Case-insensitive lookup by `fullName()`; `host` null = GitHub. */
+  exists(owner: string, name: string, host: string | null = null): boolean {
+    const key = fullName({ host, owner, name }).toLowerCase();
+    return this.db.query('SELECT 1 FROM watched_repositories WHERE full_name = ?').get(key) !== null;
   }
 
-  add(owner: string, name: string, includePrereleases: boolean): WatchedRepository {
+  /** Adds a repository; `origin` is where it lives (default GitHub). */
+  add(
+    owner: string,
+    name: string,
+    includePrereleases: boolean,
+    origin: Pick<RepositoryRef, 'provider' | 'host'> = { provider: 'github', host: null },
+  ): WatchedRepository {
+    const host = origin.provider === 'github' ? null : origin.host;
+    if (origin.provider !== 'github' && !host) {
+      throw new Error(`A ${origin.provider} repository needs a host.`);
+    }
     const row = this.db
-      .query<Row, [string, string, number, string]>(
-        'INSERT INTO watched_repositories (owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?) RETURNING *',
+      .query<Row, [string, string | null, string, string, number, string]>(
+        'INSERT INTO watched_repositories (provider, host, owner, name, include_prereleases, created_at) VALUES (?, ?, ?, ?, ?, ?) RETURNING *',
       )
-      .get(owner, name, includePrereleases ? 1 : 0, new Date().toISOString())!;
+      .get(origin.provider, host, owner, name, includePrereleases ? 1 : 0, new Date().toISOString())!;
     return toEntity(row, this.secrets);
   }
 
@@ -786,13 +947,13 @@ export class RepositoryStore {
       .query(
         `UPDATE watched_repositories SET
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
-           etag = ?, last_checked_at = ?, last_error = ?,
+           releases_etag = ?, last_checked_at = ?, last_error = ?,
            installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?,
            -- A version read from an app on a machine is kept up to date by triggers: never overwrite it with a copy
            -- that may have been read before the app's last check.
            installed_version = IIF(${FROM_MACHINE}, installed_version, ?),
            installed_version_checked_at = IIF(${FROM_MACHINE}, installed_version_checked_at, ?),
-           installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), github_token = ?,
+           installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), access_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
            osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?, group_id = ?
          WHERE id = ?`,
@@ -802,7 +963,7 @@ export class RepositoryStore {
         repo.isEnabled ? 1 : 0,
         repo.lastSeenTag,
         repo.lastSeenPublishedAt,
-        repo.etag,
+        repo.releasesEtag,
         repo.lastCheckedAt,
         repo.lastError,
         repo.installedVersionUrl,
@@ -811,7 +972,7 @@ export class RepositoryStore {
         repo.installedVersion,
         repo.installedVersionCheckedAt,
         repo.installedVersionError,
-        this.secrets.encryptNullable(repo.githubToken),
+        this.secrets.encryptNullable(repo.accessToken),
         repo.advisoriesEtag,
         repo.advisoriesCheckedAt,
         repo.advisoriesError,
@@ -841,7 +1002,7 @@ export class RepositoryStore {
               SET installed_app_id = a.id, installed_docker_id = NULL,
                   installed_version = coalesce(a.installed_version, watched_repositories.installed_version),
                   installed_version_checked_at = a.checked_at, installed_version_error = a.error
-             FROM container_apps a
+             FROM target_apps a
             WHERE a.id = ?2 AND watched_repositories.id = ?1`,
         )
         .run(repositoryId, app.id);
@@ -867,13 +1028,13 @@ export class RepositoryStore {
       .query<NameRow, []>(
         `SELECT r.id AS repository_id, 'app' AS kind, a.id, a.name, c.name AS machine
            FROM watched_repositories r
-           JOIN container_apps a ON a.id = r.installed_app_id
-           JOIN containers c ON c.id = a.container_id
+           JOIN target_apps a ON a.id = r.installed_app_id
+           JOIN targets c ON c.id = a.target_id
          UNION ALL
          SELECT r.id, 'docker', d.id, d.name, coalesce(c.name, e.name)
            FROM watched_repositories r
            JOIN docker_containers d ON d.id = r.installed_docker_id
-           LEFT JOIN containers c ON c.id = d.target_id
+           LEFT JOIN targets c ON c.id = d.target_id
            LEFT JOIN docker_endpoints e ON e.id = d.endpoint_id`,
       )
       .all();
@@ -1067,7 +1228,7 @@ export class RepositoryStore {
     params.push(limit + 1);
     const rows = this.db
       .query<PageRow, SQLQueryBindings[]>(
-        `SELECT a.*, r.owner, r.name, r.installed_version, r.icon
+        `SELECT a.*, r.provider, r.host, r.owner, r.name, r.installed_version, r.icon
          FROM repository_advisories a JOIN watched_repositories r ON r.id = a.repository_id
          ${where.length > 0 ? `WHERE ${where.join(' AND ')}` : ''}
          ORDER BY a.impact DESC, a.severity_rank DESC, a.published_at DESC, a.repository_id DESC, a.advisory_id DESC
@@ -1078,7 +1239,15 @@ export class RepositoryStore {
       hasMore: rows.length > limit,
       rows: rows.slice(0, limit).map((r) => ({
         advisory: toAdvisory(r),
-        repository: { id: r.repository_id, owner: r.owner, name: r.name, installedVersion: r.installed_version, icon: r.icon },
+        repository: {
+          id: r.repository_id,
+          provider: toProvider(r.provider, r.host),
+          host: r.host,
+          owner: r.owner,
+          name: r.name,
+          installedVersion: r.installed_version,
+          icon: r.icon,
+        },
         affects: impactOfRank(r.impact ?? 1),
         affectedVersions: parseStringArray(r.affected_versions),
         cursor: {
@@ -1218,16 +1387,16 @@ export class RepositoryStore {
     const plain = (value: string | null): value is string => value !== null && !SecretBox.isEncrypted(value);
     this.db.transaction(() => {
       const repos = this.db
-        .query<Pick<Row, 'id' | 'github_token' | 'installed_version_headers'>, []>(
-          'SELECT id, github_token, installed_version_headers FROM watched_repositories',
+        .query<Pick<Row, 'id' | 'access_token' | 'installed_version_headers'>, []>(
+          'SELECT id, access_token, installed_version_headers FROM watched_repositories',
         )
         .all();
       for (const r of repos) {
-        if (plain(r.github_token) || plain(r.installed_version_headers)) {
+        if (plain(r.access_token) || plain(r.installed_version_headers)) {
           this.db
-            .query('UPDATE watched_repositories SET github_token = ?, installed_version_headers = ? WHERE id = ?')
+            .query('UPDATE watched_repositories SET access_token = ?, installed_version_headers = ? WHERE id = ?')
             .run(
-              plain(r.github_token) ? this.secrets.encrypt(r.github_token) : r.github_token,
+              plain(r.access_token) ? this.secrets.encrypt(r.access_token) : r.access_token,
               plain(r.installed_version_headers) ? this.secrets.encrypt(r.installed_version_headers) : r.installed_version_headers,
               r.id,
             );

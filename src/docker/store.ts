@@ -95,7 +95,7 @@ const sourceColumns = (source: DockerSource): [number | null, number | null] =>
 const sourceColumn = (source: DockerSource): 'target_id' | 'endpoint_id' => (source.kind === 'target' ? 'target_id' : 'endpoint_id');
 
 /** A watched repository as containers see it. */
-export type RepositoryLink = Pick<WatchedRepository, 'id' | 'owner' | 'name' | 'lastSeenTag' | 'icon'>;
+export type RepositoryLink = Pick<WatchedRepository, 'id' | 'host' | 'owner' | 'name' | 'lastSeenTag' | 'icon'>;
 
 /** Fields of a listed container written by {@link DockerStore.replaceListing}. */
 export interface ListedContainer extends EngineContainer {
@@ -230,7 +230,7 @@ export class DockerStore {
         `SELECT d.installed_version FROM docker_containers d
           WHERE d.present = 1 AND d.ignored = 0 AND (
             (d.link_auto = 0 AND d.repository_id = ?1) OR
-            (d.link_auto = 1 AND d.label_repository = (SELECT lower(owner || '/' || name) FROM watched_repositories WHERE id = ?1)))`,
+            (d.link_auto = 1 AND d.label_repository = (SELECT full_name FROM watched_repositories WHERE id = ?1)))`,
       )
       .all(repositoryId)
       .map((r) => r.installed_version);
@@ -238,15 +238,14 @@ export class DockerStore {
 
   /**
    * Installed version of every shown container linked to a repository (by hand or through its labels). The repository
-   * is looked up in `idx_watched_repositories_full_name`; the unary `+` drops the TEXT affinity of `label_repository`,
-   * which would otherwise keep SQLite from using the index of the expression.
+   * is looked up by its `full_name` (unique index).
    */
   listLinkedVersions(): { repositoryId: number; installedVersion: string | null }[] {
     return this.db
       .query<{ repository_id: number; installed_version: string | null }, []>(
         `SELECT IIF(d.link_auto = 1, r.id, d.repository_id) AS repository_id, d.installed_version
            FROM docker_containers d
-           LEFT JOIN watched_repositories r ON d.link_auto = 1 AND lower(r.owner || '/' || r.name) = +d.label_repository
+           LEFT JOIN watched_repositories r ON d.link_auto = 1 AND r.full_name = d.label_repository
           WHERE d.present = 1 AND d.ignored = 0 AND IIF(d.link_auto = 1, r.id, d.repository_id) IS NOT NULL`,
       )
       .all()
@@ -256,11 +255,11 @@ export class DockerStore {
   /** Watched repositories with only the fields containers are matched and compared with (no secrets decrypted). */
   listRepositoryLinks(): RepositoryLink[] {
     return this.db
-      .query<{ id: number; owner: string; name: string; last_seen_tag: string | null; icon: string | null }, []>(
-        'SELECT id, owner, name, last_seen_tag, icon FROM watched_repositories',
+      .query<{ id: number; host: string | null; owner: string; name: string; last_seen_tag: string | null; icon: string | null }, []>(
+        'SELECT id, host, owner, name, last_seen_tag, icon FROM watched_repositories',
       )
       .all()
-      .map((r) => ({ id: r.id, owner: r.owner, name: r.name, lastSeenTag: r.last_seen_tag, icon: r.icon }));
+      .map((r) => ({ id: r.id, host: r.host, owner: r.owner, name: r.name, lastSeenTag: r.last_seen_tag, icon: r.icon }));
   }
 
   // --- Registry data ---

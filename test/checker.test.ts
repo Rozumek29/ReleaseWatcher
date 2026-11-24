@@ -272,7 +272,7 @@ describe('ReleaseChecker', () => {
           releases: true,
           vulnerabilities: false,
           appUpdates: true,
-          aptUpdates: true,
+          packageUpdates: true,
           updateSucceeded: false,
           updateFailed: false,
           dockerUpdates: true,

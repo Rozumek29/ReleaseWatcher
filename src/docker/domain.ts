@@ -2,7 +2,7 @@
  * Docker / Podman containers: image references, versions read from tags and labels, links to watched repositories
  * and the image update state. Pure logic – no I/O.
  */
-import { parseRepositoryName } from '../domain.ts';
+import { fullName, parseRepositoryReference } from '../domain.ts';
 import { compareVersions, parseVersion } from '../version.ts';
 
 export const DOCKER_RUNTIMES = ['docker', 'podman'] as const;
@@ -197,7 +197,7 @@ export const LABELS = {
   source: 'org.opencontainers.image.source',
   legacySource: 'org.label-schema.vcs-url',
   url: 'org.opencontainers.image.url',
-  /** Own label: the watched repository (`owner/name` or a GitHub URL). */
+  /** Own label: the watched repository (`owner/name`, a GitHub URL or the URL of a Gitea/Forgejo or GitLab repository). */
   repository: 'releasewatcher.repo',
   /** Own label: `true` hides the container (it can still be shown again in the UI). */
   ignore: 'releasewatcher.ignore',
@@ -231,12 +231,16 @@ export function labelVersion(labels: Readonly<Record<string, string>>): string |
   return null;
 }
 
-/** Watched repository named by the labels (`owner/name`, lower case); null when none points to GitHub. */
+/**
+ * Watched repository named by the labels as its lower-case `fullName()`: `owner/name` on GitHub, `host/owner/name` on a
+ * Gitea/Forgejo or GitLab instance (e.g. `org.opencontainers.image.source=https://codeberg.org/forgejo/forgejo`). The
+ * `url` label often names a project or registry page, so it counts only when it points to GitHub. Null when none fits.
+ */
 export function labelRepository(labels: Readonly<Record<string, string>>): string | null {
   for (const key of [LABELS.repository, LABELS.source, LABELS.legacySource, LABELS.url]) {
-    const parsed = parseRepositoryName(labels[key]?.replace(/^git\+/, '').replace(/#.*$/, ''));
-    if (parsed) {
-      return `${parsed.owner}/${parsed.name}`.toLowerCase();
+    const parsed = parseRepositoryReference(labels[key]);
+    if (parsed && (parsed.host === null || key !== LABELS.url)) {
+      return fullName(parsed).toLowerCase();
     }
   }
   return null;

@@ -172,7 +172,7 @@ describe('RepositoryStore file size', () => {
     assert.equal(containers.pruneRuns(), 0);
 
     limits = { checks: 10, others: 30 };
-    const updates = Array.from({ length: 32 }, () => finish(web.id, 'apt-upgrade'));
+    const updates = Array.from({ length: 32 }, () => finish(web.id, 'packages-upgrade'));
     const checks = Array.from({ length: 50 }, () => finish(web.id, 'check'));
     const dbChecks = Array.from({ length: 5 }, () => finish(db.id, 'check'));
 
@@ -228,11 +228,11 @@ describe('RepositoryStore installed version from machines', () => {
 
   it('reads the installed version from apps linked before the upgrade', () => {
     const path = join(dir, 'old.db');
-    // A database of the previous version with apps already linked to repositories.
+    // A database of the version before installed versions were read from apps, with apps already linked to repositories.
+    const before = MIGRATIONS.findIndex((m) => m.includes('ADD COLUMN installed_app_id'));
     const old = new Database(path);
-    const upgrade = MIGRATIONS.findIndex((m) => m.includes('ADD COLUMN installed_app_id'));
-    for (const migration of MIGRATIONS.slice(0, upgrade)) old.exec(migration);
-    old.exec(`PRAGMA user_version = ${upgrade}`);
+    for (const migration of MIGRATIONS.slice(0, before)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${before}`);
     const now = '2026-11-01T00:00:00.000Z';
     old.exec(`
       INSERT INTO watched_repositories (id, owner, name, created_at, installed_version) VALUES
@@ -264,9 +264,117 @@ describe('RepositoryStore installed version from machines', () => {
 
     // save() never overwrites the version read from the app with an older copy.
     const stale = repo(1);
-    store.database.exec("UPDATE container_apps SET installed_version = '1.3.0' WHERE id = 2");
+    store.database.exec("UPDATE target_apps SET installed_version = '1.3.0' WHERE id = 2");
     store.save(stale);
     assert.equal(repo(1).installedVersion, '1.3.0');
+    store.close();
+  });
+});
+
+describe('RepositoryStore providers', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-provider-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('rebuilds the repositories with provider and host, keeping links, advisories and triggers', () => {
+    const path = join(dir, 'old.db');
+    const before = MIGRATIONS.findIndex((m) => m.includes('CREATE TABLE watched_repositories_new'));
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, before)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${before}`);
+    const now = '2026-11-01T00:00:00.000Z';
+    old.exec(`
+      INSERT INTO watched_repositories (id, owner, name, created_at, github_token) VALUES
+        (5, 'Acme', 'App', '${now}', NULL),
+        (9, 'acme', 'docker', '${now}', NULL);
+      INSERT INTO containers (id, vmid, name, created_at) VALUES (1, 101, 'vault', '${now}');
+      INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id, version_command, installed_version, checked_at) VALUES
+        (2, 1, 'App', '${now}', 'github', 5, 'cat /v', '1.2.0', '${now}');
+      INSERT INTO docker_containers (id, target_id, name, container_id, image, link_auto, label_repository, installed_version, first_seen_at, last_seen_at) VALUES
+        (1, 1, 'docker', 'c1', 'acme/docker:3.0.0', 1, 'acme/docker', '3.0.0', '${now}', '${now}');
+      UPDATE watched_repositories SET installed_app_id = 2 WHERE id = 5;
+      UPDATE watched_repositories SET installed_docker_id = 1 WHERE id = 9;
+      INSERT INTO repository_advisories (repository_id, advisory_id, source, aliases, summary, severity, html_url, published_at, vulnerabilities, first_seen_at)
+        VALUES (5, 'GHSA-1', 'github', '[]', 'Bug', 'high', 'https://x', '${now}', '[]', '${now}');
+    `);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    const app = store.get(5)!;
+    assert.deepEqual([app.provider, app.host, app.owner, app.name], ['github', null, 'Acme', 'App']);
+    assert.deepEqual(app.installedVersionApp, { kind: 'app', id: 2 });
+    assert.equal(store.listAdvisories(5).length, 1);
+    // New repositories continue after the highest id.
+    assert.equal(store.add('acme', 'next', false).id, 10);
+
+    // The triggers read the rebuilt table: a Docker container linked through its labels keeps the version in sync …
+    store.database.exec("UPDATE docker_containers SET installed_version = '3.1.0' WHERE id = 1");
+    assert.equal(store.get(9)!.installedVersion, '3.1.0');
+    // … and is dropped when its labels point elsewhere.
+    store.database.exec("UPDATE docker_containers SET label_repository = 'codeberg.org/acme/docker' WHERE id = 1");
+    assert.equal(store.get(9)!.installedVersionApp, null);
+    // Removing a repository still removes its advisories.
+    store.delete(5);
+    assert.equal(store.database.query<{ n: number }, []>('SELECT count(*) AS n FROM repository_advisories').get()!.n, 0);
+    store.close();
+  });
+
+  it('keeps one repository per host, owner and name', () => {
+    const store = new RepositoryStore(':memory:');
+    const codeberg = store.add('acme', 'docker', false, { provider: 'gitea', host: 'codeberg.org' });
+    store.add('acme', 'docker', false);
+    assert.deepEqual([codeberg.provider, codeberg.host], ['gitea', 'codeberg.org']);
+    assert.equal(store.exists('ACME', 'Docker', 'Codeberg.org'), true);
+    assert.equal(store.exists('acme', 'docker', 'gitlab.com'), false);
+    assert.throws(() => store.add('Acme', 'DOCKER', false, { provider: 'gitlab', host: 'CODEBERG.org' }), /UNIQUE/);
+    // GitHub never has a host, the others always do.
+    assert.throws(() => store.database.exec("INSERT INTO watched_repositories (provider, owner, name, created_at) VALUES ('gitea', 'a', 'b', 'x')"), /CHECK/);
+    store.close();
+  });
+});
+
+describe('Renamed columns', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-rename-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('keeps tokens, package updates, app sources, runs, settings and triggers of older databases', () => {
+    const path = join(dir, 'old.db');
+    const before = MIGRATIONS.findIndex((m) => m.includes('RENAME COLUMN github_token TO access_token'));
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, before)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${before}`);
+    const now = '2026-11-01T00:00:00.000Z';
+    old.exec(`
+      INSERT INTO watched_repositories (id, owner, name, created_at, github_token, etag) VALUES (1, 'acme', 'app', '${now}', 'tok', '"e1"');
+      INSERT INTO hosts (id, type, name, address, created_at) VALUES (1, 'proxmox', 'pve', 'pve.lan', '${now}');
+      INSERT INTO containers (id, host_id, vmid, name, created_at, apt_enabled, apt_upgradable, notified_signature) VALUES
+        (1, 1, 101, 'vault', '${now}', 0, '[{"name":"curl","currentVersion":"1","newVersion":"2"}]', 'apt:curl=2|app:1=3|flatpak:x=1');
+      INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id) VALUES (1, 1, 'App', '${now}', 'github', 1);
+      INSERT INTO container_runs (container_id, kind, trigger, status, started_at) VALUES (1, 'apt-upgrade', 'manual', 'success', '${now}');
+      INSERT INTO settings (key, value) VALUES ('notifyAptUpdates', 'false');
+      UPDATE watched_repositories SET installed_app_id = 1 WHERE id = 1;
+    `);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    const repo = store.get(1)!;
+    assert.deepEqual([repo.accessToken, repo.releasesEtag], ['tok', '"e1"']);
+    const containers = new ContainerStore(store.database, store.secretBox);
+    const container = containers.get(1)!;
+    assert.equal(container.packagesEnabled, false);
+    assert.deepEqual(container.packageUpdates.map((p) => p.name), ['curl']);
+    assert.equal(container.notifiedSignature, 'pkg:curl=2|app:1=3|flatpak:x=1');
+    assert.equal(containers.listApps(1)[0]!.latestSource, 'repository');
+    assert.equal(containers.listRuns(1)[0]!.kind, 'packages-upgrade');
+    assert.equal(store.readSettings()['notifyPackageUpdates'], 'false');
+    // The tables were renamed to targets, target_apps and target_runs; the triggers follow them.
+    store.database.exec("UPDATE target_apps SET installed_version = '9.0.0' WHERE id = 1");
+    assert.equal(store.get(1)!.installedVersion, '9.0.0');
     store.close();
   });
 });
@@ -278,9 +386,9 @@ describe('ContainerStore run output', () => {
     const container = containers.add(addProxmoxHost(store).id, 101, 'web');
     const log = Array.from({ length: 200 }, (_, i) => `Setting up package-${i} (1.${i}) …`).join('\n');
     const storedType = (id: number) =>
-      (store.database.query('SELECT typeof(output) AS t FROM container_runs WHERE id = ?').get(id) as { t: string }).t;
+      (store.database.query('SELECT typeof(output) AS t FROM target_runs WHERE id = ?').get(id) as { t: string }).t;
 
-    const run = containers.startRun(container.id, null, 'apt-upgrade', 'manual');
+    const run = containers.startRun(container.id, null, 'packages-upgrade', 'manual');
     containers.saveRunOutput(run.id, log);
     assert.equal(storedType(run.id), 'text'); // live output stays text while running
     containers.finishRun({ ...run, status: 'succeeded', finishedAt: new Date().toISOString(), exitCode: 0, output: log });
@@ -290,8 +398,8 @@ describe('ContainerStore run output', () => {
     // A run finished before compression existed is packed at startup; short output stays text.
     const old = containers.startRun(container.id, null, 'check', 'manual');
     const short = containers.startRun(container.id, null, 'check', 'manual');
-    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = ? WHERE id = ?`, [log, old.id]);
-    store.database.run(`UPDATE container_runs SET status = 'succeeded', output = 'ok' WHERE id = ?`, [short.id]);
+    store.database.run(`UPDATE target_runs SET status = 'succeeded', output = ? WHERE id = ?`, [log, old.id]);
+    store.database.run(`UPDATE target_runs SET status = 'succeeded', output = 'ok' WHERE id = ?`, [short.id]);
     assert.equal(containers.packFinishedOutputs(), 1);
     assert.equal(storedType(old.id), 'blob');
     assert.equal(containers.getRun(old.id)?.output, log);

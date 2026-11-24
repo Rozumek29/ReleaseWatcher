@@ -1,6 +1,16 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'bun:test';
-import { iconUrls, MAX_NOTIFICATIONS_PER_CHECK, parseRepositoryName, selectNewReleases, validateIcon } from '../src/domain.ts';
+import {
+  fullName,
+  iconUrls,
+  MAX_NOTIFICATIONS_PER_CHECK,
+  parseRepositoryName,
+  parseRepositoryReference,
+  repositoryAvatarUrl,
+  repositoryUrl,
+  selectNewReleases,
+  validateIcon,
+} from '../src/domain.ts';
 import { dayIso, release } from './helpers.ts';
 
 describe('parseRepositoryName', () => {
@@ -19,6 +29,55 @@ describe('parseRepositoryName', () => {
   for (const input of [null, '', 'just-owner', 'a/b/c', 'https://gitlab.com/owner/repo', 'owner/..', '-owner/repo', 'own er/repo']) {
     it(`rejects ${JSON.stringify(input)}`, () => assert.equal(parseRepositoryName(input), null));
   }
+});
+
+describe('parseRepositoryReference', () => {
+  const valid: [string, string | null, string, string, string | null][] = [
+    ['dotnet/runtime', null, 'dotnet', 'runtime', 'github'],
+    ['https://github.com/dotnet/aspire', null, 'dotnet', 'aspire', 'github'],
+    ['https://codeberg.org/forgejo/forgejo', 'codeberg.org', 'forgejo', 'forgejo', 'gitea'],
+    ['codeberg.org/forgejo/forgejo/releases', 'codeberg.org', 'forgejo', 'forgejo', 'gitea'],
+    ['https://code.forgejo.org/forgejo/runner.git', 'code.forgejo.org', 'forgejo', 'runner', 'gitea'],
+    ['git+https://Codeberg.org/forgejo/forgejo#main', 'codeberg.org', 'forgejo', 'forgejo', 'gitea'],
+    ['https://gitlab.com/gitlab-org/gitlab-runner', 'gitlab.com', 'gitlab-org', 'gitlab-runner', 'gitlab'],
+    ['https://gitlab.com/group/sub/project/-/releases', 'gitlab.com', 'group/sub', 'project', 'gitlab'],
+    ['https://git.example.com:3000/me/app', 'git.example.com:3000', 'me', 'app', null],
+    ['git.lan/me/app/', 'git.lan', 'me', 'app', null],
+  ];
+  for (const [input, host, owner, name, provider] of valid) {
+    it(`parses "${input}"`, () => assert.deepEqual(parseRepositoryReference(input), { host, owner, name, provider }));
+  }
+
+  for (const input of [
+    null,
+    '',
+    'just-owner',
+    'http://codeberg.org/forgejo/forgejo',
+    'ssh://git@codeberg.org/forgejo/forgejo',
+    'https://user:secret@git.lan/me/app',
+    'https://codeberg.org/forgejo',
+    'https://git.lan/me/..',
+    'https://git.lan/me/bad name',
+    'https://github.com/a/b/c',
+  ]) {
+    it(`rejects ${JSON.stringify(input)}`, () => assert.equal(parseRepositoryReference(input), null));
+  }
+
+  it('names, links and shows repositories of every provider', () => {
+    const codeberg = { provider: 'gitea', host: 'codeberg.org', owner: 'forgejo', name: 'forgejo' } as const;
+    const gitlab = { provider: 'gitlab', host: 'gitlab.com', owner: 'group/sub', name: 'project' } as const;
+    const github = { provider: 'github', host: null, owner: 'acme', name: 'widget' } as const;
+    assert.deepEqual([fullName(github), fullName(codeberg), fullName(gitlab)], [
+      'acme/widget',
+      'codeberg.org/forgejo/forgejo',
+      'gitlab.com/group/sub/project',
+    ]);
+    assert.equal(repositoryUrl(github), 'https://github.com/acme/widget');
+    assert.equal(repositoryUrl(gitlab), 'https://gitlab.com/group/sub/project');
+    assert.equal(repositoryAvatarUrl(github), 'https://avatars.githubusercontent.com/acme?s=64');
+    assert.equal(repositoryAvatarUrl(codeberg), 'https://codeberg.org/user/avatar/forgejo/64');
+    assert.equal(repositoryAvatarUrl(gitlab), null);
+  });
 });
 
 describe('selectNewReleases', () => {

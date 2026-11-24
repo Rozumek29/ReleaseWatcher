@@ -229,7 +229,7 @@ describe('GitHubReleaseSource.getSecurityAdvisories', () => {
       }) as unknown as typeof fetch,
     });
 
-    const first = await source.getSecurityAdvisories('acme', 'widget', null);
+    const first = await source.getSecurityAdvisories({ provider: 'github', host: null, owner: 'acme', name: 'widget' }, null);
     assert.equal(first.etag, '"a1"');
     assert.deepEqual(first.advisories, [
       {
@@ -248,7 +248,7 @@ describe('GitHubReleaseSource.getSecurityAdvisories', () => {
     ]);
     assert.match(requests[0]!.url, /\/repos\/acme\/widget\/security-advisories\?state=published/);
 
-    const second = await source.getSecurityAdvisories('acme', 'widget', '"a1"');
+    const second = await source.getSecurityAdvisories({ provider: 'github', host: null, owner: 'acme', name: 'widget' }, '"a1"');
     assert.equal(second.notModified, true);
     assert.equal(requests[1]!.headers['If-None-Match'], '"a1"');
   });

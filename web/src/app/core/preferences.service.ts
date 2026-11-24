@@ -1,5 +1,6 @@
 import { DOCUMENT } from '@angular/common';
 import { Injectable, effect, inject, signal } from '@angular/core';
+import { DEFAULT_NAV_ORDER, NavPageId, normalizeNavOrder } from './nav-pages';
 
 export type RepositoryLayout = 'list' | 'grid';
 /** Grouping of the repositories list. */
@@ -25,6 +26,8 @@ interface Preferences {
   containerSort: ContainerSort;
   theme: ThemeMode;
   accent: AccentColor;
+  /** Order of the sidebar pages; the first one is the start page. */
+  navOrder: NavPageId[];
 }
 
 const DEFAULTS: Preferences = {
@@ -34,6 +37,7 @@ const DEFAULTS: Preferences = {
   containerSort: 'attention',
   theme: 'system',
   accent: 'indigo',
+  navOrder: [...DEFAULT_NAV_ORDER],
 };
 const CONTAINER_SORTS: readonly ContainerSort[] = ['attention', 'vmid', 'name'];
 const REPOSITORY_GROUPINGS: readonly RepositoryGrouping[] = ['none', 'owner', 'custom'];
@@ -49,6 +53,7 @@ export class PreferencesService {
   readonly containerSort = signal<ContainerSort>(this.initial.containerSort);
   readonly theme = signal<ThemeMode>(this.initial.theme);
   readonly accent = signal<AccentColor>(this.initial.accent);
+  readonly navOrder = signal<NavPageId[]>(this.initial.navOrder);
 
   constructor() {
     effect(() =>
@@ -59,6 +64,7 @@ export class PreferencesService {
         containerSort: this.containerSort(),
         theme: this.theme(),
         accent: this.accent(),
+        navOrder: this.navOrder(),
       }),
     );
     effect(() => applyAppearance(this.document, this.theme(), this.accent()));
@@ -89,6 +95,7 @@ function load(): Preferences {
       containerSort: oneOf(CONTAINER_SORTS, stored.containerSort, DEFAULTS.containerSort),
       theme: oneOf(THEME_MODES, stored.theme, DEFAULTS.theme),
       accent: oneOf(ACCENTS, stored.accent, DEFAULTS.accent),
+      navOrder: normalizeNavOrder(stored.navOrder),
     };
   } catch {
     return DEFAULTS;

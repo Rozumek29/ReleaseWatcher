@@ -18,13 +18,13 @@ const containerUpdates: ContainerUpdatesNotification = {
   targetKind: 'lxc',
   containerName: 'cloud',
   apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }],
-  aptPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
+  systemPackages: [{ name: 'curl', currentVersion: '8.0', newVersion: '8.1' }],
 };
 const failedUpdate: UpdateResultNotification = {
   vmid: 105,
   targetKind: 'lxc',
   containerName: 'cloud',
-  kind: 'apt-upgrade',
+  kind: 'packages-upgrade',
   appName: null,
   succeeded: false,
   detail: 'Update failed – exit code 100',
@@ -46,9 +46,9 @@ describe('NotificationDispatcher preferences', () => {
   });
 
   it('leaves out apt packages or applications that are switched off', async () => {
-    const { notifier, dispatcher, current } = setup({ aptUpdates: false });
+    const { notifier, dispatcher, current } = setup({ packageUpdates: false });
     await dispatcher.dispatchContainerUpdates(containerUpdates);
-    assert.deepEqual(notifier.containerSent[0]?.aptPackages, []);
+    assert.deepEqual(notifier.containerSent[0]?.systemPackages, []);
     assert.equal(notifier.containerSent[0]?.apps.length, 1);
 
     current.appUpdates = false;

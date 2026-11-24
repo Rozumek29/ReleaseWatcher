@@ -37,6 +37,37 @@ described in `DESIGN.md` – follow it for every UI or API change so new code lo
   bun run typecheck && bun run test && bun run build
   ```
 
+### Large tasks: stacked PRs
+
+A small task stays one PR (above). A large one – several layers or several parts worth reviewing on their own, e.g.
+API contract → server → UI – becomes a chain of small PRs with
+[stacked PRs](https://docs.github.com/en/pull-requests/get-started/about-stacked-prs) and the `gh stack` extension
+(`gh extension install github/gh-stack`, needs gh 2.90+):
+
+- Each PR is based on the branch of the PR below it; the bottom one targets `main`. A branch depends only on its own
+  layer or the ones below it, never on a higher one.
+- Every PR in the stack follows the rules above: its own commits, a draft, green CI, no AI attribution.
+
+```bash
+gh stack init feat/x-contract       # new stack on main (or: gh stack init --base main <existing branches…>)
+# …commit…
+gh stack add feat/x-server          # next layer on top of the current one
+# …commit…
+gh stack submit --auto              # push all branches, create/update the PRs (drafts) and link them as a stack
+gh stack rebase                     # after changing a lower branch: cascade-rebase the ones above
+gh stack sync                       # fetch, rebase onto the current main, push and refresh the PRs
+gh stack view --short
+```
+
+- **Merging:** still only when the user says so, after CI passes, and **always squash into `main`** – every PR of the
+  stack becomes its own squashed commit. Merge from the bottom: `gh stack merge --squash` merges atomically everything up
+  to the chosen PR (`gh stack merge --squash <pr>`), the PRs above it are rebased and retargeted. Mark the merged PRs
+  ready first (`gh pr ready <pr>`; drafts cannot be merged) and run `gh stack sync` afterwards. Never merge a stack PR
+  into the branch below it.
+- **Parallel sessions:** each agent works in its own `git worktree` on its own branch; one coordinating session
+  assembles the stack (`gh stack init --base main <branches…>` adopts branches from other worktrees) and does the
+  rebases and submits.
+
 ## Releasing a version
 
 1. Pick the version from the changes since the last tag (`git log $(git describe --tags --abbrev=0)..main`):
@@ -113,7 +144,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   `lxc-info` / `lxc-attach` directly and falls back to `pct` only when they fail; keep frequent work in as few `pct`/`qm`
   calls as possible. Node
   commands that differ per guest kind take a `GuestTarget` (`{ kind, vmid }`) and use `guestCli()` (`pct`/`qm`). `ContainerService` allows one task per container
-  and runs checks/updates in the background, writing output to `container_runs`; updates are manual only
+  and runs checks/updates in the background, writing output to `target_runs`; updates are manual only
   (the scheduler runs checks, never updates). The runtime Docker image therefore needs `openssh-client`.
 - What a target kind supports (backups, start/stop, resources, applications, Home Assistant, "update all", how it
   restarts) is described once in `TARGET_CAPABILITIES` (`src/proxmox/domain.ts`) and sent to the UI as
@@ -147,7 +178,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
   SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, the OIDC client secret, password hashes, session tokens, API tokens and the setup code are secrets
-  (a key is exposed only as its public key and fingerprint, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
+  (a key is exposed only as its public key and fingerprint, a repository token as `hasAccessToken` + `accessTokenMasked`, the Home Assistant token as
   `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).
   Keep it that way in any new endpoint or DTO.

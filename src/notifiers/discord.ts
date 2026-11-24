@@ -1,4 +1,4 @@
-import { ownerAvatarUrl, rasterIconUrl } from '../domain.ts';
+import { rasterIconUrl, repositoryAvatarUrl, type RepositoryProvider } from '../domain.ts';
 import {
   advisoryIds,
   affectedVersions,
@@ -23,7 +23,15 @@ import {
 } from './notifier.ts';
 
 /** Author icon of a repository embed: its custom icon (Discord shows no SVG) or the owner's avatar. */
-const repositoryIconUrl = (n: { owner: string; icon?: string | null }): string => rasterIconUrl(n.icon ?? null) ?? ownerAvatarUrl(n.owner, 128);
+const repositoryIconUrl = (n: {
+  provider?: RepositoryProvider;
+  host?: string | null;
+  owner: string;
+  icon?: string | null;
+}): string | undefined =>
+  rasterIconUrl(n.icon ?? null) ??
+  repositoryAvatarUrl({ provider: n.provider ?? 'github', host: n.host ?? null, owner: n.owner }, 128) ??
+  undefined;
 
 export interface DiscordOptions {
   /** Channel webhook URL (Channel settings → Integrations → Webhooks). Null disables the notifier. */

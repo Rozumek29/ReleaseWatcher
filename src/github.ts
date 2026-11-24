@@ -1,46 +1,13 @@
 import { normalizeSeverity, type SecurityAdvisory } from './advisories.ts';
-import type { ReleaseInfo } from './domain.ts';
-
-export interface ReleaseFetchResult {
-  releases: ReleaseInfo[];
-  etag: string | null;
-  notModified: boolean;
-}
-
-export interface AdvisoryFetchResult {
-  advisories: SecurityAdvisory[];
-  etag: string | null;
-  notModified: boolean;
-}
-
-/** Fetches releases from a remote provider (GitHub today, possibly GitLab etc. later). */
-export interface RateLimit {
-  limit: number;
-  remaining: number;
-  /** ISO date when the limit resets. */
-  resetAt: string;
-}
-
-export interface ReleaseSource {
-  /** Current API quota, or null when the provider doesn't report one. */
-  getRateLimit?(): Promise<RateLimit | null>;
-  /** `token` overrides the global token for this repository (e.g. a private repository of another account). */
-  repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean>;
-  /** Most recent published releases (drafts excluded). Pass the previous ETag to get a cheap 304. */
-  getRecentReleases(owner: string, name: string, etag: string | null, token?: string | null): Promise<ReleaseFetchResult>;
-  /** Published security advisories of the repository (withdrawn ones excluded). Optional: not every provider has them. */
-  getSecurityAdvisories?(owner: string, name: string, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult>;
-}
-
-export class GitHubApiError extends Error {
-  readonly status: number;
-
-  constructor(message: string, status: number) {
-    super(message);
-    this.name = 'GitHubApiError';
-    this.status = status;
-  }
-}
+import type { ReleaseInfo, RepositoryRef } from './domain.ts';
+import {
+  ReleaseSourceError,
+  truncate,
+  type AdvisoryFetchResult,
+  type RateLimit,
+  type ReleaseFetchResult,
+  type ReleaseSource,
+} from './release-source.ts';
 
 interface GitHubReleaseDto {
   tag_name: string;
@@ -99,8 +66,8 @@ export class GitHubReleaseSource implements ReleaseSource {
     return core ? { limit: core.limit, remaining: core.remaining, resetAt: new Date(core.reset * 1000).toISOString() } : null;
   }
 
-  async repositoryExists(owner: string, name: string, token?: string | null): Promise<boolean> {
-    const response = await this.request(this.repoPath(owner, name), {}, token);
+  async repositoryExists(repo: RepositoryRef, token?: string | null): Promise<boolean> {
+    const response = await this.request(this.repoPath(repo), {}, token);
     if (response.status === 404) {
       return false;
     }
@@ -108,13 +75,8 @@ export class GitHubReleaseSource implements ReleaseSource {
     return true;
   }
 
-  async getRecentReleases(
-    owner: string,
-    name: string,
-    etag: string | null,
-    token?: string | null,
-  ): Promise<ReleaseFetchResult> {
-    const path = `${this.repoPath(owner, name)}/releases?per_page=${this.options.releasesPerPage}`;
+  async getRecentReleases(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
+    const path = `${this.repoPath(repo)}/releases?per_page=${this.options.releasesPerPage}`;
     const response = await this.request(path, etag ? { 'If-None-Match': etag } : {}, token);
 
     if (response.status === 304) {
@@ -141,14 +103,9 @@ export class GitHubReleaseSource implements ReleaseSource {
     return { releases, etag: response.headers.get('etag'), notModified: false };
   }
 
-  async getSecurityAdvisories(
-    owner: string,
-    name: string,
-    etag: string | null,
-    token?: string | null,
-  ): Promise<AdvisoryFetchResult> {
+  async getSecurityAdvisories(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {
     const path =
-      `${this.repoPath(owner, name)}/security-advisories?state=published&sort=published&direction=desc&per_page=${ADVISORIES_PER_PAGE}`;
+      `${this.repoPath(repo)}/security-advisories?state=published&sort=published&direction=desc&per_page=${ADVISORIES_PER_PAGE}`;
     const response = await this.request(path, etag ? { 'If-None-Match': etag } : {}, token);
 
     if (response.status === 304) {
@@ -182,8 +139,8 @@ export class GitHubReleaseSource implements ReleaseSource {
     return { advisories, etag: response.headers.get('etag'), notModified: false };
   }
 
-  private repoPath(owner: string, name: string): string {
-    return `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}`;
+  private repoPath(repo: RepositoryRef): string {
+    return `/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.name)}`;
   }
 
   /** `tokenOverride` (a repository's own token) wins over the global token. */
@@ -211,7 +168,5 @@ async function ensureOk(response: Response): Promise<void> {
   const message = rateLimited
     ? 'GitHub API rate limit exceeded. Set GITHUB_TOKEN to raise the limit.'
     : `GitHub API returned ${response.status}: ${truncate(await response.text(), 300)}`;
-  throw new GitHubApiError(message, response.status);
+  throw new ReleaseSourceError(message, response.status);
 }
-
-const truncate = (value: string, max: number): string => (value.length <= max ? value : `${value.slice(0, max)}…`);

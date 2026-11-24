@@ -76,7 +76,7 @@ const addContainerSchema = body({
 const updateContainerSchema = body({
   name: z.string().max(100),
   isEnabled: z.boolean(),
-  aptEnabled: z.boolean(),
+  packagesEnabled: z.boolean(),
   backupBeforeUpdate: z.boolean().nullish(),
   startWhenStopped: z.boolean().optional(),
   checkCron: z.string().max(200).nullish(),
@@ -88,13 +88,13 @@ const updateContainerSchema = body({
   dockerEnabled: z.boolean().optional(),
 });
 
-/** Body of `POST /api/containers/:id/home-assistant-update`: `ids` selects updates (omitted = all installable). */
+/** Body of `POST /api/targets/:id/home-assistant-update`: `ids` selects updates (omitted = all installable). */
 const homeAssistantUpdateSchema = body({
   backup: z.boolean().nullish(),
   ids: z.array(z.string().max(300)).max(100).nullish(),
 });
 
-/** Body of `POST /api/containers/update-all`: `ids` selects containers (omitted = every container with updates). */
+/** Body of `POST /api/targets/update-all`: `ids` selects containers (omitted = every container with updates). */
 const updateAllSchema = body({
   backup: z.boolean().nullish(),
   ids: z.array(z.int().min(1)).max(1000).nullish(),
@@ -123,7 +123,7 @@ type AppBody = z.output<typeof appSchema>;
 
 const blankToNull = (value: string | null | undefined): string | null => value?.trim() || null;
 
-export const runDto = (run: Run | Omit<Run, 'output'>) => ({ ...run });
+export const runDto = ({ containerId, ...run }: Run | Omit<Run, 'output'>) => ({ ...run, targetId: containerId });
 
 /** A request named a host that is not a Proxmox node. */
 class UnknownNodeError extends Error {
@@ -256,7 +256,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       vmid: c.vmid,
       name: c.name,
       isEnabled: c.isEnabled,
-      aptEnabled: c.aptEnabled,
+      packagesEnabled: c.packagesEnabled,
       backupBeforeUpdate: c.backupBeforeUpdate,
       /** Whether updates back up first unless changed for a single update. */
       effectiveBackupBeforeUpdate:
@@ -271,7 +271,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       resourcesRaised: c.resourcesToRestore !== null,
       nextCheckAt: scheduler.nextRunOf(c)?.toISOString() ?? null,
       status: c.status,
-      aptUpgradable: c.aptUpgradable,
+      packageUpdates: c.packageUpdates,
       packageManager: c.packageManager,
       /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
       appStores: APP_STORES.flatMap((store) => {
@@ -295,7 +295,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       apps: appDtos,
       /** System packages count as one pending update, so do Flatpak and Snap; every Home Assistant update as one. */
       updatesAvailable:
-        (c.aptUpgradable.length > 0 ? 1 : 0) +
+        (c.packageUpdates.length > 0 ? 1 : 0) +
         APP_STORES.filter((store) => (c.appStores[store]?.length ?? 0) > 0).length +
         appDtos.filter((a) => a.updateAvailable).length +
         (c.homeAssistant?.updates.length ?? 0),
@@ -331,8 +331,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       return validationProblem('latestSource', `Use one of: ${LATEST_SOURCES.join(', ')}.`);
     }
     const latestSource = body.latestSource as LatestSource;
-    const repositoryId = latestSource === 'github' ? (body.repositoryId ?? null) : null;
-    if (latestSource === 'github' && (repositoryId === null || !repositories.get(repositoryId))) {
+    const repositoryId = latestSource === 'repository' ? (body.repositoryId ?? null) : null;
+    if (latestSource === 'repository' && (repositoryId === null || !repositories.get(repositoryId))) {
       return validationProblem('repositoryId', 'Choose a watched GitHub repository.');
     }
     const latestCommand = latestSource === 'command' ? blankToNull(body.latestCommand) : null;
@@ -408,7 +408,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     backupOf: (container: Container) => string | null | Response,
   ): Response => {
     if (plan.length === 0) {
-      return Response.json({ containers: 0, updates: 0 });
+      return Response.json({ targets: 0, updates: 0 });
     }
     const requests: UpdateRequest[] = [];
     for (const { container } of plan) {
@@ -420,7 +420,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     }
     updater.enqueue(requests);
     return Response.json(
-      { containers: plan.length, updates: plan.reduce((sum, p) => sum + p.updates.length, 0) },
+      { targets: plan.length, updates: plan.reduce((sum, p) => sum + p.updates.length, 0) },
       { status: 202 },
     );
   };
@@ -436,7 +436,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
     // Containers present on the node (`pct list`), marked when already added.
-    '/api/proxmox/containers': {
+    '/api/proxmox/guests': {
       GET: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
@@ -457,7 +457,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
 
-    '/api/containers': {
+    '/api/targets': {
       GET: () => Response.json(listDtos()),
       POST: (req: Request) =>
         guard(async () => {
@@ -479,12 +479,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           service.startCheck(container, 'manual');
           return Response.json(containerDto(container), {
             status: 201,
-            headers: { location: `/api/containers/${container.id}` },
+            headers: { location: `/api/targets/${container.id}` },
           });
         }),
     },
     // The Proxmox host itself as a target: apt check and dist-upgrade on the node (no applications, no backup).
-    '/api/containers/node': {
+    '/api/targets/node': {
       POST: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
@@ -501,13 +501,13 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           service.startCheck(node, 'manual');
           return Response.json(containerDto(node), {
             status: 201,
-            headers: { location: `/api/containers/${node.id}` },
+            headers: { location: `/api/targets/${node.id}` },
           });
         }),
     },
     // Adds every container of the node that has not been added yet and queues a check of each. Virtual machines
     // are added one by one: they need the QEMU guest agent, and appliances like Home Assistant OS have no apt.
-    '/api/containers/add-all': {
+    '/api/targets/add-all': {
       POST: (req: Request) =>
         guard(async () => {
           const hostId = requireNode(queryHostId(req));
@@ -529,7 +529,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           );
         }),
     },
-    '/api/containers/check-all': {
+    '/api/targets/check-all': {
       POST: () =>
         guard(() => {
           const enabled = containers.listEnabledSchedules();
@@ -543,7 +543,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
     },
     // Updates every container with pending updates (or those in `ids`: apt, then applications), one after another.
     // The host is left out.
-    '/api/containers/update-all': {
+    '/api/targets/update-all': {
       POST: (req: Request) =>
         guard(async () => {
           const options = await readOptionalBody(req, updateAllSchema);
@@ -563,12 +563,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return startUpdates(plan, (container) => resolveBackup(container, options.backup === false ? false : undefined));
         }),
     },
-    '/api/containers/:id': {
-      GET: (req: Bun.BunRequest<'/api/containers/:id'>) => {
+    '/api/targets/:id': {
+      GET: (req: Bun.BunRequest<'/api/targets/:id'>) => {
         const container = findContainer(req.params.id);
         return container ? Response.json(containerDto(container)) : problem(404, 'Container not found.');
       },
-      PUT: async (req: Bun.BunRequest<'/api/containers/:id'>) => {
+      PUT: async (req: Bun.BunRequest<'/api/targets/:id'>) => {
         const container = findContainer(req.params.id);
         const body = await readBody(req, updateContainerSchema);
         if (!container) {
@@ -613,7 +613,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         Object.assign(container, {
           name,
           isEnabled: body.isEnabled,
-          aptEnabled: !can.aptOptional || body.aptEnabled,
+          packagesEnabled: !can.packagesOptional || body.packagesEnabled,
           backupBeforeUpdate:
             can.backup === null ? null : body.backupBeforeUpdate === undefined ? container.backupBeforeUpdate : body.backupBeforeUpdate,
           startWhenStopped: can.power && (body.startWhenStopped ?? container.startWhenStopped),
@@ -624,8 +624,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           homeAssistantToken: can.homeAssistant ? homeAssistantToken : null,
           homeAssistantInstall: can.homeAssistant && (body.homeAssistantInstall ?? container.homeAssistantInstall),
         });
-        if (!container.aptEnabled) {
-          container.aptUpgradable = [];
+        if (!container.packagesEnabled) {
+          container.packageUpdates = [];
         }
         if (body.dockerEnabled !== undefined && body.dockerEnabled !== container.dockerEnabled) {
           container.dockerEnabled = body.dockerEnabled;
@@ -634,7 +634,7 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         containers.save(container);
         return Response.json(containerDto(container));
       },
-      DELETE: (req: Bun.BunRequest<'/api/containers/:id'>) => {
+      DELETE: (req: Bun.BunRequest<'/api/targets/:id'>) => {
         const container = findContainer(req.params.id);
         if (!container) {
           return problem(404, 'Container not found.');
@@ -647,34 +647,34 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         return new Response(null, { status: 204 });
       },
     },
-    '/api/containers/:id/check': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/check'>) =>
+    '/api/targets/:id/check': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/check'>) =>
         guard(() => {
           const container = findContainer(req.params.id);
           return container ? accepted(service.startCheck(container, 'manual')) : problem(404, 'Container not found.');
         }),
     },
-    '/api/containers/:id/apt-upgrade': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/apt-upgrade'>) =>
+    '/api/targets/:id/packages-upgrade': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/packages-upgrade'>) =>
         guard(async () => {
           const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
           if (!container) {
             return problem(404, 'Container not found.');
           }
-          if (!container.aptEnabled) {
+          if (!container.packagesEnabled) {
             return problem(409, 'System packages are disabled for this container.');
           }
           const backup = resolveBackup(container, options.backup);
-          return backup instanceof Response ? backup : accepted(service.startAptUpgrade(container, backup));
+          return backup instanceof Response ? backup : accepted(service.startPackagesUpgrade(container, backup));
         }),
     },
     // Updates every Flatpak / Snap application of a machine (`flatpak update` / `snap refresh`).
     ...Object.fromEntries(
       APP_STORES.map((store) => [
-        `/api/containers/:id/${store}-update`,
+        `/api/targets/:id/${store}-update`,
         {
-          POST: (req: Bun.BunRequest<'/api/containers/:id'>) =>
+          POST: (req: Bun.BunRequest<'/api/targets/:id'>) =>
             guard(async () => {
               const options = await readOptionalBody(req, updateOptionsSchema);
               const container = findContainer(req.params.id);
@@ -691,8 +691,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       ]),
     ),
     // Installs Home Assistant updates in a Home Assistant OS virtual machine (every installable one, or `ids`).
-    '/api/containers/:id/home-assistant-update': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/home-assistant-update'>) =>
+    '/api/targets/:id/home-assistant-update': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/home-assistant-update'>) =>
         guard(async () => {
           const options = await readOptionalBody(req, homeAssistantUpdateSchema);
           const container = findContainer(req.params.id);
@@ -712,8 +712,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
     // Restarts a running container (`pct reboot`) or schedules a restart of a machine (the Proxmox host, a server).
-    '/api/containers/:id/restart': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/restart'>) =>
+    '/api/targets/:id/restart': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/restart'>) =>
         guard(() => {
           const container = findContainer(req.params.id);
           if (!container) {
@@ -738,8 +738,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }),
     },
     // Runs every pending update of one container (apt, then applications) one after another.
-    '/api/containers/:id/update-all': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/update-all'>) =>
+    '/api/targets/:id/update-all': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/update-all'>) =>
         guard(async () => {
           const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
@@ -755,9 +755,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           return startUpdates(updater.plan([container]), (c) => resolveBackup(c, options.backup));
         }),
     },
-    '/api/containers/:id/runs': {
+    '/api/targets/:id/runs': {
       // Paged newest first (keyset): `cursor` = `nextCursor` of the previous page.
-      GET: (req: Bun.BunRequest<'/api/containers/:id/runs'>) => {
+      GET: (req: Bun.BunRequest<'/api/targets/:id/runs'>) => {
         const container = findContainer(req.params.id);
         if (!container) {
           return problem(404, 'Container not found.');
@@ -773,8 +773,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
       },
     },
     // Suggests applications found in the container with their GitHub repository (nothing is saved).
-    '/api/containers/:id/detect-apps': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/detect-apps'>) =>
+    '/api/targets/:id/detect-apps': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/detect-apps'>) =>
         guard(async () => {
           const container = findContainer(req.params.id);
           if (!container) {
@@ -812,8 +812,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           );
         }),
     },
-    '/api/containers/:id/apps': {
-      POST: async (req: Bun.BunRequest<'/api/containers/:id/apps'>) => {
+    '/api/targets/:id/apps': {
+      POST: async (req: Bun.BunRequest<'/api/targets/:id/apps'>) => {
         const container = findContainer(req.params.id);
         const body = await readBody(req, appSchema);
         if (!container) {
@@ -840,12 +840,12 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }
         return Response.json(appDto(app), {
           status: 201,
-          headers: { location: `/api/containers/${container.id}/apps/${app.id}` },
+          headers: { location: `/api/targets/${container.id}/apps/${app.id}` },
         });
       },
     },
-    '/api/containers/:id/apps/:appId': {
-      PUT: async (req: Bun.BunRequest<'/api/containers/:id/apps/:appId'>) => {
+    '/api/targets/:id/apps/:appId': {
+      PUT: async (req: Bun.BunRequest<'/api/targets/:id/apps/:appId'>) => {
         const containerId = parseId(req.params.id);
         const app = containers.getApp(containerId, parseId(req.params.appId, 'params/appId'));
         const body = await readBody(req, appSchema);
@@ -877,14 +877,14 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         }
         return Response.json(appDto(app));
       },
-      DELETE: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId'>) =>
+      DELETE: (req: Bun.BunRequest<'/api/targets/:id/apps/:appId'>) =>
         containers.deleteApp(parseId(req.params.id), parseId(req.params.appId, 'params/appId'))
           ? new Response(null, { status: 204 })
           : problem(404, 'Application not found.'),
     },
     // Sets the installed version of an app without a version command to its latest version ("Mark as installed").
-    '/api/containers/:id/apps/:appId/mark-installed': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/mark-installed'>) => {
+    '/api/targets/:id/apps/:appId/mark-installed': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/apps/:appId/mark-installed'>) => {
         const app = containers.getApp(parseId(req.params.id), parseId(req.params.appId, 'params/appId'));
         if (!app) {
           return problem(404, 'Application not found.');
@@ -900,8 +900,8 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
         return Response.json(appDto(app));
       },
     },
-    '/api/containers/:id/apps/:appId/update': {
-      POST: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId/update'>) =>
+    '/api/targets/:id/apps/:appId/update': {
+      POST: (req: Bun.BunRequest<'/api/targets/:id/apps/:appId/update'>) =>
         guard(async () => {
           const options = await readOptionalBody(req, updateOptionsSchema);
           const container = findContainer(req.params.id);
@@ -941,7 +941,7 @@ export function containerStatus(containers: ContainerStore) {
     total: counts.total,
     enabled: counts.enabled,
     withErrors: counts.withErrors,
-    aptPending: counts.aptPending,
+    packagesPending: counts.packagesPending,
     /** Pending Flatpak / Snap updates, one per store and machine. */
     appStorePending: counts.appStorePending,
     appUpdatesAvailable: containers.listAppVersions().filter((a) => appUpdateAvailable(a)).length,

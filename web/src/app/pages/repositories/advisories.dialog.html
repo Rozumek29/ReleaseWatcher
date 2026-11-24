@@ -90,10 +90,12 @@
       </div>
 
       <footer class="dialog-foot">
-        <a class="btn btn-ghost" [href]="repo.url + '/security/advisories'" target="_blank" rel="noopener">
-          <app-icon name="external" [size]="16" />
-          Open on GitHub
-        </a>
+        @if (repo.provider === 'github') {
+          <a class="btn btn-ghost" [href]="repo.url + '/security/advisories'" target="_blank" rel="noopener">
+            <app-icon name="external" [size]="16" />
+            Open on GitHub
+          </a>
+        }
         <button type="button" class="btn" (click)="close()">Close</button>
       </footer>
     </div>

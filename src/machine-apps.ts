@@ -1,6 +1,6 @@
 import type { RepositoryStore } from './db.ts';
 import type { DockerStore } from './docker/store.ts';
-import type { MachineAppRef, WatchedRepository } from './domain.ts';
+import { fullName, type MachineAppRef, type WatchedRepository } from './domain.ts';
 import type { ContainerStore } from './proxmox/store.ts';
 
 /** An app on a machine a repository can read its installed version from. */
@@ -56,8 +56,8 @@ export class MachineApps {
     };
 
     const repositories = docker.listRepositoryLinks();
-    const fullNames = new Map(repositories.map((r) => [r.id, `${r.owner}/${r.name}`]));
-    const byFullName = new Map(repositories.map((r) => [`${r.owner}/${r.name}`.toLowerCase(), r.id]));
+    const fullNames = new Map(repositories.map((r) => [r.id, fullName(r)]));
+    const byFullName = new Map(repositories.map((r) => [fullName(r).toLowerCase(), r.id]));
     const linkTo = (repositoryId: number | null) => ({ repositoryId, repository: repositoryId === null ? null : (fullNames.get(repositoryId) ?? null) });
 
     const targetNames = containers.names();
@@ -108,8 +108,8 @@ export class MachineApps {
   link(ref: MachineAppRef, repositoryId: number): void {
     if (ref.kind === 'app') {
       const app = this.deps.containers.findApp(ref.id);
-      if (app && (app.latestSource !== 'github' || app.repositoryId !== repositoryId)) {
-        app.latestSource = 'github';
+      if (app && (app.latestSource !== 'repository' || app.repositoryId !== repositoryId)) {
+        app.latestSource = 'repository';
         app.repositoryId = repositoryId;
         // The latest version came from elsewhere: the next check reads it from the repository.
         app.latestVersion = null;

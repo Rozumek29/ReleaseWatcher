@@ -81,4 +81,51 @@
       </div>
     </div>
   </section>
+  <!-- Sidebar order -->
+  <section class="card section enter" style="--i: 2" aria-labelledby="sidebar-title">
+    <div class="section-head">
+      <span class="section-icon sidebar"><app-icon name="menu" /></span>
+      <div class="section-title">
+        <h2 id="sidebar-title">Sidebar</h2>
+        <p>
+          Put the pages in the order you like – the first one opens after signing in and at the start address. Saved
+          in this browser only.
+        </p>
+      </div>
+    </div>
+
+    <div class="section-body">
+      <ol class="page-order" aria-label="Current order">
+        @for (page of navigation.pages(); track page.id; let first = $first) {
+          <li>
+            <app-icon [name]="page.icon" [size]="16" />
+            <span>{{ page.label }}</span>
+            @if (first) {
+              <span class="badge badge-accent"><app-icon name="home" [size]="12" /> Start page</span>
+            }
+          </li>
+        }
+      </ol>
+
+      <div class="order-actions">
+        <button
+          type="button"
+          class="btn btn-secondary btn-sm"
+          [attr.aria-pressed]="navigation.editing()"
+          (click)="navigation.editing.set(!navigation.editing())"
+        >
+          <app-icon [name]="navigation.editing() ? 'check' : 'grip'" [size]="14" />
+          {{ navigation.editing() ? 'Done' : 'Rearrange sidebar' }}
+        </button>
+        <button
+          type="button"
+          class="btn btn-ghost btn-sm"
+          [disabled]="navigation.isDefault()"
+          (click)="navigation.reset()"
+        >
+          Reset order
+        </button>
+      </div>
+    </div>
+  </section>
 </div>

@@ -78,7 +78,7 @@ describe('backup', () => {
     const i = await instance();
     i.settings.update({
       releaseCheckCron: '*/30 * * * *',
-      notifyAptUpdates: false,
+      notifyPackageUpdates: false,
       smtpHost: 'smtp.example.com',
       smtpUsername: 'alerts',
       smtpPassword: SMTP_PASSWORD,
@@ -90,7 +90,7 @@ describe('backup', () => {
     Object.assign(widget, {
       icon: 'sh:frigate',
       groupId: i.store.ensureGroup('Home lab'),
-      githubToken: GITHUB_TOKEN,
+      accessToken: GITHUB_TOKEN,
       installedVersionUrl: 'https://widget.example.com/api/version',
       installedVersionField: 'version',
       installedVersionHeaders: [{ name: 'Authorization', value: HEADER_SECRET }],
@@ -112,7 +112,7 @@ describe('backup', () => {
     i.containers.addApp(ct.id, {
       name: 'Widget',
       versionCommand: 'widget --version',
-      latestSource: 'github',
+      latestSource: 'repository',
       repositoryId: widget.id,
       latestCommand: null,
       updateCommand: 'widget-update',
@@ -160,10 +160,12 @@ describe('backup', () => {
       releaseCheckCron: '*/30 * * * *',
       smtpHost: 'smtp.example.com',
       smtpUsername: 'alerts',
-      notifyAptUpdates: false,
+      notifyPackageUpdates: false,
     });
     const widget = file.repositories.find((r) => r.name === 'widget')!;
     assert.deepEqual(widget, {
+      provider: 'github',
+      host: null,
       owner: 'acme',
       name: 'widget',
       includePrereleases: true,
@@ -177,7 +179,7 @@ describe('backup', () => {
       installedVersion: null,
       osvEcosystem: 'npm',
       osvPackage: 'widget',
-      hasGithubToken: true,
+      hasAccessToken: true,
     });
     assert.equal(file.repositories.find((r) => r.name === 'gadget')!.installedVersion, '2.0.0');
 
@@ -190,7 +192,7 @@ describe('backup', () => {
       {
         name: 'Widget',
         versionCommand: 'widget --version',
-        latestSource: 'github',
+        latestSource: 'repository',
         repository: 'acme/widget',
         latestCommand: null,
         updateCommand: 'widget-update',
@@ -267,7 +269,7 @@ describe('backup', () => {
       ...f,
       exportedAt: null,
       secretsOmitted: null,
-      repositories: f.repositories.map((r) => ({ ...r, hasGithubToken: null, installedVersionHeaderNames: null })),
+      repositories: f.repositories.map((r) => ({ ...r, hasAccessToken: null, installedVersionHeaderNames: null })),
       hosts: f.hosts.map((h) => ({ ...h, targets: h.targets.map((t) => ({ ...t, hasHomeAssistantToken: null })) })),
     });
     assert.deepEqual(strip(again), strip(file));
@@ -277,13 +279,44 @@ describe('backup', () => {
     // The application is linked to the imported repository.
     const widget = target.store.list().find((r) => r.name === 'widget')!;
     assert.equal(target.containers.listApps()[0]!.repositoryId, widget.id);
-    assert.equal(widget.githubToken, null);
+    assert.equal(widget.accessToken, null);
     assert.deepEqual(widget.installedVersionHeaders, []);
     // Importing the same file again changes nothing.
     const preview: ImportPreview = (await importInto(target, file, 'merge', true)).json().preview;
     for (const s of preview.sections) {
       assert.deepEqual([s.key, s.added, s.updated, s.removed], [s.key, [], [], []]);
     }
+  });
+
+  it('restores repositories of Gitea/Forgejo and GitLab instances', async () => {
+    const source = await instance();
+    source.store.add('forgejo', 'forgejo', false, { provider: 'gitea', host: 'codeberg.org' });
+    source.store.add('group/sub', 'project', true, { provider: 'gitlab', host: 'gitlab.com' });
+    source.store.add('forgejo', 'forgejo', false);
+    const file = await exportFrom(source);
+    assert.deepEqual(
+      file.repositories.map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+      [
+        ['gitea', 'codeberg.org', 'forgejo', 'forgejo'],
+        ['github', null, 'forgejo', 'forgejo'],
+        ['gitlab', 'gitlab.com', 'group/sub', 'project'],
+      ],
+    );
+
+    const target = await instance();
+    assert.equal((await importInto(target, file, 'merge')).status, 200);
+    assert.deepEqual(
+      target.store.list().map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+      file.repositories.map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
+    );
+
+    // A file of an older version (no provider) means GitHub; a repository of a host needs a valid host.
+    const invalid = await importInto(
+      await instance(),
+      { ...file, repositories: [{ ...file.repositories[0]!, provider: 'gitea', host: 'not a host' }] },
+      'merge',
+    );
+    assert.equal(invalid.status, 400);
   });
 
   it('keeps the app a repository reads its installed version from', async () => {
@@ -293,7 +326,7 @@ describe('backup', () => {
     const app = source.containers.addApp(ct.id, {
       name: 'Gadget',
       versionCommand: 'gadget --version',
-      latestSource: 'github',
+      latestSource: 'repository',
       repositoryId: gadget.id,
       latestCommand: null,
       updateCommand: null,
@@ -330,7 +363,7 @@ describe('backup', () => {
     const target = await configured();
     // Local changes: a token for gadget, other settings of widget, an extra repository and app.
     const gadget = target.store.list().find((r) => r.name === 'gadget')!;
-    gadget.githubToken = 'local-token';
+    gadget.accessToken = 'local-token';
     target.store.save(gadget);
     const widget = target.store.list().find((r) => r.name === 'widget')!;
     widget.includePrereleases = false;
@@ -357,10 +390,10 @@ describe('backup', () => {
     const repos = target.store.list();
     assert.deepEqual(repos.map((r) => `${r.owner}/${r.name}`).sort(), ['acme/gadget', 'acme/widget', 'other/tool']);
     const updated = repos.find((r) => r.name === 'widget')!;
-    assert.deepEqual([updated.includePrereleases, updated.icon, updated.githubToken], [true, 'sh:frigate', GITHUB_TOKEN]);
+    assert.deepEqual([updated.includePrereleases, updated.icon, updated.accessToken], [true, 'sh:frigate', GITHUB_TOKEN]);
     assert.deepEqual(target.store.listGroups().map((g) => [g.name, g.icon, g.id === updated.groupId]), [['Home lab', 'sh:homelab', true]]);
     assert.deepEqual(updated.installedVersionHeaders, [{ name: 'Authorization', value: HEADER_SECRET }]);
-    assert.equal(repos.find((r) => r.name === 'gadget')!.githubToken, 'local-token');
+    assert.equal(repos.find((r) => r.name === 'gadget')!.accessToken, 'local-token');
     assert.equal(target.containers.list().find((c) => c.vmid === 200)!.homeAssistantToken, HA_TOKEN);
     assert.deepEqual(target.containers.listApps(ct.id).map((a) => a.name), ['Local app', 'Widget']);
     assert.equal(target.settings.current.smtpPassword, SMTP_PASSWORD);
@@ -385,7 +418,7 @@ describe('backup', () => {
 
     assert.deepEqual(target.store.list().map((r) => r.name), ['widget']);
     // Secrets of kept repositories survive a replace.
-    assert.equal(target.store.list()[0]!.githubToken, GITHUB_TOKEN);
+    assert.equal(target.store.list()[0]!.accessToken, GITHUB_TOKEN);
     assert.equal(target.hosts.listHosts().length, 0);
     assert.equal(target.containers.list().length, 0);
     assert.equal(target.docker.listEndpoints().length, 0);
@@ -436,14 +469,14 @@ describe('backup', () => {
     const target = await instance();
     const file = {
       format: BACKUP_FORMAT,
-      schemaVersion: 1,
+      schemaVersion: BACKUP_SCHEMA_VERSION,
       settings: { githubToken: 'ghp_x', unknownSetting: 'x', notifyReleases: false },
       hosts: [
         {
           type: 'proxmox',
           name: 'pve',
           address: 'pve.lan',
-          targets: [{ kind: 'lxc', vmid: 101, name: 'app', apps: [{ name: 'Tool', latestSource: 'github', repository: 'nobody/tool' }] }],
+          targets: [{ kind: 'lxc', vmid: 101, name: 'app', apps: [{ name: 'Tool', latestSource: 'repository', repository: 'nobody/tool' }] }],
         },
       ],
     };
@@ -454,6 +487,31 @@ describe('backup', () => {
     assert.equal(target.settings.current.githubToken, null);
     assert.equal(target.settings.current.notifyReleases, false);
     assert.deepEqual(target.containers.listApps().map((a) => [a.name, a.latestSource, a.repositoryId]), [['Tool', 'none', null]]);
+  });
+
+  it('reads the names of format version 1', async () => {
+    const target = await instance();
+    const file = {
+      format: BACKUP_FORMAT,
+      schemaVersion: 1,
+      settings: { notifyAptUpdates: false },
+      repositories: [{ owner: 'acme', name: 'tool', hasGithubToken: true }],
+      hosts: [
+        {
+          type: 'proxmox',
+          name: 'pve',
+          address: 'pve.lan',
+          targets: [{ kind: 'lxc', vmid: 101, name: 'app', aptEnabled: false, apps: [{ name: 'Tool', latestSource: 'github', repository: 'acme/tool' }] }],
+        },
+      ],
+    };
+    const response = await importInto(target, file, 'merge');
+    assert.equal(response.status, 200);
+    assert.ok(response.json().preview.secretsToReenter.some((s: string) => s.includes('acme/tool')));
+    assert.equal(target.settings.current.notifyPackageUpdates, false);
+    assert.equal(target.containers.list()[0]!.packagesEnabled, false);
+    const tool = target.store.list().find((r) => r.name === 'tool')!;
+    assert.deepEqual(target.containers.listApps().map((a) => [a.latestSource, a.repositoryId]), [['repository', tool.id]]);
   });
 
   it('refuses to replace while a task runs on a machine that would be removed', async () => {

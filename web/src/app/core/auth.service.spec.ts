@@ -91,8 +91,8 @@ describe('AuthService, guards and interceptor', () => {
     const navigate = vi.spyOn(router, 'navigate').mockResolvedValue(true);
     vi.spyOn(router, 'url', 'get').mockReturnValue('/containers');
 
-    const request = firstValueFrom(TestBed.inject(HttpClient).get('/api/containers'));
-    http.expectOne('/api/containers').flush(null, { status: 401, statusText: 'Unauthorized' });
+    const request = firstValueFrom(TestBed.inject(HttpClient).get('/api/targets'));
+    http.expectOne('/api/targets').flush(null, { status: 401, statusText: 'Unauthorized' });
     await expect(request).rejects.toBeTruthy();
     expect(auth.authenticated()).toBe(false);
     expect(navigate).toHaveBeenCalledWith(['/login'], { queryParams: { returnUrl: '/containers' } });

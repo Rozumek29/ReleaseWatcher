@@ -68,8 +68,8 @@
             }
           } @else {
             @if (c.repository) {
-              <a class="repo muted small" [href]="'https://github.com/' + c.repository.fullName" target="_blank" rel="noopener" [title]="c.linkAuto ? 'Linked through the image labels' : 'Linked by hand'">
-                <app-icon name="github" [size]="12" /> {{ c.repository.fullName }}
+              <a class="repo muted small" [href]="c.repository.url" target="_blank" rel="noopener" [title]="c.linkAuto ? 'Linked through the image labels' : 'Linked by hand'">
+                <app-icon name="repo" [size]="12" /> {{ c.repository.fullName }}
               </a>
             } @else if (c.suggestedRepository) {
               <button type="button" class="btn btn-sm btn-secondary" (click)="watch(c)" [disabled]="isBusy(c)" [title]="'The image labels point to ' + c.suggestedRepository">

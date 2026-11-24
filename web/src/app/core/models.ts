@@ -1,11 +1,18 @@
+/** Where a repository lives: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
+export type RepositoryProvider = 'github' | 'gitea' | 'gitlab';
+
 export interface WatchedRepository {
   id: number;
+  provider: RepositoryProvider;
+  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  host: string | null;
   owner: string;
   name: string;
+  /** `owner/name` on GitHub, `host/owner/name` elsewhere. */
   fullName: string;
   url: string;
-  /** Avatar of the owner (user or organization). */
-  avatarUrl: string;
+  /** Avatar of the owner (user or organization); null when the provider has none (GitLab). */
+  avatarUrl: string | null;
   /** Custom icon as entered: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = owner avatar. */
   icon: string | null;
   /** Image URLs of the custom icon, best first; empty without one. Shown before `avatarUrl`. */
@@ -35,8 +42,8 @@ export interface WatchedRepository {
   /** True when the latest release is newer than the installed version; null when unknown. */
   updateAvailable: boolean | null;
   /** The repository uses its own token instead of the global one (the token itself is never returned). */
-  hasOwnToken: boolean;
-  githubTokenMasked: string | null;
+  hasAccessToken: boolean;
+  accessTokenMasked: string | null;
   /** OSV.dev package of the app (both set or both null). */
   osvEcosystem: string | null;
   osvPackage: string | null;
@@ -112,10 +119,13 @@ export interface SecurityAdvisory {
 }
 
 export interface AddRepositoryRequest {
+  /** `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository. */
   repository: string;
+  /** Provider of a host that is not well known; omitted = detected. */
+  provider?: RepositoryProvider | null;
   includePrereleases: boolean;
-  /** Token for a private repository the global token cannot read. */
-  githubToken?: string | null;
+  /** Token of the repository: a private one the global GitHub token cannot read, or one on another host. */
+  accessToken?: string | null;
 }
 
 export interface UpdateRepositoryRequest {
@@ -130,7 +140,7 @@ export interface UpdateRepositoryRequest {
   /** App on a machine to read the installed version from (it gets linked); omit to keep, null to stop. */
   installedVersionApp?: MachineAppRef | null;
   /** Omit to keep, null to remove the repository's own token. */
-  githubToken?: string | null;
+  accessToken?: string | null;
   /** OSV.dev package; omit to keep, null to remove. */
   osvEcosystem?: string | null;
   osvPackage?: string | null;
@@ -313,7 +323,7 @@ export interface NotificationPreferences {
   releases: boolean;
   vulnerabilities: boolean;
   appUpdates: boolean;
-  aptUpdates: boolean;
+  packageUpdates: boolean;
   updateSucceeded: boolean;
   updateFailed: boolean;
   /** Newer images of the tags Docker containers run. */
@@ -347,7 +357,7 @@ export interface SettingsPatch extends Partial<Record<ChannelSettingKey, string 
   notifyReleases?: boolean | null;
   notifyVulnerabilities?: boolean | null;
   notifyAppUpdates?: boolean | null;
-  notifyAptUpdates?: boolean | null;
+  notifyPackageUpdates?: boolean | null;
   notifyUpdateSucceeded?: boolean | null;
   notifyUpdateFailed?: boolean | null;
   notifyDockerUpdates?: boolean | null;
@@ -408,7 +418,7 @@ export interface RepositoryAdvisory extends SecurityAdvisory {
     fullName: string;
     owner: string;
     url: string;
-    avatarUrl: string;
+    avatarUrl: string | null;
     /** Custom icon of the repository, best first; empty without one. */
     iconUrls: string[];
     installedVersion: string | null;
@@ -440,11 +450,11 @@ export interface AppStatus {
     withErrors: number;
     updatesAvailable: number;
   };
-  containers?: {
+  targets?: {
     total: number;
     enabled: number;
     withErrors: number;
-    aptPending: number;
+    packagesPending: number;
     /** Pending Flatpak / Snap updates, one per store and machine. */
     appStorePending?: number;
     appUpdatesAvailable: number;
@@ -476,17 +486,17 @@ export interface AppStoreInfo {
   store: AppStore;
   /** "Flatpak", "Snap". */
   label: string;
-  packages: AptPackage[];
+  packages: PackageUpdate[];
 }
 
-export interface AptPackage {
+export interface PackageUpdate {
   name: string;
   currentVersion: string | null;
   newVersion: string;
 }
 
 /** Where the newest available version of an application comes from. */
-export type LatestSource = 'none' | 'github' | 'command';
+export type LatestSource = 'none' | 'repository' | 'command';
 
 export interface ContainerApp {
   id: number;
@@ -508,7 +518,7 @@ export interface ContainerApp {
   updateAvailable: boolean | null;
 }
 
-/** An application found in a container (`POST /api/containers/:id/detect-apps`) – a suggestion, not saved. */
+/** An application found in a container (`POST /api/targets/:id/detect-apps`) – a suggestion, not saved. */
 export interface DetectedApp {
   name: string;
   /** community-scripts slug; null when found by a version file only. */
@@ -566,7 +576,7 @@ export interface TargetCapabilities {
   /** Can be started and shut down ("Start temporarily when stopped"). */
   power: boolean;
   /** apt can be switched off (false = always on). */
-  aptOptional: boolean;
+  packagesOptional: boolean;
   /** CPU cores and memory can be raised for updates. */
   updateResources: boolean;
   /** Applications can be added and detected. */
@@ -615,7 +625,7 @@ export interface Container {
   vmid: number;
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   /** Back up before updates; null = use the global default. */
   backupBeforeUpdate: boolean | null;
   /** The value in effect for this container (own setting or the global default). */
@@ -634,7 +644,7 @@ export interface Container {
   resourcesRaised: boolean;
   nextCheckAt: string | null;
   status: string | null;
-  aptUpgradable: AptPackage[];
+  packageUpdates: PackageUpdate[];
   /** Package manager found by the last check; null = not checked yet (or none found). */
   packageManager: PackageManager | null;
   /** Flatpak / Snap found by the last check (only installed ones), with their pending updates. */
@@ -662,7 +672,7 @@ export interface Container {
 export interface UpdateContainerRequest {
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   backupBeforeUpdate: boolean | null;
   startWhenStopped: boolean;
   checkCron: string | null;
@@ -700,12 +710,12 @@ export interface DiscoveredContainer {
   added: boolean;
 }
 
-export type RunKind = 'check' | 'apt-upgrade' | 'app-update' | 'restart' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
+export type RunKind = 'check' | 'packages-upgrade' | 'app-update' | 'restart' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
 export type RunStatus = 'running' | 'succeeded' | 'failed';
 
 export interface RunSummary {
   id: number;
-  containerId: number;
+  targetId: number;
   appId: number | null;
   kind: RunKind;
   trigger: 'manual' | 'schedule';
@@ -715,7 +725,7 @@ export interface RunSummary {
   exitCode: number | null;
 }
 
-/** GET /api/containers/:id/runs – one page of the run history, newest first. */
+/** GET /api/targets/:id/runs – one page of the run history, newest first. */
 export interface RunHistoryPage {
   items: RunSummary[];
   /** Cursor of the next page, or null on the last one. */
@@ -932,8 +942,8 @@ export interface DockerContainer {
   installedVersionSource: 'tag' | 'label' | 'digest' | null;
   /** Linked through its labels (true) or chosen by hand (false). */
   linkAuto: boolean;
-  repository: { id: number; fullName: string; latestVersion: string | null; iconUrls: string[] } | null;
-  /** Repository named by the labels that is not watched yet (`owner/name`). */
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository named by the labels that is not watched yet (`owner/name`, `host/owner/name` outside GitHub). */
   suggestedRepository: string | null;
   /** The linked repository has a newer release than the installed version; null = unknown. */
   updateAvailable: boolean | null;
@@ -977,6 +987,8 @@ export interface BackupAppearance {
   accent: string;
   repositoryLayout: string;
   containerSort: string;
+  /** Order of the sidebar pages (missing in files from older versions). */
+  navOrder?: string[];
 }
 
 /** A backup file (`GET /api/backup/export`); secrets are never part of it. */

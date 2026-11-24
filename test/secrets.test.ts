@@ -87,14 +87,14 @@ describe('RepositoryStore secrets', () => {
   it('stores tokens, header values and secret settings encrypted', () => {
     const store = new RepositoryStore(path, new SecretBox(parseKey(KEY)));
     const repo = store.add('owner', 'name', false);
-    repo.githubToken = 'ghp_repo';
+    repo.accessToken = 'ghp_repo';
     repo.installedVersionHeaders = [{ name: 'Authorization', value: 'Bearer abc' }];
     store.save(repo);
     store.writeSetting('githubToken', 'ghp_global');
     store.writeSetting('proxmoxSshKey', '-----BEGIN OPENSSH PRIVATE KEY-----');
     store.writeSetting('discordUsername', 'Watcher');
 
-    assert.equal(store.get(repo.id)!.githubToken, 'ghp_repo');
+    assert.equal(store.get(repo.id)!.accessToken, 'ghp_repo');
     assert.deepEqual(store.get(repo.id)!.installedVersionHeaders, [{ name: 'Authorization', value: 'Bearer abc' }]);
     assert.equal(store.readSettings()['proxmoxSshKey'], '-----BEGIN OPENSSH PRIVATE KEY-----');
     store.close();
@@ -112,22 +112,22 @@ describe('RepositoryStore secrets', () => {
     new RepositoryStore(path, new SecretBox(parseKey(KEY))).close();
     const db = new Database(path);
     db.run('DELETE FROM app_meta');
-    db.run(`INSERT INTO watched_repositories (owner, name, created_at, github_token, installed_version_headers)
+    db.run(`INSERT INTO watched_repositories (owner, name, created_at, access_token, installed_version_headers)
             VALUES ('o', 'n', '2026-01-01T00:00:00.000Z', 'ghp_old', '[{"name":"X-Key","value":"v"}]')`);
     db.run(`INSERT INTO settings (key, value) VALUES ('discordWebhookUrl', 'https://discord.com/api/webhooks/1/x')`);
     db.close();
 
     const store = new RepositoryStore(path, new SecretBox(parseKey(KEY)));
     const [repo] = store.list();
-    assert.equal(repo!.githubToken, 'ghp_old');
+    assert.equal(repo!.accessToken, 'ghp_old');
     assert.deepEqual(repo!.installedVersionHeaders, [{ name: 'X-Key', value: 'v' }]);
     assert.equal(store.readSettings()['discordWebhookUrl'], 'https://discord.com/api/webhooks/1/x');
     store.close();
 
-    const [row] = raw<{ github_token: string; installed_version_headers: string }>(
-      'SELECT github_token, installed_version_headers FROM watched_repositories',
+    const [row] = raw<{ access_token: string; installed_version_headers: string }>(
+      'SELECT access_token, installed_version_headers FROM watched_repositories',
     );
-    assert.ok(SecretBox.isEncrypted(row!.github_token));
+    assert.ok(SecretBox.isEncrypted(row!.access_token));
     assert.ok(SecretBox.isEncrypted(row!.installed_version_headers));
     const [setting] = raw<{ value: string }>(`SELECT value FROM settings WHERE key = 'discordWebhookUrl'`);
     assert.ok(SecretBox.isEncrypted(setting!.value));

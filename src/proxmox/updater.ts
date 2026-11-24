@@ -143,8 +143,8 @@ export class ContainerUpdater {
         continue;
       }
       try {
-        if (update.kind === 'apt-upgrade') {
-          this.service.startAptUpgrade(container, backup);
+        if (update.kind === 'packages-upgrade') {
+          this.service.startPackagesUpgrade(container, backup);
         } else if ('store' in update) {
           this.service.startAppStoreUpdate(container, update.store, backup);
         } else if (update.kind === 'home-assistant-update') {
@@ -164,4 +164,4 @@ export class ContainerUpdater {
 }
 
 const updateKey = (update: PendingUpdate): string =>
-  update.kind === 'app-update' ? `app:${update.appId}` : update.kind === 'apt-upgrade' ? 'apt' : update.kind;
+  update.kind === 'app-update' ? `app:${update.appId}` : update.kind === 'packages-upgrade' ? 'packages' : update.kind;

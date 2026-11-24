@@ -95,7 +95,15 @@ describe('versions', () => {
       labelRepository({ 'releasewatcher.repo': 'owner/own', 'org.opencontainers.image.source': 'https://github.com/a/b' }),
       'owner/own',
     );
-    assert.equal(labelRepository({ 'org.opencontainers.image.source': 'https://gitlab.com/a/b' }), null);
+    // Gitea/Forgejo and GitLab repositories are named with their host.
+    assert.equal(labelRepository({ 'org.opencontainers.image.source': 'https://gitlab.com/A/b' }), 'gitlab.com/a/b');
+    assert.equal(
+      labelRepository({ 'org.opencontainers.image.source': 'https://codeberg.org/forgejo/forgejo.git' }),
+      'codeberg.org/forgejo/forgejo',
+    );
+    // The url label of another host is usually a project or registry page.
+    assert.equal(labelRepository({ 'org.opencontainers.image.url': 'https://hub.docker.com/r/a/b' }), null);
+    assert.equal(labelRepository({ 'org.opencontainers.image.url': 'https://forgejo.org/' }), null);
   });
 
   it('keeps only the labels it uses', () => {

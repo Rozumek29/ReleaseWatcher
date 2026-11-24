@@ -9,6 +9,7 @@ const repo = (id: number, owner: string, name: string, extra: Partial<WatchedRep
     name,
     fullName: `${owner}/${name}`,
     avatarUrl: `https://avatars.githubusercontent.com/${owner}`,
+    host: null,
     groupId: null,
     updateAvailable: null,
     ...extra,
@@ -46,6 +47,11 @@ describe('groupRepositories', () => {
     expect(shape(entries)).toEqual(['home-assistant: 2,4', 1, 3, 5]);
     const group = entries[0]!.kind === 'group' ? entries[0].group : null;
     expect(group).toMatchObject({ key: 'owner:home-assistant', updates: 2, avatarUrl: 'https://avatars.githubusercontent.com/home-assistant' });
+  });
+
+  it('tells owners on other hosts apart', () => {
+    const repos = [repo(1, 'acme', 'a'), repo(2, 'acme', 'b'), repo(3, 'acme', 'c', { host: 'codeberg.org' }), repo(4, 'acme', 'd', { host: 'codeberg.org' })];
+    expect(shape(groupRepositories(repos, repos, 'owner'))).toEqual(['acme: 1,2', 'codeberg.org/acme: 3,4']);
   });
 
   it('keeps an owner group when a filter leaves only one of its repositories', () => {

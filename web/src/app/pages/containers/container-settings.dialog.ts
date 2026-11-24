@@ -92,7 +92,7 @@ export class ContainerSettingsDialog {
 
   protected name = '';
   protected isEnabled = true;
-  protected aptEnabled = true;
+  protected packagesEnabled = true;
   protected startWhenStopped = false;
   protected dockerEnabled = true;
   /** 'default' = follow the global setting. */
@@ -143,7 +143,7 @@ export class ContainerSettingsDialog {
         if (container) {
           this.name = container.name;
           this.isEnabled = container.isEnabled;
-          this.aptEnabled = container.aptEnabled;
+          this.packagesEnabled = container.packagesEnabled;
           this.startWhenStopped = container.startWhenStopped;
           this.dockerEnabled = container.docker.enabled;
           this.backupChoice =
@@ -187,7 +187,7 @@ export class ContainerSettingsDialog {
         this.api.updateContainer(container.id, {
           name: this.name.trim(),
           isEnabled: this.isEnabled,
-          aptEnabled: this.aptEnabled,
+          packagesEnabled: this.packagesEnabled,
           startWhenStopped: this.startWhenStopped,
           dockerEnabled: this.dockerEnabled,
           backupBeforeUpdate: this.backupChoice === 'default' ? null : this.backupChoice === 'yes',
@@ -222,7 +222,7 @@ export class ContainerSettingsDialog {
     return [
       this.name,
       this.isEnabled,
-      this.aptEnabled,
+      this.packagesEnabled,
       this.startWhenStopped,
       this.dockerEnabled,
       this.backupChoice,
@@ -297,7 +297,7 @@ export class ContainerSettingsDialog {
       // Without a version command the installed version is the one entered by hand.
       ...(versionCommand ? {} : { installedVersion: form.installedVersion.trim() || null }),
       latestSource: form.latestSource,
-      repositoryId: form.latestSource === 'github' ? form.repositoryId : null,
+      repositoryId: form.latestSource === 'repository' ? form.repositoryId : null,
       latestCommand: form.latestSource === 'command' ? form.latestCommand.trim() || null : null,
       updateCommand: form.updateCommand.trim() || null,
       useTty: form.useTty,
@@ -374,7 +374,7 @@ export class ContainerSettingsDialog {
         this.api.addContainerApp(container.id, {
           name: found.name,
           versionCommand: found.versionCommand,
-          latestSource: repositoryId === null ? 'none' : 'github',
+          latestSource: repositoryId === null ? 'none' : 'repository',
           repositoryId,
           latestCommand: null,
           updateCommand: found.updateCommand,
@@ -425,7 +425,7 @@ export class ContainerSettingsDialog {
 
   protected sourceLabel(app: ContainerApp): string {
     switch (app.latestSource) {
-      case 'github':
+      case 'repository':
         return `latest from ${app.repositoryFullName ?? 'GitHub'}`;
       case 'command':
         return 'latest from a command';

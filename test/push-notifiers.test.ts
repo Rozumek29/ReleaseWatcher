@@ -50,7 +50,7 @@ const containerEvent: NotificationEvent = {
     targetKind: 'lxc',
     containerName: 'nextcloud',
     apps: [{ name: 'Nextcloud', installedVersion: '29.0.1', latestVersion: '29.0.2' }],
-    aptPackages: Array.from({ length: 30 }, (_, i) => ({ name: `pkg${i}`, currentVersion: '1', newVersion: '2' })),
+    systemPackages: Array.from({ length: 30 }, (_, i) => ({ name: `pkg${i}`, currentVersion: '1', newVersion: '2' })),
   },
 };
 
@@ -85,7 +85,7 @@ describe('simple messages', () => {
   it('builds a digest with linked lines and a high priority for failed updates', () => {
     const message = buildMessage([
       { type: 'release', release: sample },
-      { type: 'update-result', result: { vmid: 105, targetKind: 'lxc', containerName: 'nextcloud', kind: 'apt-upgrade', appName: null, succeeded: false, detail: null } },
+      { type: 'update-result', result: { vmid: 105, targetKind: 'lxc', containerName: 'nextcloud', kind: 'packages-upgrade', appName: null, succeeded: false, detail: null } },
       { type: 'docker-updates', docker: { images: [{ image: 'nginx:1.27', installedVersion: '1.27.2', latestVersion: '1.27.3', containers: [{ name: 'web', source: 'NAS' }] }] } },
     ]);
     assert.equal(message.title, 'ReleaseWatcher: 1 new release, 1 new Docker image, 1 update failed');

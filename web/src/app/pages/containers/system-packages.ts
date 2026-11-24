@@ -1,5 +1,5 @@
 import { ChangeDetectionStrategy, Component, computed, input, signal } from '@angular/core';
-import { AptPackage } from '../../core/models';
+import { PackageUpdate } from '../../core/models';
 
 /** A version split into the part shared with the installed version and the part that changes. */
 export interface VersionDiff {
@@ -34,13 +34,13 @@ const FILTER_FROM = 10;
 
 /** Upgradable apt packages of a container: name, installed and available version side by side. */
 @Component({
-  selector: 'app-apt-packages',
-  templateUrl: './apt-packages.html',
-  styleUrl: './apt-packages.scss',
+  selector: 'app-system-packages',
+  templateUrl: './system-packages.html',
+  styleUrl: './system-packages.scss',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class AptPackages {
-  readonly packages = input.required<readonly AptPackage[]>();
+export class SystemPackages {
+  readonly packages = input.required<readonly PackageUpdate[]>();
   /** Used for unique element ids when several lists are open. */
   readonly listId = input.required<string | number>();
 

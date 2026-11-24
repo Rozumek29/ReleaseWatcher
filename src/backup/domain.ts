@@ -2,12 +2,13 @@
  * Backup file of the configuration (Settings → Backup): what is exported, how items are matched on import and how
  * secrets are left out. Pure types and helpers – no I/O.
  */
+import { fullName, type RepositoryProvider } from '../domain.ts';
 import type { SettingKey } from '../settings.ts';
 
 /** Marks a JSON file as a ReleaseWatcher backup. */
 export const BACKUP_FORMAT = 'releasewatcher-backup';
 /** Version of the file layout; bump it (and keep reading older versions) when the layout changes incompatibly. */
-export const BACKUP_SCHEMA_VERSION = 1;
+export const BACKUP_SCHEMA_VERSION = 2;
 
 /** How an import treats what is already configured. */
 export const IMPORT_MODES = ['merge', 'replace'] as const;
@@ -19,6 +20,10 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 
 /** A watched repository without its state (releases seen, check results) and without secrets. */
 export interface BackupRepository {
+  /** `github`, `gitea` (Gitea/Forgejo) or `gitlab`; missing in older files = GitHub. */
+  provider: RepositoryProvider;
+  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  host: string | null;
   owner: string;
   name: string;
   includePrereleases: boolean;
@@ -35,15 +40,15 @@ export interface BackupRepository {
   installedVersion: string | null;
   osvEcosystem: string | null;
   osvPackage: string | null;
-  /** The repository has its own GitHub token (not exported). */
-  hasGithubToken: boolean;
+  /** The repository has its own token (not exported). */
+  hasAccessToken: boolean;
 }
 
 export interface BackupApp {
   name: string;
   versionCommand: string | null;
   latestSource: string;
-  /** Watched repository the latest version comes from, as `owner/name` (ids differ between databases). */
+  /** Watched repository the latest version comes from, as its `fullName()` (ids differ between databases). */
   repository: string | null;
   latestCommand: string | null;
   updateCommand: string | null;
@@ -61,7 +66,7 @@ export interface BackupTarget {
   vmid: number;
   name: string;
   isEnabled: boolean;
-  aptEnabled: boolean;
+  packagesEnabled: boolean;
   backupBeforeUpdate: boolean | null;
   startWhenStopped: boolean;
   checkCron: string | null;
@@ -138,7 +143,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   'notifyReleases',
   'notifyVulnerabilities',
   'notifyAppUpdates',
-  'notifyAptUpdates',
+  'notifyPackageUpdates',
   'notifyUpdateSucceeded',
   'notifyUpdateFailed',
   'notifyDockerUpdates',
@@ -168,7 +173,7 @@ export function settingLabel(key: string): string {
 }
 
 /** Matching keys: items of a file match existing ones by these (case-insensitive where the app compares so). */
-export const repositoryKey = (r: { owner: string; name: string }): string => `${r.owner}/${r.name}`.toLowerCase();
+export const repositoryKey = (r: { host?: string | null; owner: string; name: string }): string => fullName(r).toLowerCase();
 export const hostKey = (h: { type: string; address: string; port: number }): string => `${h.type}|${h.address.toLowerCase()}|${h.port}`;
 export const targetKey = (t: { kind: string; vmid: number }): string => `${t.kind}|${t.vmid}`;
 export const appKey = (a: { name: string }): string => a.name.trim().toLowerCase();

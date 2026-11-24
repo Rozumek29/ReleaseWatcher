@@ -1,9 +1,13 @@
 import type { SecurityAdvisory } from '../advisories.ts';
-import type { ReleaseInfo } from '../domain.ts';
+import { fullName, repositoryUrl, type ReleaseInfo, type RepositoryProvider } from '../domain.ts';
 import type { TargetKind } from '../proxmox/domain.ts';
 
 /** Payload passed to every notifier when a new release is detected. */
 export interface ReleaseNotification {
+  /** Where the repository lives; omitted = GitHub. */
+  provider?: RepositoryProvider;
+  /** Host of a Gitea/Forgejo or GitLab instance; omitted/null = GitHub. */
+  host?: string | null;
   owner: string;
   repository: string;
   release: ReleaseInfo;
@@ -15,6 +19,8 @@ export interface ReleaseNotification {
 
 /** A new security advisory was published for a watched repository. */
 export interface VulnerabilityNotification {
+  provider?: RepositoryProvider;
+  host?: string | null;
   owner: string;
   repository: string;
   advisory: SecurityAdvisory;
@@ -33,7 +39,7 @@ export interface ContainerUpdatesNotification {
   targetKind: TargetKind;
   containerName: string;
   /** Upgradable system packages (all of them, not only new ones). */
-  aptPackages: PackageUpdate[];
+  systemPackages: PackageUpdate[];
   /** Package manager of the target (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
   packageManager?: string | null;
   /** Flatpak / Snap applications with updates (stores without updates are left out). */
@@ -47,13 +53,13 @@ export interface UpdateResultNotification {
   vmid: number;
   targetKind: TargetKind;
   containerName: string;
-  kind: 'apt-upgrade' | 'app-update' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
+  kind: 'packages-upgrade' | 'app-update' | 'home-assistant-update' | 'flatpak-update' | 'snap-update';
   /** Application name for `app-update` ("Home Assistant" for `home-assistant-update`). */
   appName: string | null;
   succeeded: boolean;
   /** Last line of the run log, e.g. "Update failed – exit code 1". */
   detail: string | null;
-  /** Package manager of the target for `apt-upgrade` (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
+  /** Package manager of the target for `packages-upgrade` (apt, dnf, zypper, apk, pacman …); omitted/null = apt. */
   packageManager?: string | null;
 }
 
@@ -81,9 +87,13 @@ export type NotificationEvent =
   | { type: 'update-result'; result: UpdateResultNotification }
   | { type: 'docker-updates'; docker: DockerUpdatesNotification };
 
-export const notificationFullName = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string => `${n.owner}/${n.repository}`;
-export const notificationRepoUrl = (n: Pick<ReleaseNotification, 'owner' | 'repository'>): string =>
-  `https://github.com/${n.owner}/${n.repository}`;
+type NotificationRepository = Pick<ReleaseNotification, 'host' | 'owner' | 'repository'>;
+
+/** `owner/repo` on GitHub, `host/owner/repo` elsewhere. */
+export const notificationFullName = (n: NotificationRepository): string =>
+  fullName({ host: n.host ?? null, owner: n.owner, name: n.repository });
+export const notificationRepoUrl = (n: NotificationRepository): string =>
+  repositoryUrl({ host: n.host ?? null, owner: n.owner, name: n.repository });
 
 /** "CT 105 (nextcloud)", "VM 137 (debian)", "Proxmox host (pve)" or a server's own name. */
 export const targetName = (n: { vmid: number; targetKind: TargetKind; containerName: string }): string =>
@@ -101,7 +111,7 @@ export const packageManagerName = (n: { packageManager?: string | null }): strin
 /** "apt upgrade", "dnf upgrade", "Flatpak update", "Snap update", "update of Nextcloud" or "update of Home Assistant". */
 export function updateLabel(n: UpdateResultNotification): string {
   switch (n.kind) {
-    case 'apt-upgrade':
+    case 'packages-upgrade':
       return `${packageManagerName(n)} upgrade`;
     case 'flatpak-update':
       return 'Flatpak update';
@@ -128,10 +138,10 @@ export interface PackageGroup {
 /** The non-empty package lists of a notification: system packages first, then Flatpak and Snap. */
 export function packageGroups(n: ContainerUpdatesNotification): PackageGroup[] {
   const groups: PackageGroup[] = [];
-  if (n.aptPackages.length > 0) {
+  if (n.systemPackages.length > 0) {
     const name = packageManagerName(n);
-    const count = `${n.aptPackages.length} package(s)`;
-    groups.push({ title: `${name} – ${count}`, name, summary: `${n.aptPackages.length} ${name} package(s)`, packages: n.aptPackages });
+    const count = `${n.systemPackages.length} package(s)`;
+    groups.push({ title: `${name} – ${count}`, name, summary: `${n.systemPackages.length} ${name} package(s)`, packages: n.systemPackages });
   }
   for (const store of n.appStores ?? []) {
     if (store.packages.length > 0) {

@@ -78,7 +78,7 @@ describe('login', () => {
     });
     assert.equal((await browser.request('GET', '/api/repositories')).status, 401);
     assert.equal((await browser.request('GET', '/api/settings')).status, 401);
-    assert.equal((await browser.request('POST', '/api/containers/check-all')).status, 401);
+    assert.equal((await browser.request('POST', '/api/targets/check-all')).status, 401);
     assert.equal((await browser.request('GET', '/health')).status, 200);
     const version = await browser.request('GET', '/api/version');
     assert.equal(version.status, 200);
@@ -147,7 +147,7 @@ describe('login', () => {
     await start();
     const browser = await setupAccount();
     assert.equal(
-      (await browser.request('POST', '/api/containers/check-all', undefined, { origin: 'https://evil.example' })).status,
+      (await browser.request('POST', '/api/targets/check-all', undefined, { origin: 'https://evil.example' })).status,
       403,
     );
     assert.equal(
@@ -376,7 +376,7 @@ describe('login', () => {
       const write = await bearer('PUT', '/api/settings', {});
       assert.equal(write.status, 403);
       assert.match(write.json().title, /only read/);
-      assert.equal((await apiKey('POST', '/api/containers/check-all')).status, 403);
+      assert.equal((await apiKey('POST', '/api/targets/check-all')).status, 403);
       // Unknown API paths are a 404 for a valid token.
       assert.equal((await bearer('GET', '/api/nothing-here')).status, 404);
 

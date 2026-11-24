@@ -3,7 +3,10 @@ import type { RepositoryGrouping } from '../../core/preferences.service';
 
 /** A collapsible group of the repositories list: the repositories of one owner or of one custom group. */
 export interface ListGroup {
-  /** Stable key, remembered when the group is collapsed: `owner:<owner>` (lower case) or `group:<id>`. */
+  /**
+   * Stable key, remembered when the group is collapsed: `owner:<owner>` (lower case; `owner:<host>/<owner>` outside
+   * GitHub) or `group:<id>`.
+   */
   key: string;
   /** Owner or group name as shown. */
   label: string;
@@ -27,7 +30,8 @@ export type ListEntry =
 function groupKey(repository: WatchedRepository, grouping: RepositoryGrouping): string | null {
   if (grouping === 'owner') {
     const owner = repository.owner.trim().toLowerCase();
-    return owner ? `owner:${owner}` : null;
+    // The same owner name on another host is another owner.
+    return owner ? `owner:${repository.host ? `${repository.host.toLowerCase()}/` : ''}${owner}` : null;
   }
   if (grouping === 'custom') {
     return repository.groupId === null ? null : `group:${repository.groupId}`;
@@ -72,7 +76,7 @@ export function groupRepositories(
     if (!group) {
       group = {
         key,
-        label: customGroup ? customGroup.name : repository.owner.trim(),
+        label: customGroup ? customGroup.name : `${repository.host ? `${repository.host}/` : ''}${repository.owner.trim()}`,
         avatarUrl: customGroup ? null : repository.avatarUrl,
         iconUrls: customGroup?.iconUrls ?? [],
         customGroup,

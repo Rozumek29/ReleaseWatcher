@@ -18,10 +18,10 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  ┌────────────────────────── Bun process (src/main.ts) ──────────────────────────┐
  Browser ──HTTP──▶ app.ts  Bun.serve({ routes })  ── Basic auth guard ── /health is public      │
  (Angular UI)    │   ├─ /api/repositories, /api/settings, /api/status, /api/notifiers …           │
-                 │   ├─ proxmox/routes.ts  /api/containers…, /api/proxmox…, /api/runs/:id         │
+                 │   ├─ proxmox/routes.ts  /api/targets…, /api/proxmox…, /api/runs/:id            │
                  │   └─ static UI (public/ or embedded) + SPA fallback                           │
                  │                                                                                │
-                 │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (github.ts, ETag) ─▶ GitHub   │
+                 │ CronJobs (cron) ─▶ ReleaseChecker ─▶ ReleaseSource (per provider) ─▶ GitHub/Gitea/GitLab │
                  │                            ├─▶ OsvClient (osv.ts) ─▶ OSV.dev (vulnerabilities)           │
                  │                            └─▶ NotificationDispatcher ─▶ Notifier[] ─▶ Discord/SMTP│
                  │ ContainerScheduler (cron) ─▶ ContainerService ─▶ NodeShell (ssh) ─▶ Proxmox node │
@@ -30,8 +30,13 @@ This file does not repeat those; it describes the **shape** of the system, the *
                  └────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub, OSV.dev, Discord, the
-  user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+- **One process, one SQLite file.** No queue, no cache, no external services besides GitHub (and the Gitea/Forgejo or
+  GitLab instances of watched repositories), OSV.dev, Discord, the user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+- **Release sources:** `ReleaseSource` (`src/release-source.ts`) takes a `RepositoryRef` (`provider`, `host`, `owner`,
+  `name`); `ProviderReleaseSource` hands each repository to `github.ts`, `gitea.ts` (Gitea and Forgejo) or `gitlab.ts`.
+  Only GitHub has security advisories and a global token – a repository on another host is read with its own token
+  only. `watched_repositories` stores `provider` and `host` (NULL on GitHub); its generated, unique `full_name`
+  (lower-case `fullName()`) is the key repositories are matched by – also by Docker labels and their triggers.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client). A feature folder owns its
@@ -59,8 +64,8 @@ This file does not repeat those; it describes the **shape** of the system, the *
   Servers without systemd (e.g. Alpine with OpenRC) get the same behaviour from a `setsid` supervisor (pid file,
   process-group kill at the timeout), so scripts that run on a server must stay POSIX `sh` and BusyBox compatible.
 - System packages are handled by whichever package manager a check finds (`PACKAGES_CHECK_SCRIPT` /
-  `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); the API keeps the historical `apt*` names
-  (`aptEnabled`, `aptUpgradable`, `apt-upgrade`) and adds `packageManager`. Flatpak and Snap are separate
+  `PACKAGES_UPGRADE_SCRIPT`: apt, dnf, yum, zypper, apk, pacman); names stay
+  manager-neutral (`packagesEnabled`, `packageUpdates`, run `packages-upgrade`) and `packageManager` says which one. Flatpak and Snap are separate
   *application stores* (`APP_STORES`, `appStores` on the target, runs `flatpak-update` / `snap-update`), checked only
   where they are installed and work.
 - State that must be undone after a task (e.g. raised container resources) is saved **before** the change and
@@ -84,7 +89,7 @@ This file does not repeat those; it describes the **shape** of the system, the *
 
 Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 
-- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/containers/:id/apt-upgrade`.
+- **Paths:** `/api/<plural-resource>[/:id][/<action>]`, kebab-case, e.g. `/api/targets/:id/packages-upgrade`.
   Actions that do something (check, test, update) are `POST` to a verb sub-path.
 - **JSON in camelCase**, dates as ISO 8601 strings, missing values as `null` (not omitted) in responses.
 - **Status codes:** `200` read/update, `201` create, `202` background run started, `204` delete,
@@ -349,6 +354,6 @@ These exist today; do not copy them into new code:
 - Repository, settings and status routes still live in `app.ts` (600+ lines); new areas should get their own
   `routes.ts` like `proxmox/routes.ts`, and repositories can be moved out the same way.
 - Unsafe requests (`POST`/`PUT`/`DELETE`) have no CSRF protection: with Basic auth enabled the browser re-sends
-  cached credentials on a cross-site form post, and e.g. `POST /api/containers/:id/apt-upgrade` accepts an empty
+  cached credentials on a cross-site form post, and e.g. `POST /api/targets/:id/packages-upgrade` accepts an empty
   body. Planned fix: reject unsafe requests whose `Sec-Fetch-Site`/`Origin` is cross-site. New endpoints must not
   rely on “nobody can reach it” as protection.

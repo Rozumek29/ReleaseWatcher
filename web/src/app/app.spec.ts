@@ -5,6 +5,7 @@ import { Router, provideRouter } from '@angular/router';
 import { App } from './app';
 import { routes } from './app.routes';
 import { AuthService } from './core/auth.service';
+import { NavigationService } from './core/navigation';
 import { settle } from './testing';
 
 const status = {
@@ -12,12 +13,13 @@ const status = {
   poller: { cron: '*/15 * * * *', isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   advisoryPoller: { cron: '0 */6 * * *', isRunning: false, lastRunStartedAt: null, lastRunFinishedAt: null, nextRunAt: null },
   repositories: { total: 3, enabled: 2, withErrors: 1, updatesAvailable: 2 },
-  containers: { total: 4, enabled: 4, withErrors: 1, aptPending: 2, appUpdatesAvailable: 1 },
+  targets: { total: 4, enabled: 4, withErrors: 1, packagesPending: 2, appUpdatesAvailable: 1 },
   advisories: { total: 5, affecting: 2 },
 };
 
 describe('App shell', () => {
   beforeEach(async () => {
+    localStorage.removeItem('releasewatcher.preferences');
     await TestBed.configureTestingModule({
       imports: [App],
       providers: [provideHttpClient(), provideHttpClientTesting(), provideRouter(routes)],
@@ -92,5 +94,120 @@ describe('App shell', () => {
     await settle(fixture);
     expect(auth.authenticated()).toBe(false);
     expect(navigate).toHaveBeenCalledWith('/login');
+  });
+
+  async function signedIn() {
+    TestBed.inject(AuthService).state.set({
+      setupRequired: false,
+      authenticated: true,
+      username: 'admin',
+      hasPasskeys: false,
+      passwordLogin: true,
+      oidcLogin: null,
+    });
+    const fixture = TestBed.createComponent(App);
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).expectOne('/api/status').flush(status);
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+    const labels = (selector: string) =>
+      [...el.querySelectorAll(selector)].map((a) => a.textContent?.trim());
+    return { fixture, el, labels, navigation: TestBed.inject(NavigationService) };
+  }
+
+  it('shows the pages in the saved order', async () => {
+    localStorage.setItem(
+      'releasewatcher.preferences',
+      JSON.stringify({ navOrder: ['docker', 'settings', 'repositories', 'machines', 'vulnerabilities'] }),
+    );
+    const { labels } = await signedIn();
+    expect(labels('nav a > span:not(.count)')).toEqual([
+      'Docker',
+      'Settings',
+      'Repositories',
+      'Machines',
+      'Vulnerabilities',
+    ]);
+  });
+
+  it('rearranges the pages with the keyboard in edit mode', async () => {
+    const { fixture, el, labels, navigation } = await signedIn();
+    navigation.editing.set(true);
+    await settle(fixture);
+
+    expect(el.querySelector('nav a')).toBeNull();
+    expect(labels('.nav-item')).toEqual(['Repositories', 'Machines', 'Docker', 'Vulnerabilities', 'Settings']);
+    expect(el.querySelector('.nav-item .home-mark')).not.toBeNull();
+
+    el.querySelectorAll<HTMLButtonElement>('.nav-item')[2]!.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Home', bubbles: true }),
+    );
+    await settle(fixture);
+
+    expect(labels('.nav-item')).toEqual(['Docker', 'Repositories', 'Machines', 'Vulnerabilities', 'Settings']);
+    expect(navigation.home()).toBe('docker');
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('Docker moved to position 1 of 5.');
+
+    [...el.querySelectorAll<HTMLButtonElement>('nav .btn')].find((b) => b.textContent?.includes('Done'))!.click();
+    await settle(fixture);
+    expect(labels('nav a')[0]).toContain('Docker');
+  });
+
+  it('rearranges the pages by dragging', async () => {
+    const { fixture, el, labels, navigation } = await signedIn();
+    navigation.editing.set(true);
+    await settle(fixture);
+    // Items 36px high with a 4px gap.
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      const index = [...el.querySelectorAll('.nav-item')].indexOf(this);
+      return { top: index * 40, bottom: index * 40 + 36, height: 36 } as DOMRect;
+    });
+    const item = el.querySelector<HTMLButtonElement>('[data-page="repositories"]')!;
+    const pointer = (type: string, clientY: number) =>
+      item.dispatchEvent(new MouseEvent(type, { clientY, button: 0, bubbles: true }));
+
+    pointer('pointerdown', 10);
+    pointer('pointermove', 40);
+    pointer('pointermove', 95);
+    await settle(fixture);
+    expect(item.classList).toContain('dragging');
+
+    pointer('pointerup', 95);
+    await settle(fixture);
+
+    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Repositories', 'Vulnerabilities', 'Settings']);
+    expect(item.classList).not.toContain('dragging');
+  });
+
+  it('scrolls a short sidebar while an item is held near its edge', async () => {
+    const { fixture, el, labels, navigation } = await signedIn();
+    navigation.editing.set(true);
+    await settle(fixture);
+    // A sidebar 120px high that can scroll by 100px; items 36px high with a 4px gap.
+    const sidebar = el.querySelector<HTMLElement>('.sidebar')!;
+    let scrollTop = 0;
+    Object.defineProperty(sidebar, 'scrollTop', {
+      get: () => scrollTop,
+      set: (value: number) => (scrollTop = Math.max(0, Math.min(100, value))),
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this === sidebar) return { top: 0, bottom: 120, height: 120 } as DOMRect;
+      if (this.localName === 'nav') return { top: -scrollTop, bottom: 200 - scrollTop } as DOMRect;
+      const index = [...el.querySelectorAll('.nav-item')].indexOf(this);
+      return { top: index * 40 - scrollTop, bottom: index * 40 + 36 - scrollTop, height: 36 } as DOMRect;
+    });
+    const item = el.querySelector<HTMLButtonElement>('[data-page="repositories"]')!;
+    const pointer = (type: string, clientY: number) =>
+      item.dispatchEvent(new MouseEvent(type, { clientY, button: 0, bubbles: true }));
+
+    pointer('pointerdown', 10);
+    pointer('pointermove', 115);
+    // Only as far as the end of the list (200px + 8px of room - 120px).
+    await vi.waitFor(() => expect(scrollTop).toBe(88));
+    pointer('pointerup', 115);
+    await settle(fixture);
+
+    // 115px on screen + 88px scrolled is below the last item.
+    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Vulnerabilities', 'Settings', 'Repositories']);
   });
 });

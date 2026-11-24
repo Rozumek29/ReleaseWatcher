@@ -20,8 +20,23 @@ import { repositoryGroupRoutes } from './repository-groups.ts';
 import { BackupService } from './backup/service.ts';
 import { ReleaseChecker } from './checker.ts';
 import { type AdvisoryCursor, type AdvisoryFilter, type InstalledVersionAppName, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
-import { fullName, GROUP_NAME_MAX_LENGTH, ICON_MAX_LENGTH, normalizeGroupName, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
-import type { ReleaseSource } from './github.ts';
+import {
+  fullName,
+  GROUP_NAME_MAX_LENGTH,
+  ICON_MAX_LENGTH,
+  iconUrls,
+  normalizeGroupName,
+  parseRepositoryReference,
+  PROVIDER_LABELS,
+  PROVIDERS,
+  repositoryAvatarUrl,
+  repositoryUrl,
+  validateIcon,
+  type RepositoryProvider,
+  type RepositoryRef,
+  type WatchedRepository,
+} from './domain.ts';
+import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import { noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
@@ -308,11 +323,16 @@ export const toDto = (
   machineApp: InstalledVersionAppName | null = null,
 ) => ({
   id: r.id,
+  /** Where the repository lives: `github`, `gitea` (Gitea/Forgejo) or `gitlab`. */
+  provider: r.provider,
+  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  host: r.host,
   owner: r.owner,
   name: r.name,
   fullName: fullName(r),
-  url: `https://github.com/${fullName(r)}`,
-  avatarUrl: ownerAvatarUrl(r.owner),
+  url: repositoryUrl(r),
+  /** Owner's avatar; null when the provider has none without an API call (GitLab). */
+  avatarUrl: repositoryAvatarUrl(r),
   /** Custom icon as entered (URL or `sh:<slug>`); null = the owner's avatar. */
   icon: r.icon,
   /** Image URLs of the custom icon, best first (the UI falls back to `avatarUrl`). */
@@ -342,8 +362,8 @@ export const toDto = (
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
   installedVersions: installedVersions(r.installedVersion, linkedVersions),
   // The repository's own token is a secret: only whether it is set and a masked hint.
-  hasOwnToken: r.githubToken !== null,
-  githubTokenMasked: maskSecret(r.githubToken, 4),
+  hasAccessToken: r.accessToken !== null,
+  accessTokenMasked: maskSecret(r.accessToken, 4),
   /** True/false when both versions are known and comparable, otherwise null. */
   updateAvailable: (() => {
     const diff = compareVersions(r.lastSeenTag, r.installedVersion);
@@ -359,9 +379,11 @@ export const toDto = (
 });
 
 const addRepositorySchema = body({
-  repository: z.string(),
+  repository: z.string().max(500),
+  /** Provider of a host that is not well known (detected when omitted); ignored for github.com, gitlab.com, codeberg.org … */
+  provider: z.enum(PROVIDERS).nullish(),
   includePrereleases: z.boolean().optional(),
-  githubToken: z.string().max(1000).nullish(),
+  accessToken: z.string().max(1000).nullish(),
 });
 
 const updateRepositorySchema = body({
@@ -378,7 +400,7 @@ const updateRepositorySchema = body({
    */
   installedVersionApp: z.object({ kind: z.enum(['app', 'docker']), id: z.int() }).nullish(),
   /** Omit = keep, null/"" = remove (use the global token). */
-  githubToken: z.string().max(1000).nullish(),
+  accessToken: z.string().max(1000).nullish(),
   /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
   osvEcosystem: z.string().max(50).nullish(),
   osvPackage: z.string().max(300).nullish(),
@@ -435,7 +457,7 @@ const settingsSchema = body({
   notifyReleases: z.boolean().nullish(),
   notifyVulnerabilities: z.boolean().nullish(),
   notifyAppUpdates: z.boolean().nullish(),
-  notifyAptUpdates: z.boolean().nullish(),
+  notifyPackageUpdates: z.boolean().nullish(),
   notifyUpdateSucceeded: z.boolean().nullish(),
   notifyUpdateFailed: z.boolean().nullish(),
   notifyDockerUpdates: z.boolean().nullish(),
@@ -462,7 +484,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       releases: current.notifyReleases,
       vulnerabilities: current.notifyVulnerabilities,
       appUpdates: current.notifyAppUpdates,
-      aptUpdates: current.notifyAptUpdates,
+      packageUpdates: current.notifyPackageUpdates,
       updateSucceeded: current.notifyUpdateSucceeded,
       updateFailed: current.notifyUpdateFailed,
       dockerUpdates: current.notifyDockerUpdates,
@@ -736,7 +758,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         releases: current.notifyReleases,
         vulnerabilities: current.notifyVulnerabilities,
         appUpdates: current.notifyAppUpdates,
-        aptUpdates: current.notifyAptUpdates,
+        packageUpdates: current.notifyPackageUpdates,
         updateSucceeded: current.notifyUpdateSucceeded,
         updateFailed: current.notifyUpdateFailed,
         dockerUpdates: current.notifyDockerUpdates,
@@ -774,7 +796,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         withErrors: repositories.filter((r) => r.lastError).length,
         updatesAvailable: repositories.filter((r) => (compareVersions(r.lastSeenTag, r.installedVersion) ?? 0) > 0).length,
       },
-      containers: containerStatus(containerStore),
+      targets: containerStatus(containerStore),
       docker: dockerStatus(),
       advisories: (() => {
         impacts.refresh();
@@ -826,8 +848,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           id: row.repository.id,
           fullName: fullName(row.repository),
           owner: row.repository.owner,
-          url: `https://github.com/${fullName(row.repository)}`,
-          avatarUrl: ownerAvatarUrl(row.repository.owner),
+          url: repositoryUrl(row.repository),
+          avatarUrl: repositoryAvatarUrl(row.repository),
           iconUrls: iconUrls(row.repository.icon),
           installedVersion: row.repository.installedVersion,
           installedVersions: installedVersions(row.repository.installedVersion, linked.get(row.repository.id)),
@@ -843,31 +865,56 @@ export async function buildApp(deps: AppDeps): Promise<App> {
 
   const addRepository = async (req: Request) => {
     const body = await readBody(req, addRepositorySchema);
-    const githubToken = body.githubToken?.trim() || null;
-    const parsed = parseRepositoryName(body.repository);
+    const accessToken = body.accessToken?.trim() || null;
+    const parsed = parseRepositoryReference(body.repository);
     if (!parsed) {
-      return validationProblem('repository', "Use the 'owner/repo' format or a https://github.com/owner/repo URL.");
+      return validationProblem(
+        'repository',
+        "Use 'owner/repo' for GitHub or the HTTPS URL of the repository, e.g. https://codeberg.org/forgejo/forgejo.",
+      );
+    }
+    const { host, owner, name } = parsed;
+    const label = fullName(parsed);
+    if (parsed.provider === null && body.provider === 'github') {
+      return validationProblem('provider', `${host} is not GitHub – choose Gitea/Forgejo or GitLab.`);
+    }
+    if (store.exists(owner, name, host)) {
+      return problem(409, `${label} is already being watched.`);
     }
 
-    const { owner, name } = parsed;
-    if (store.exists(owner, name)) {
-      return problem(409, `${owner}/${name} is already being watched.`);
-    }
-
-    try {
-      if (!(await source.repositoryExists(owner, name, githubToken))) {
-        return validationProblem(
-          'repository',
-          `Repository ${owner}/${name} was not found on GitHub. A private repository needs a token with access to it.`,
-        );
+    // A well-known host decides the provider; on another one the chosen provider is used, or each one is tried.
+    const candidates: RepositoryProvider[] = parsed.provider
+      ? [parsed.provider]
+      : body.provider
+        ? [body.provider]
+        : owner.includes('/')
+          ? ['gitlab']
+          : ['gitea', 'gitlab'];
+    let found: RepositoryRef | null = null;
+    const failures: string[] = [];
+    for (const provider of candidates) {
+      const ref: RepositoryRef = { provider, host, owner, name };
+      try {
+        if (await source.repositoryExists(ref, accessToken)) {
+          found = ref;
+          break;
+        }
+      } catch (error) {
+        failures.push(`${PROVIDER_LABELS[provider]}: ${errorMessage(error)}`);
       }
-    } catch (error) {
-      return problem(502, 'Bad Gateway', { detail: errorMessage(error) });
+    }
+    if (!found) {
+      if (failures.length === candidates.length) {
+        return problem(502, 'Bad Gateway', { detail: failures.join(' ') });
+      }
+      const where = candidates.length === 1 ? PROVIDER_LABELS[candidates[0]!] : 'Gitea/Forgejo or GitLab';
+      const tokenHint = candidates[0] === 'github' ? 'A private repository needs a token with access to it.' : 'A private repository needs a token of that instance.';
+      return validationProblem('repository', `Repository ${label} was not found on ${where}${host ? ` (${host})` : ''}. ${tokenHint}`);
     }
 
-    const repo = store.add(owner, name, body.includePrereleases ?? false);
-    if (githubToken) {
-      repo.githubToken = githubToken;
+    const repo = store.add(owner, name, body.includePrereleases ?? false, found);
+    if (accessToken) {
+      repo.accessToken = accessToken;
       store.save(repo);
     }
     // Establish the baseline right away so the UI shows the current latest release.
@@ -904,14 +951,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     if (repo.includePrereleases !== body.includePrereleases) {
       // Filter changed: force a full fetch on the next check.
-      repo.etag = null;
+      repo.releasesEtag = null;
     }
-    if (body.githubToken !== undefined) {
-      const token = body.githubToken?.trim() || null;
-      if (token !== repo.githubToken) {
-        repo.githubToken = token;
+    if (body.accessToken !== undefined) {
+      const token = body.accessToken?.trim() || null;
+      if (token !== repo.accessToken) {
+        repo.accessToken = token;
         // Another token may see different data.
-        repo.etag = null;
+        repo.releasesEtag = null;
         repo.advisoriesEtag = null;
       }
     }
