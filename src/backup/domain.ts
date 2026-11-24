@@ -48,6 +48,8 @@ export interface BackupApp {
   timeoutSeconds: number;
   /** Installed version entered by hand (only without a version command). */
   installedVersion: string | null;
+  /** The linked repository reads its installed version from this app ("An app on a machine"). */
+  isInstalledVersionSource: boolean;
 }
 
 /** A container, virtual machine, the Proxmox node itself or a server – its settings, not its check results. */

@@ -17,6 +17,7 @@ const appSchema = z.object({
   useTty: z.boolean().nullish(),
   timeoutSeconds: z.int().nullish(),
   installedVersion: text(100),
+  isInstalledVersionSource: z.boolean().nullish(),
 });
 
 const targetSchema = z.object({

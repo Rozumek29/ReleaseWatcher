@@ -193,6 +193,7 @@ describe('backup', () => {
         useTty: true,
         timeoutSeconds: 600,
         installedVersion: null,
+        isInstalledVersionSource: false,
       },
     ]);
     const haos = pve.targets.find((t) => t.vmid === 200)!;
@@ -279,6 +280,45 @@ describe('backup', () => {
     for (const s of preview.sections) {
       assert.deepEqual([s.key, s.added, s.updated, s.removed], [s.key, [], [], []]);
     }
+  });
+
+  it('keeps the app a repository reads its installed version from', async () => {
+    const source = await configured();
+    const gadget = source.store.list().find((r) => r.name === 'gadget')!;
+    const ct = source.containers.list().find((c) => c.vmid === 101)!;
+    const app = source.containers.addApp(ct.id, {
+      name: 'Gadget',
+      versionCommand: 'gadget --version',
+      latestSource: 'github',
+      repositoryId: gadget.id,
+      latestCommand: null,
+      updateCommand: null,
+      useTty: false,
+      timeoutSeconds: 600,
+    });
+    source.store.setInstalledVersionApp(gadget.id, { kind: 'app', id: app.id });
+    const file = await exportFrom(source);
+    const apps = file.hosts.find((h) => h.type === 'proxmox')!.targets.find((t) => t.vmid === 101)!.apps;
+    assert.deepEqual(apps.map((a) => [a.name, a.isInstalledVersionSource]), [['Gadget', true], ['Widget', false]]);
+    // The last version stays in the file as entered by hand, for instances without the app.
+    assert.equal(file.repositories.find((r) => r.name === 'gadget')!.installedVersion, '2.0.0');
+
+    const target = await instance();
+    assert.equal((await importInto(target, file, 'merge')).status, 200);
+    const restored = () => target.store.list().find((r) => r.name === 'gadget')!;
+    const restoredApp = target.containers.listApps().find((a) => a.name === 'Gadget')!;
+    assert.deepEqual(restored().installedVersionApp, { kind: 'app', id: restoredApp.id });
+    assert.equal(restored().installedVersion, '2.0.0');
+
+    // A file without the flag (or of an older version) stops reading the version from the app.
+    for (const t of file.hosts.flatMap((h) => h.targets)) {
+      for (const a of t.apps) delete (a as Partial<typeof a>).isInstalledVersionSource;
+    }
+    const preview: ImportPreview = (await importInto(target, file, 'merge', true)).json().preview;
+    assert.equal(section(preview, 'machines').updated.length, 1);
+    assert.equal((await importInto(target, file, 'merge')).status, 200);
+    assert.equal(restored().installedVersionApp, null);
+    assert.equal(restored().installedVersion, '2.0.0');
   });
 
   it('merges into an existing configuration and keeps its secrets', async () => {

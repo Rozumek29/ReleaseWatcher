@@ -114,7 +114,7 @@ export class BackupService {
     }
 
     const repositories = store.list();
-    const repoNames = new Map(repositories.map((r) => [r.id, fullName(r)]));
+    const repoNames = repositoryRefs(repositories);
     const keyNames = hosts.keyNames();
     const targets = containers.list();
     const apps = containers.listApps();
@@ -196,21 +196,37 @@ function exportRepository(r: WatchedRepository): BackupRepository {
   };
 }
 
-function exportApp(a: ContainerApp, repoNames: ReadonlyMap<number, string>): BackupApp {
+/** What apps need to know about the watched repositories when they are exported. */
+interface RepositoryRefs {
+  /** `owner/name` by id. */
+  names: ReadonlyMap<number, string>;
+  /** Ids of the apps that repositories read their installed version from. */
+  installedVersionApps: ReadonlySet<number>;
+}
+
+const repositoryRefs = (repositories: readonly WatchedRepository[]): RepositoryRefs => ({
+  names: new Map(repositories.map((r) => [r.id, fullName(r)])),
+  installedVersionApps: new Set(
+    repositories.flatMap((r) => (r.installedVersionApp?.kind === 'app' ? [r.installedVersionApp.id] : [])),
+  ),
+});
+
+function exportApp(a: ContainerApp, repoNames: RepositoryRefs): BackupApp {
   return {
     name: a.name,
     versionCommand: a.versionCommand,
     latestSource: a.latestSource,
-    repository: a.repositoryId === null ? null : (repoNames.get(a.repositoryId) ?? null),
+    repository: a.repositoryId === null ? null : (repoNames.names.get(a.repositoryId) ?? null),
     latestCommand: a.latestCommand,
     updateCommand: a.updateCommand,
     useTty: a.useTty,
     timeoutSeconds: a.timeoutSeconds,
     installedVersion: a.versionCommand ? null : a.installedVersion,
+    isInstalledVersionSource: repoNames.installedVersionApps.has(a.id),
   };
 }
 
-function exportTarget(c: Container, apps: readonly ContainerApp[], repoNames: ReadonlyMap<number, string>): BackupTarget {
+function exportTarget(c: Container, apps: readonly ContainerApp[], repoNames: RepositoryRefs): BackupTarget {
   return {
     kind: c.kind,
     vmid: c.vmid,
@@ -235,7 +251,7 @@ function exportHost(
   keyNames: ReadonlyMap<number, string>,
   targets: readonly Container[],
   apps: readonly ContainerApp[],
-  repoNames: ReadonlyMap<number, string>,
+  repoNames: RepositoryRefs,
 ): BackupHost {
   return {
     type: h.type,
@@ -493,7 +509,7 @@ class ImportPlanner {
     const allTargets = containers.list();
     const allApps = containers.listApps();
     const keyIds = new Map([...hosts.keyNames()].map(([id, name]) => [name.toLowerCase(), id]));
-    const repoNames = new Map(this.deps.store.list().map((r) => [r.id, fullName(r)]));
+    const repoNames = repositoryRefs(this.deps.store.list());
     const seen = new Set<string>();
 
     (this.input.hosts ?? []).forEach((raw, index) => {
@@ -591,7 +607,7 @@ class ImportPlanner {
    * missing from the file are removed only in replace mode.
    */
   private planTargets(host: Host, currentTargets: readonly Container[], allApps: readonly ContainerApp[], targets: readonly BackupTarget[]): boolean {
-    const repoNames = new Map(this.deps.store.list().map((r) => [r.id, fullName(r)]));
+    const repoNames = repositoryRefs(this.deps.store.list());
     let changed = false;
     for (const t of targets) {
       const current = currentTargets.find((c) => targetKey(c) === targetKey(t));
@@ -649,24 +665,43 @@ class ImportPlanner {
       for (const app of t.apps) {
         const input = this.appInput(app);
         const existing = apps.find((a) => appKey(a) === appKey(app));
+        let saved: ContainerApp;
         if (existing) {
-          const saved = containers.getApp(container.id, existing.id)!;
+          saved = containers.getApp(container.id, existing.id)!;
           Object.assign(saved, input);
           if (!input.versionCommand && app.installedVersion !== null) saved.installedVersion = app.installedVersion;
           containers.saveApp(saved);
         } else {
-          const added = containers.addApp(container.id, input);
+          saved = containers.addApp(container.id, input);
           if (!input.versionCommand && app.installedVersion !== null) {
-            added.installedVersion = app.installedVersion;
-            containers.saveApp(added);
+            saved.installedVersion = app.installedVersion;
+            containers.saveApp(saved);
           }
         }
+        this.writeInstalledVersionSource(saved, app.isInstalledVersionSource);
       }
       if (this.mode === 'replace') {
         const keep = new Set(t.apps.map(appKey));
         for (const a of apps) {
           if (!keep.has(appKey(a))) containers.deleteApp(container.id, a.id);
         }
+      }
+    }
+  }
+
+  /**
+   * Makes the app the source of its repository's installed version, as the file says – or stops reading the version
+   * from it (the last one stays as entered by hand).
+   */
+  private writeInstalledVersionSource(app: ContainerApp, isSource: boolean): void {
+    const { store } = this.deps;
+    if (isSource && app.repositoryId !== null) {
+      store.setInstalledVersionApp(app.repositoryId, { kind: 'app', id: app.id });
+      return;
+    }
+    for (const repo of store.list()) {
+      if (repo.installedVersionApp?.kind === 'app' && repo.installedVersionApp.id === app.id) {
+        store.setInstalledVersionApp(repo.id, null);
       }
     }
   }
@@ -797,6 +832,8 @@ class ImportPlanner {
             useTty: a.useTty ?? false,
             timeoutSeconds,
             installedVersion: versionCommand ? null : blank(a.installedVersion),
+            // Only an app linked to a repository can be the source of its installed version.
+            isInstalledVersionSource: repository !== null && (a.isInstalledVersionSource ?? false),
           });
         });
       }
