@@ -1,5 +1,5 @@
 import type { RepositoryStore } from '../db.ts';
-import { fullName, iconUrls } from '../domain.ts';
+import { fullName, iconUrls, type MachineAppRef } from '../domain.ts';
 import { errorMessage } from '../errors.ts';
 import { problem, validationProblem } from '../http.ts';
 import { maskSecret } from '../settings.ts';
@@ -60,6 +60,8 @@ export interface ContainerRoutesDeps {
   onTargetDeleted?: (container: Container) => void;
   /** Called when Docker listing was switched off for a target (forgets its Docker containers). */
   onDockerDisabled?: (container: Container) => void;
+  /** Called after an application was linked to a repository (added with one, or its repository changed). */
+  onAppLinked?: (app: MachineAppRef, repositoryId: number) => void;
 }
 
 const COMMAND_MAX_LENGTH = 4000;
@@ -833,6 +835,9 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           app.installedVersion = manual;
           containers.saveApp(app);
         }
+        if (app.repositoryId !== null) {
+          deps.onAppLinked?.({ kind: 'app', id: app.id }, app.repositoryId);
+        }
         return Response.json(appDto(app), {
           status: 201,
           headers: { location: `/api/containers/${container.id}/apps/${app.id}` },
@@ -860,12 +865,16 @@ export function containerRoutes(deps: ContainerRoutesDeps) {
           input.repositoryId !== app.repositoryId ||
           input.latestCommand !== app.latestCommand;
         const versionChanged = input.versionCommand !== app.versionCommand;
+        const linked = input.repositoryId !== null && input.repositoryId !== app.repositoryId;
         Object.assign(app, input);
         // Values read with the old configuration would be misleading.
         if (sourceChanged) app.latestVersion = null;
         if (versionChanged) app.installedVersion = null;
         if (manual !== undefined) app.installedVersion = manual;
         containers.saveApp(app);
+        if (linked && app.repositoryId !== null) {
+          deps.onAppLinked?.({ kind: 'app', id: app.id }, app.repositoryId);
+        }
         return Response.json(appDto(app));
       },
       DELETE: (req: Bun.BunRequest<'/api/containers/:id/apps/:appId'>) =>

@@ -250,6 +250,61 @@ describe('docker API', () => {
     assert.ok(JSON.stringify(dto).includes('2024.11.1'));
   });
 
+  it('reads the installed version of a repository from a Docker container', async () => {
+    const repo = store.add('owner', 'other', false);
+    engine.listing.containers = [engineContainer('app', 'owner/app:1.0.0')];
+    const endpoint = await addEndpoint();
+    const app_ = await container('app');
+    const repository = async () => (await request('GET', `/api/repositories/${repo.id}`)).json();
+
+    // Linked by hand on the Docker page: its version becomes the repository's installed version.
+    await request('PUT', `/api/docker/containers/${app_.id}`, { repositoryId: repo.id });
+    let dto = await repository();
+    assert.equal(dto.installedVersionSource, 'machine');
+    assert.deepEqual(dto.installedVersionApp, { kind: 'docker', id: app_.id, name: 'app', machine: 'NAS' });
+    assert.equal(dto.installedVersion, '1.0.0');
+    const machines = (await request('GET', '/api/machine-apps')).json();
+    assert.deepEqual(machines[0].machine, { kind: 'endpoint', id: endpoint.id, name: 'NAS' });
+    assert.equal(machines[0].apps[0].repositoryId, repo.id);
+
+    // Updated on the next check.
+    engine.listing.containers = [engineContainer('app', 'owner/app:1.1.0')];
+    await request('POST', `/api/docker/endpoints/${endpoint.id}/check`);
+    await app.docker.idle();
+    assert.equal((await repository()).installedVersion, '1.1.0');
+
+    // Hidden: the last version stays, entered by hand – and hidden containers cannot be chosen.
+    await request('PUT', `/api/docker/containers/${app_.id}`, { ignored: true });
+    dto = await repository();
+    assert.equal(dto.installedVersionSource, 'manual');
+    assert.match(dto.installedVersionError, /hidden or no longer linked/);
+    const choose = () =>
+      request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'docker', id: app_.id } });
+    assert.equal((await choose()).status, 400);
+    await request('PUT', `/api/docker/containers/${app_.id}`, { ignored: false });
+    assert.equal((await repository()).installedVersionSource, 'manual'); // shown again, but not chosen again by itself
+    dto = (await choose()).json();
+    assert.equal(dto.installedVersionSource, 'machine');
+    assert.equal(dto.installedVersionError, null);
+
+    // Linked to another repository on the Docker page: that one takes it over (it has no source yet), and back.
+    const third = store.add('owner', 'third', false);
+    await request('PUT', `/api/docker/containers/${app_.id}`, { repositoryId: third.id });
+    assert.equal((await repository()).installedVersionSource, 'manual');
+    assert.equal((await request('GET', `/api/repositories/${third.id}`)).json().installedVersionSource, 'machine');
+    dto = (await choose()).json();
+    assert.equal((await container('app')).repository?.fullName, 'owner/other');
+    assert.equal((await request('GET', `/api/repositories/${third.id}`)).json().installedVersionSource, 'manual');
+    assert.equal(dto.installedVersionSource, 'machine');
+
+    // Removed with its connection.
+    assert.equal((await request('DELETE', `/api/docker/endpoints/${endpoint.id}`)).status, 204);
+    dto = await repository();
+    assert.equal(dto.installedVersionSource, 'manual');
+    assert.equal(dto.installedVersion, '1.1.0');
+    assert.match(dto.installedVersionError, /removed/);
+  });
+
   it('keeps ignored containers ignored when they are re-created', async () => {
     engine.listing.containers = [engineContainer('web', 'nginx:1.27'), engineContainer('old', 'nginx:1.25', { labels: { 'releasewatcher.ignore': 'true' } })];
     const endpoint = await addEndpoint();

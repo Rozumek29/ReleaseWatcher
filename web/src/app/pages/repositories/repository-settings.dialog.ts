@@ -18,8 +18,15 @@ import {
   HeaderInput,
   InstalledVersionSource,
   InstalledVersionTestResult,
+  MachineAppGroup,
+  MachineAppOption,
+  MachineAppRef,
   WatchedRepository,
 } from '../../core/models';
+
+/** Key of a machine (`target:3`, `endpoint:1`) or an app (`app:5`, `docker:7`) in the selects. */
+const machineKey = (m: MachineAppGroup['machine']): string => `${m.kind}:${m.id}`;
+const appKey = (a: MachineAppRef): string => `${a.kind}:${a.id}`;
 
 /** Editable header row. `saved` = a value exists on the server; an empty value field keeps it. */
 interface HeaderRow {
@@ -61,6 +68,14 @@ export class RepositorySettingsDialog {
   protected manualVersion = '';
   protected url = '';
   protected field = '';
+  /** Machine and app the installed version is read from (source = machine); keys as built by `machineKey` / `appKey`. */
+  protected machine = '';
+  protected app = '';
+  /** Apps on machines to choose from; null = not loaded (yet). */
+  protected readonly machines = signal<MachineAppGroup[] | null>(null);
+  protected readonly machinesError = signal<string | null>(null);
+  protected readonly machineKey = machineKey;
+  protected readonly appKey = appKey;
   protected includePrereleases = false;
   protected isEnabled = true;
   protected headers: HeaderRow[] = [];
@@ -91,6 +106,8 @@ export class RepositorySettingsDialog {
     return [
       this.source,
       this.manualVersion,
+      this.machine,
+      this.app,
       this.url,
       this.field,
       this.includePrereleases,
@@ -117,6 +134,9 @@ export class RepositorySettingsDialog {
         this.source = repo.installedVersionSource;
         this.manualVersion = repo.installedVersionSource === 'manual' ? (repo.installedVersion ?? '') : '';
         this.url = repo.installedVersionUrl ?? '';
+        const current = repo.installedVersionApp;
+        this.app = current ? appKey(current) : '';
+        this.machine = '';
         this.field = repo.installedVersionField ?? '';
         this.includePrereleases = repo.includePrereleases;
         this.isEnabled = repo.isEnabled;
@@ -132,6 +152,10 @@ export class RepositorySettingsDialog {
         this.testResult.set(null);
         this.testError.set(null);
         this.saveError.set(null);
+        this.machines.set(null);
+        if (this.source === 'machine') {
+          void this.loadMachines(repo);
+        }
         if (!dialog.open) {
           dialog.showModal?.();
         }
@@ -139,6 +163,62 @@ export class RepositorySettingsDialog {
         dialog.close();
       }
     });
+  }
+
+  /** Loads the apps on machines and selects the machine of the current app (a default: the snapshot follows). */
+  private async loadMachines(repo: WatchedRepository): Promise<void> {
+    this.machinesError.set(null);
+    try {
+      const groups = await firstValueFrom(this.api.machineApps());
+      if (this.repository()?.id !== repo.id) {
+        return;
+      }
+      const pristine = !this.changed();
+      const current = repo.installedVersionApp;
+      const found = current ? groups.find((g) => g.apps.some((a) => appKey(a) === appKey(current))) : undefined;
+      // Without a current app, start with the only machine – or the one with an app linked to this repository.
+      const preselected =
+        found ?? (groups.length === 1 ? groups[0] : groups.find((g) => g.apps.some((a) => a.repositoryId === repo.id)));
+      this.machines.set(groups);
+      if (found) {
+        this.machine = machineKey(found.machine);
+      } else if (!this.machine && preselected) {
+        this.chooseMachine(machineKey(preselected.machine));
+      }
+      if (pristine) {
+        this.savedValues = this.values();
+      }
+    } catch (error) {
+      this.machines.set([]);
+      this.machinesError.set(describeError(error));
+    }
+  }
+
+  /** Switches the source; the apps on machines are loaded the first time they are needed. */
+  protected chooseSource(source: InstalledVersionSource): void {
+    this.source = source;
+    const repo = this.repository();
+    if (source === 'machine' && repo && this.machines() === null) {
+      void this.loadMachines(repo);
+    }
+  }
+
+  /** Apps of the chosen machine. */
+  protected appsOf(key: string): MachineAppOption[] {
+    return this.machines()?.find((g) => machineKey(g.machine) === key)?.apps ?? [];
+  }
+
+  /** The chosen app (null = none chosen or no longer on the machine). */
+  protected chosenApp(): MachineAppOption | null {
+    return this.appsOf(this.machine).find((a) => appKey(a) === this.app) ?? null;
+  }
+
+  protected chooseMachine(key: string): void {
+    this.machine = key;
+    const apps = this.appsOf(key);
+    // An app already linked to this repository is the likely choice; otherwise the user picks one.
+    const linked = apps.find((a) => a.repositoryId === this.repository()?.id);
+    this.app = linked ? appKey(linked) : apps.length === 1 ? appKey(apps[0]!) : '';
   }
 
   protected async test(): Promise<void> {
@@ -166,10 +246,16 @@ export class RepositorySettingsDialog {
     if (!repo) {
       return;
     }
+    const fromUrl = this.source === 'url';
+    const fromMachine = this.source === 'machine';
+    const chosen = fromMachine ? this.chosenApp() : null;
+    if (fromMachine && !chosen) {
+      this.saveError.set('Choose the app to read the installed version from.');
+      return;
+    }
     this.saving.set(true);
     this.saveError.set(null);
     const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
-    const fromUrl = this.source === 'url';
     try {
       const updated = await firstValueFrom(
         this.api.updateRepository(repo.id, {
@@ -178,8 +264,14 @@ export class RepositorySettingsDialog {
           installedVersionUrl: fromUrl ? this.url.trim() || null : null,
           installedVersionField: fromUrl ? this.field.trim() || null : null,
           installedVersionHeaders: fromUrl ? this.headerInputs() : [],
-          // A version read from the URL is not sent back; otherwise the value entered by hand (or none).
-          ...(fromUrl ? {} : { installedVersion: this.source === 'manual' ? this.manualVersion.trim() || null : null }),
+          // A version read from the URL or an app is not sent back; otherwise the value entered by hand (or none).
+          ...(fromUrl || fromMachine ? {} : { installedVersion: this.source === 'manual' ? this.manualVersion.trim() || null : null }),
+          // Choosing an app links it to this repository; any other source stops reading it.
+          ...(chosen
+            ? { installedVersionApp: { kind: chosen.kind, id: chosen.id } }
+            : repo.installedVersionApp
+              ? { installedVersionApp: null }
+              : {}),
           // The token is never sent back to the UI: empty = keep, "Remove" = null.
           ...(this.token.trim() ? { githubToken: this.token.trim() } : this.removeToken ? { githubToken: null } : {}),
           // Both or neither: an ecosystem without a package removes the OSV.dev package.

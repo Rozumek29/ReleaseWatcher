@@ -22,8 +22,10 @@ export interface WatchedRepository {
   /** Header names only – values are secrets and never leave the server. */
   installedVersionHeaders: { name: string; hasValue: boolean }[];
   installedVersion: string | null;
-  /** Where the installed version comes from: the version URL, entered by hand, or nowhere. */
+  /** Where the installed version comes from: the version URL, entered by hand, an app on a machine, or nowhere. */
   installedVersionSource: InstalledVersionSource;
+  /** The app on a machine the installed version is read from (source = machine). */
+  installedVersionApp: InstalledVersionApp | null;
   installedVersionCheckedAt: string | null;
   installedVersionError: string | null;
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
@@ -40,7 +42,36 @@ export interface WatchedRepository {
   advisories: AdvisorySummary;
 }
 
-export type InstalledVersionSource = 'none' | 'url' | 'manual';
+export type InstalledVersionSource = 'none' | 'url' | 'manual' | 'machine';
+
+/** An app on a machine: an application of a target or a Docker container. */
+export interface MachineAppRef {
+  kind: 'app' | 'docker';
+  id: number;
+}
+
+export interface InstalledVersionApp extends MachineAppRef {
+  name: string;
+  /** Name of the machine or Docker connection. */
+  machine: string;
+}
+
+/** An app a repository can read its installed version from (`GET /api/machine-apps`). */
+export interface MachineAppOption extends MachineAppRef {
+  name: string;
+  installedVersion: string | null;
+  checkedAt: string | null;
+  /** Repository the app is linked to; null = none. */
+  repositoryId: number | null;
+  /** `owner/name` of that repository. */
+  repository: string | null;
+}
+
+/** A machine (target) or Docker connection with its apps. */
+export interface MachineAppGroup {
+  machine: { kind: 'target' | 'endpoint'; id: number; name: string };
+  apps: MachineAppOption[];
+}
 
 export type AdvisorySource = 'github' | 'osv';
 
@@ -94,6 +125,8 @@ export interface UpdateRepositoryRequest {
   installedVersionHeaders?: HeaderInput[] | null;
   /** Installed version entered by hand (only without a URL); omit to keep, null to clear. */
   installedVersion?: string | null;
+  /** App on a machine to read the installed version from (it gets linked); omit to keep, null to stop. */
+  installedVersionApp?: MachineAppRef | null;
   /** Omit to keep, null to remove the repository's own token. */
   githubToken?: string | null;
   /** OSV.dev package; omit to keep, null to remove. */

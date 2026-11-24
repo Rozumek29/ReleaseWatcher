@@ -180,6 +180,15 @@ export class RepositoriesPage {
     });
   }
 
+  /** Where the installed version shown on the card comes from. */
+  protected installedFrom(repo: WatchedRepository): string {
+    const app = repo.installedVersionApp;
+    if (app) {
+      return `Read from ${app.name} on ${app.machine}`;
+    }
+    return repo.installedVersionUrl ? `Read from ${repo.installedVersionUrl}` : 'Entered by hand';
+  }
+
   /** A version entered by hand that is not the latest release can be set to it in one click. */
   protected canMarkInstalled(repo: WatchedRepository): boolean {
     return (

@@ -27,6 +27,7 @@ const repo: WatchedRepository = {
   installedVersionHeaders: [],
   installedVersion: null,
   installedVersionSource: 'none',
+  installedVersionApp: null,
   installedVersionCheckedAt: null,
   installedVersionError: null,
   installedVersions: [],
@@ -209,6 +210,100 @@ describe('RepositorySettingsDialog', () => {
     request.flush({ ...repo });
     await settle(fixture);
     http.verify();
+  });
+
+  it('reads the installed version from an app on a machine and links it', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', repo);
+    await settle(fixture);
+    http.expectNone('/api/machine-apps'); // loaded only when needed
+
+    const el = fixture.nativeElement as HTMLElement;
+    const choose = async (id: string, value: string) => {
+      const select = el.querySelector<HTMLSelectElement>(id)!;
+      select.value = value;
+      select.dispatchEvent(new Event('change'));
+      await settle(fixture);
+    };
+    await choose('#version-source', 'machine');
+    expect(el.textContent).toContain('Loading apps on your machines…');
+    http.expectOne('/api/machine-apps').flush([
+      {
+        machine: { kind: 'target', id: 1, name: 'vaultwarden' },
+        apps: [{ kind: 'app', id: 3, name: 'Vaultwarden', installedVersion: '1.30.0', checkedAt: null, repositoryId: null, repository: null }],
+      },
+      {
+        machine: { kind: 'endpoint', id: 2, name: 'NAS' },
+        apps: [
+          { kind: 'docker', id: 4, name: 'vaultwarden', installedVersion: '1.31.0', checkedAt: null, repositoryId: 9, repository: 'acme/other' },
+          { kind: 'docker', id: 5, name: 'db', installedVersion: null, checkedAt: null, repositoryId: null, repository: null },
+        ],
+      },
+    ]);
+    await settle(fixture);
+    const options = (id: string) => [...el.querySelectorAll<HTMLOptionElement>(`${id} option`)].map((o) => o.textContent!.trim());
+    expect(options('#version-machine')).toEqual(['Choose a machine…', 'vaultwarden', 'NAS (Docker)']);
+
+    // Saving without an app asks for one.
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    await settle(fixture);
+    http.expectNone('/api/repositories/7');
+    expect(el.querySelector('.save-error')?.textContent).toContain('Choose the app');
+
+    await choose('#version-machine', 'endpoint:2');
+    expect(options('#version-app')).toEqual([
+      'Choose an app…',
+      'vaultwarden (container) – 1.31.0',
+      'db (container) – version not known yet',
+    ]);
+    await choose('#version-app', 'docker:4');
+    expect(el.querySelector('.machine-warning')?.textContent).toContain('acme/other');
+
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.installedVersionApp).toEqual({ kind: 'docker', id: 4 });
+    expect('installedVersion' in request.request.body).toBe(false);
+  });
+
+  it('shows the app the installed version is read from and stops reading it', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', {
+      ...repo,
+      installedVersion: '1.30.0',
+      installedVersionSource: 'machine',
+      installedVersionApp: { kind: 'app', id: 3, name: 'Vaultwarden', machine: 'vaultwarden' },
+    });
+    await settle(fixture);
+    http.expectOne('/api/machine-apps').flush([
+      {
+        machine: { kind: 'target', id: 1, name: 'vaultwarden' },
+        apps: [{ kind: 'app', id: 3, name: 'Vaultwarden', installedVersion: '1.30.0', checkedAt: null, repositoryId: 7, repository: 'dani-garcia/vaultwarden' }],
+      },
+    ]);
+    await settle(fixture);
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector<HTMLSelectElement>('#version-machine')!.value).toBe('target:1');
+    expect(el.querySelector<HTMLSelectElement>('#version-app')!.value).toBe('app:3');
+    expect(el.querySelector('app-unsaved-changes')).toBeNull();
+
+    const source = el.querySelector<HTMLSelectElement>('#version-source')!;
+    source.value = 'manual';
+    source.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.installedVersionApp).toBeNull();
+    expect(request.request.body.installedVersion).toBeNull();
   });
 
   it('saves the OSV.dev package only with both the ecosystem and the name', async () => {

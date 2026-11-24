@@ -29,6 +29,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
   installedVersionHeaders: [],
     installedVersion: null,
     installedVersionSource: 'none',
+    installedVersionApp: null,
     installedVersionCheckedAt: null,
     installedVersionError: null,
     installedVersions: [],

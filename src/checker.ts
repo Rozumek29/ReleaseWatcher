@@ -105,11 +105,14 @@ export class ReleaseChecker {
 
   /**
    * Reads the version of the self-hosted app (if configured). Failures are stored on the repository
-   * but never block the release check. Without a URL the installed version is the one entered by hand (or none) and is kept.
+   * but never block the release check. Without a URL the installed version is the one entered by hand (or none) and is
+   * kept; one read from an app on a machine is updated by the machine's checks.
    */
   async refreshInstalledVersion(repo: WatchedRepository): Promise<void> {
+    if (repo.installedVersionApp) {
+      return;
+    }
     if (!repo.installedVersionUrl) {
-      repo.installedVersionError = null;
       repo.installedVersionCheckedAt = null;
       return;
     }

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
+import { MIGRATIONS, RepositoryStore, SELF_REPOSITORY } from '../src/db.ts';
 import { SecretBox, parseKey } from '../src/secret-box.ts';
 import { AdvisoryImpacts } from '../src/advisory-impacts.ts';
 import { Database } from 'bun:sqlite';
@@ -216,6 +216,57 @@ describe('RepositoryStore file size', () => {
     const fresh = new RepositoryStore(join(dir, 'new.db'), box());
     assert.equal(pragma(fresh.database, 'auto_vacuum'), 2);
     fresh.close();
+  });
+});
+
+describe('RepositoryStore installed version from machines', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-machine-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('reads the installed version from apps linked before the upgrade', () => {
+    const path = join(dir, 'old.db');
+    // A database of the previous version with apps already linked to repositories.
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, -1)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    const now = '2026-11-01T00:00:00.000Z';
+    old.exec(`
+      INSERT INTO watched_repositories (id, owner, name, created_at, installed_version) VALUES
+        (1, 'acme', 'app', '${now}', '1.0.0'),
+        (2, 'acme', 'url', '${now}', NULL),
+        (3, 'acme', 'docker', '${now}', NULL),
+        (4, 'acme', 'none', '${now}', NULL);
+      UPDATE watched_repositories SET installed_version_url = 'https://url.lan/version' WHERE id = 2;
+      INSERT INTO containers (id, vmid, name, created_at) VALUES (1, 101, 'vault', '${now}');
+      INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id, version_command, installed_version, checked_at) VALUES
+        (1, 1, 'No version', '${now}', 'github', 1, NULL, NULL, NULL),
+        (2, 1, 'App', '${now}', 'github', 1, 'cat /v', '1.2.0', '${now}'),
+        (3, 1, 'Url', '${now}', 'github', 2, 'cat /v', '2.0.0', '${now}'),
+        (4, 1, 'Unknown', '${now}', 'github', 4, NULL, NULL, NULL);
+      INSERT INTO docker_containers (id, target_id, name, container_id, image, link_auto, repository_id, installed_version, first_seen_at, last_seen_at) VALUES
+        (1, 1, 'docker', 'c1', 'acme/docker:3.0.0', 0, 3, '3.0.0', '${now}', '${now}');
+    `);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    const repo = (id: number) => store.get(id)!;
+    assert.deepEqual(repo(1).installedVersionApp, { kind: 'app', id: 2 });
+    assert.equal(repo(1).installedVersion, '1.2.0');
+    assert.equal(repo(2).installedVersionApp, null); // keeps its version URL
+    assert.deepEqual(repo(3).installedVersionApp, { kind: 'docker', id: 1 });
+    assert.equal(repo(3).installedVersion, '3.0.0');
+    assert.equal(repo(4).installedVersionApp, null); // no app reports a version
+    assert.deepEqual(store.installedVersionApps().get(3), { kind: 'docker', id: 1, name: 'docker', machine: 'vault' });
+
+    // save() never overwrites the version read from the app with an older copy.
+    const stale = repo(1);
+    store.database.exec("UPDATE container_apps SET installed_version = '1.3.0' WHERE id = 2");
+    store.save(stale);
+    assert.equal(repo(1).installedVersion, '1.3.0');
+    store.close();
   });
 });
 

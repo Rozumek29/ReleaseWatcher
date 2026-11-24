@@ -26,6 +26,7 @@ import {
   ImportMode,
   ImportResponse,
   InstalledVersionTestResult,
+  MachineAppGroup,
   Notifier,
   RateLimit,
   Run,
@@ -90,6 +91,11 @@ export class ApiService {
 
   updateRepository(id: number, request: UpdateRepositoryRequest): Observable<WatchedRepository> {
     return this.http.put<WatchedRepository>(`${this.baseUrl}/repositories/${id}`, request);
+  }
+
+  /** Apps on machines a repository can read its installed version from. */
+  machineApps(): Observable<MachineAppGroup[]> {
+    return this.http.get<MachineAppGroup[]>(`${this.baseUrl}/machine-apps`);
   }
 
   /** Sets the installed version (entered by hand) to the latest release. */
