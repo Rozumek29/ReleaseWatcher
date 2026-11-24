@@ -55,6 +55,39 @@
     background: var(--warning-soft);
     color: var(--warning);
   }
+
+  &.sso {
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+  }
+}
+
+.sso-link-action {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+
+  .hint {
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+}
+
+.sso-link .item-meta.mono {
+  overflow-wrap: anywhere;
+}
+
+.sso-form {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.sso-skeleton {
+  height: 220px;
+  border-radius: 10px;
 }
 
 .new-token {

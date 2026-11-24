@@ -3,7 +3,7 @@
     <span class="logo"><app-icon name="bell" [size]="22" /></span>
     <h1 id="login-title">Sign in to ReleaseWatcher</h1>
     @if (!passwordLogin()) {
-      <p>Password sign-in is turned off – use a passkey.</p>
+      <p>Password sign-in is turned off – use {{ alternatives() }}.</p>
     }
   </div>
 
@@ -44,23 +44,43 @@
       </button>
     </form>
 
-    @if (showPasskey()) {
+    @if (showPasskey() || sso()) {
       <div class="divider">or</div>
-      <button type="button" class="btn btn-secondary btn-block passkey-btn" (click)="signInWithPasskey()" [disabled]="busy() !== null">
-        <app-icon name="key" [size]="16" />
-        {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
-      </button>
     }
-  } @else if (auth.passkeysSupported) {
-    <button type="button" class="btn btn-block passkey-btn passkey-only" (click)="signInWithPasskey()" [disabled]="busy() !== null">
-      <app-icon name="key" [size]="16" />
-      {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
-    </button>
-  } @else {
-    <p class="passkey-help" role="note">
-      Passkeys only work over <strong>HTTPS with a host name</strong> – open ReleaseWatcher at the address you added the
-      passkey on. Lost access? Run <code>--reset-login</code> on the server (see
-      <a href="https://github.com/Rozumek29/ReleaseWatcher/wiki/Account-and-security#reset-the-login" target="_blank" rel="noopener">Reset the login</a>).
-    </p>
+  }
+
+  @if (!passwordLogin() || showPasskey() || sso()) {
+    <div class="alt-signin" [class.only]="!passwordLogin()">
+      @if (sso(); as name) {
+        <button
+          type="button"
+          class="btn btn-block sso-btn"
+          [class.btn-secondary]="passwordLogin()"
+          (click)="signInWithSso()"
+          [disabled]="busy() !== null"
+        >
+          <app-icon name="login" [size]="16" />
+          {{ busy() === 'sso' ? 'Opening ' + name + '…' : 'Sign in with ' + name }}
+        </button>
+      }
+      @if (showPasskey()) {
+        <button
+          type="button"
+          class="btn btn-block passkey-btn"
+          [class.btn-secondary]="passwordLogin() || sso()"
+          (click)="signInWithPasskey()"
+          [disabled]="busy() !== null"
+        >
+          <app-icon name="key" [size]="16" />
+          {{ busy() === 'passkey' ? 'Waiting for the passkey…' : 'Sign in with a passkey' }}
+        </button>
+      } @else if (!passwordLogin() && !sso()) {
+        <p class="passkey-help" role="note">
+          Passkeys only work over <strong>HTTPS with a host name</strong> – open ReleaseWatcher at the address you added
+          the passkey on. Lost access? Run <code>--enable-password-login</code> on the server (see
+          <a href="https://github.com/Rozumek29/ReleaseWatcher/wiki/Account-and-security#reset-the-login" target="_blank" rel="noopener">Reset the login</a>).
+        </p>
+      }
+    </div>
   }
 </section>

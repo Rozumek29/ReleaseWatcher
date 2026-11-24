@@ -118,9 +118,9 @@
                       type="button"
                       class="icon-btn"
                       (click)="confirmDelete.set(p.id)"
-                      [disabled]="!passwordLogin() && passkeys().length === 1"
+                      [disabled]="!passwordLogin() && passkeys().length === 1 && !ssoUsable()"
                       [attr.aria-label]="'Remove passkey ' + p.name"
-                      [attr.title]="!passwordLogin() && passkeys().length === 1 ? 'Turn on password sign-in before removing the last passkey' : 'Remove passkey'"
+                      [attr.title]="!passwordLogin() && passkeys().length === 1 && !ssoUsable() ? 'Turn on password sign-in before removing the last passkey' : 'Remove passkey'"
                     >
                       <app-icon name="trash" [size]="16" />
                     </button>
@@ -149,20 +149,20 @@
             label="Allow password sign-in"
             [showLabel]="false"
             [checked]="passwordLogin()"
-            [disabled]="savingPasswordLogin() || (passwordLogin() && passkeys().length === 0)"
+            [disabled]="savingPasswordLogin() || (passwordLogin() && passkeys().length === 0 && !ssoUsable())"
             (toggled)="startPasswordLoginChange()"
           />
           <div class="toggle-text">
             <span class="toggle-label">Allow password sign-in</span>
             <span class="hint">
               @if (!passwordLogin()) {
-                Off – only passkeys sign in, with a PIN or biometrics, and the sign-in screen asks for one right away.
-                Lost every passkey? Run <code>--reset-login</code> on the server.
-              } @else if (passkeys().length === 0) {
-                Add a passkey to turn this off and sign in with passkeys only.
+                Off – only passkeys (with a PIN or biometrics) and single sign-on sign in. Locked out? Run
+                <code>--enable-password-login</code> on the server.
+              } @else if (passkeys().length === 0 && !ssoUsable()) {
+                Add a passkey or link single sign-on to turn this off.
               } @else {
-                Turn off to sign in with passkeys only – the password then only confirms account changes. Other
-                sessions opened with the password are signed out.
+                Turn off to sign in only with a passkey or single sign-on – the password then only confirms account
+                changes. Other sessions opened with the password are signed out.
               }
             </span>
           </div>
@@ -190,6 +190,178 @@
           }
         }
       </div>
+    </div>
+  </section>
+
+  <!-- Single sign-on -->
+  <section class="card section" aria-labelledby="sso-title">
+    <div class="section-head">
+      <span class="section-icon sso"><app-icon name="login" /></span>
+      <div class="section-title">
+        <h2 id="sso-title">Single sign-on</h2>
+        <p>Sign in through your identity provider – Pocket ID, Authentik, Keycloak, Authelia or any other OpenID Connect provider.</p>
+      </div>
+    </div>
+    <div class="section-body">
+      @if (oidc(); as o) {
+        @if (o.link; as link) {
+          <ul class="list">
+            <li class="list-item sso-link">
+              <div class="item-main">
+                <span class="item-name">
+                  <app-icon name="link" [size]="16" /> {{ link.label ?? link.subject }}
+                  @if (ssoUsable()) {
+                    <span class="badge badge-success">Linked</span>
+                  } @else {
+                    <span class="badge badge-warning">Other provider</span>
+                  }
+                </span>
+                <span class="item-meta mono">{{ link.issuer }}</span>
+                <span class="item-meta">linked {{ link.linkedAt | relativeTime: now() }}</span>
+              </div>
+              <div class="item-actions">
+                @if (confirmUnlink()) {
+                  <span class="confirm-text">Unlink?</span>
+                  <button type="button" class="btn btn-sm btn-danger-ghost" (click)="unlinkSso()">Unlink</button>
+                  <button type="button" class="btn btn-sm btn-ghost" (click)="confirmUnlink.set(false)">Keep</button>
+                } @else {
+                  <button
+                    type="button"
+                    class="btn btn-sm btn-ghost"
+                    (click)="confirmUnlink.set(true)"
+                    [disabled]="!passwordLogin() && passkeys().length === 0"
+                    [attr.title]="!passwordLogin() && passkeys().length === 0 ? 'Turn on password sign-in or add a passkey before unlinking' : null"
+                  >
+                    Unlink
+                  </button>
+                }
+              </div>
+            </li>
+          </ul>
+          @if (!ssoUsable() && o.configured) {
+            <div class="notice">
+              <app-icon name="alert" [size]="16" />
+              <span>The linked identity belongs to another provider than the one set below – link the account again.</span>
+            </div>
+          }
+        }
+        @if (o.configured && !ssoUsable()) {
+          <div class="sso-link-action">
+            <button type="button" class="btn" (click)="linkSso()" [disabled]="linkingSso() || ssoChanged()">
+              <app-icon name="link" [size]="16" />
+              {{ linkingSso() ? 'Opening ' + (o.name || 'the provider') + '…' : 'Link with ' + (o.name || 'the provider') }}
+            </button>
+            <span class="hint">
+              @if (ssoChanged()) {
+                Save the provider first.
+              } @else {
+                Sign in at the provider once – from then on that identity signs in to ReleaseWatcher.
+              }
+            </span>
+          </div>
+        } @else if (!o.configured) {
+          <p class="muted">Not set up. Create a client at your provider with the redirect URI below, then enter its details.</p>
+        }
+
+        <form class="sso-form" (ngSubmit)="saveSso()" novalidate>
+          <div class="field">
+            <label for="sso-redirect">Redirect URI</label>
+            <div class="input-with-action">
+              <input id="sso-redirect" class="input mono" name="redirectUri" [value]="o.redirectUri" readonly />
+              <button type="button" class="btn btn-ghost btn-sm" (click)="copyRedirectUri(o.redirectUri)">Copy</button>
+            </div>
+            <span class="hint">Register it at the provider (callback / redirect URL of the client).</span>
+          </div>
+          <div class="field">
+            <label for="sso-issuer">Issuer URL</label>
+            <input id="sso-issuer" class="input mono" name="issuer" [(ngModel)]="ssoIssuer" placeholder="https://id.example.com" autocomplete="off" spellcheck="false" [class.invalid]="ssoErrors()['issuer']" />
+            @if (ssoErrors()['issuer']; as e) {
+              <span class="error">{{ e }}</span>
+            } @else {
+              <span class="hint">
+                @if (o.issuerSource === 'env') { From environment (<code>OIDC_ISSUER</code>). }
+                The discovery URL (…/.well-known/openid-configuration) works too.
+              </span>
+            }
+          </div>
+          <div class="grid-2">
+            <div class="field">
+              <label for="sso-client-id">Client ID</label>
+              <input id="sso-client-id" class="input mono" name="clientId" [(ngModel)]="ssoClientId" autocomplete="off" spellcheck="false" [class.invalid]="ssoErrors()['clientId']" />
+              @if (ssoErrors()['clientId']; as e) {
+                <span class="error">{{ e }}</span>
+              } @else if (o.clientIdSource === 'env') {
+                <span class="hint">From environment (<code>OIDC_CLIENT_ID</code>).</span>
+              }
+            </div>
+            <div class="field">
+              <label for="sso-name">Button name <span class="optional">optional</span></label>
+              <input id="sso-name" class="input" name="name" [(ngModel)]="ssoName" placeholder="Pocket ID" maxlength="40" autocomplete="off" [class.invalid]="ssoErrors()['name']" />
+              @if (ssoErrors()['name']; as e) {
+                <span class="error">{{ e }}</span>
+              } @else {
+                <span class="hint">“Sign in with …” on the sign-in screen.</span>
+              }
+            </div>
+          </div>
+          <div class="field">
+            <label for="sso-secret">Client secret <span class="optional">optional</span></label>
+            <div class="input-with-action">
+              <input
+                id="sso-secret"
+                class="input mono"
+                name="clientSecret"
+                [type]="showSsoSecret() ? 'text' : 'password'"
+                [(ngModel)]="ssoClientSecret"
+                [placeholder]="o.hasClientSecret && !clearSsoSecret() ? (o.clientSecretMasked ?? '••••••••') : 'None – public client'"
+                [disabled]="clearSsoSecret()"
+                autocomplete="new-password"
+                spellcheck="false"
+                [class.invalid]="ssoErrors()['clientSecret']"
+              />
+              <button type="button" class="btn btn-ghost btn-sm" (click)="showSsoSecret.set(!showSsoSecret())">
+                {{ showSsoSecret() ? 'Hide' : 'Show' }}
+              </button>
+              @if (o.clientSecretSource === 'ui') {
+                <button type="button" class="btn btn-ghost btn-sm" (click)="clearSsoSecret.set(!clearSsoSecret()); ssoClientSecret = ''">
+                  {{ clearSsoSecret() ? 'Keep' : 'Remove' }}
+                </button>
+              }
+            </div>
+            @if (ssoErrors()['clientSecret']; as e) {
+              <span class="error">{{ e }}</span>
+            } @else {
+              <span class="hint">
+                @if (clearSsoSecret()) {
+                  The saved secret is removed when you save.
+                } @else if (o.hasClientSecret) {
+                  {{ o.clientSecretSource === 'env' ? 'From environment (OIDC_CLIENT_SECRET)' : 'Saved here' }}. Leave empty to keep the current one.
+                } @else {
+                  Leave empty for a public client (PKCE only).
+                }
+              </span>
+            }
+          </div>
+          <div class="field">
+            <label for="sso-current">Current password</label>
+            <input id="sso-current" class="input" type="password" name="ssoPassword" [(ngModel)]="ssoPassword" autocomplete="current-password" [class.invalid]="ssoErrors()['currentPassword']" />
+            @if (ssoErrors()['currentPassword']; as e) {
+              <span class="error">{{ e }}</span>
+            } @else {
+              <span class="hint">Required to change the provider.</span>
+            }
+          </div>
+          <div class="section-actions">
+            <span class="spacer"></span>
+            @if (ssoChanged()) {
+              <app-unsaved-changes />
+            }
+            <button type="submit" class="btn" [disabled]="savingSso()">{{ savingSso() ? 'Saving…' : 'Save provider' }}</button>
+          </div>
+        </form>
+      } @else {
+        <div class="skeleton sso-skeleton"></div>
+      }
     </div>
   </section>
 

@@ -75,7 +75,12 @@ form {
   }
 }
 
-.form-error + .passkey-only {
+.alt-signin {
+  display: grid;
+  gap: 10px;
+}
+
+.form-error + .alt-signin {
   margin-top: 16px;
 }
 

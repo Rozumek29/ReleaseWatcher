@@ -669,8 +669,38 @@ export interface AuthState {
   authenticated: boolean;
   username: string | null;
   hasPasskeys: boolean;
-  /** False = passkeys only: the login screen has no password form and starts the passkey prompt itself. */
+  /** False = the login screen has no password form (passkeys / single sign-on only). */
   passwordLogin: boolean;
+  /** Name of the single sign-on provider when signing in with it works (set up and linked), otherwise null. */
+  oidcLogin: string | null;
+}
+
+/** Single sign-on with an OpenID Connect provider (GET /api/auth/oidc). */
+export interface OidcSettings {
+  /** Issuer and client ID are set. */
+  configured: boolean;
+  issuer: string | null;
+  issuerSource: SettingSource;
+  clientId: string | null;
+  clientIdSource: SettingSource;
+  hasClientSecret: boolean;
+  clientSecretMasked: string | null;
+  clientSecretSource: SettingSource;
+  name: string | null;
+  nameSource: SettingSource;
+  /** To register at the provider. */
+  redirectUri: string;
+  /** The identity at the provider that signs in to the account, or null. */
+  link: { issuer: string; subject: string; label: string | null; linkedAt: string } | null;
+}
+
+/** PUT /api/auth/oidc – omitted = keep, null = back to the environment value. */
+export interface OidcSettingsUpdate {
+  currentPassword: string;
+  issuer?: string | null;
+  clientId?: string | null;
+  clientSecret?: string | null;
+  name?: string | null;
 }
 
 export interface PasskeyInfo {
@@ -686,7 +716,7 @@ export interface PasskeyInfo {
 
 export interface SessionInfo {
   id: string;
-  method: 'password' | 'passkey' | 'setup';
+  method: 'password' | 'passkey' | 'setup' | 'oidc';
   userAgent: string | null;
   ip: string | null;
   createdAt: string;

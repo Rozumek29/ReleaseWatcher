@@ -5,6 +5,7 @@ import {
   OnInit,
   computed,
   inject,
+  input,
   signal,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
@@ -16,6 +17,8 @@ import {
   ApiTokenInfo,
   ApiTokenScope,
   CreatedApiToken,
+  OidcSettings,
+  OidcSettingsUpdate,
   PasskeyInfo,
   SessionInfo,
 } from '../../core/models';
@@ -23,10 +26,10 @@ import { ToastService } from '../../core/toast.service';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
 import { Switch } from '../../shared/switch';
-import { UnsavedChanges } from '../../shared/unsaved-changes';
+import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 import { MIN_PASSWORD_LENGTH } from '../auth/setup.page';
 
-/** The single account: user name, password, passkeys, signed-in sessions and API tokens. */
+/** The single account: user name, password, passkeys, single sign-on, signed-in sessions and API tokens. */
 @Component({
   selector: 'app-account-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -38,6 +41,11 @@ export class AccountPage implements OnInit {
   protected readonly auth = inject(AuthService);
   private readonly toast = inject(ToastService);
   private readonly router = inject(Router);
+
+  /** Set by the server after linking single sign-on (`linked`) … */
+  readonly sso = input<string | undefined>();
+  /** … or when linking failed. */
+  readonly ssoError = input<string | undefined>();
 
   protected readonly minLength = MIN_PASSWORD_LENGTH;
   private readonly clock = inject(ClockService);
@@ -61,13 +69,31 @@ export class AccountPage implements OnInit {
   protected renameValue = '';
   protected readonly confirmDelete = signal<string | null>(null);
 
-  // Password sign-in (off = passkeys only)
+  // Password sign-in (off = passkeys / single sign-on only)
   protected readonly passwordLogin = computed(() => this.auth.state()?.passwordLogin ?? true);
+  /** Single sign-on works (set up and linked to the configured provider). */
+  protected readonly ssoUsable = computed(() => !!this.auth.state()?.oidcLogin);
   /** The value being confirmed with the current password; null = no change in progress. */
   protected readonly passwordLoginTarget = signal<boolean | null>(null);
   protected passwordLoginPassword = '';
   protected readonly savingPasswordLogin = signal(false);
   protected readonly passwordLoginError = signal<string | null>(null);
+
+  // Single sign-on
+  protected readonly oidc = signal<OidcSettings | null>(null);
+  protected ssoIssuer = '';
+  protected ssoClientId = '';
+  protected ssoClientSecret = '';
+  protected ssoName = '';
+  protected ssoPassword = '';
+  /** Remove the saved client secret on the next save (back to the environment value / a public client). */
+  protected readonly clearSsoSecret = signal(false);
+  protected readonly showSsoSecret = signal(false);
+  protected readonly savingSso = signal(false);
+  protected readonly ssoErrors = signal<Record<string, string>>({});
+  protected readonly linkingSso = signal(false);
+  protected readonly confirmUnlink = signal(false);
+  private ssoSaved = { issuer: '', clientId: '', name: '' };
 
   // Sessions
   protected readonly sessions = signal<SessionInfo[]>([]);
@@ -88,17 +114,135 @@ export class AccountPage implements OnInit {
   async ngOnInit(): Promise<void> {
     this.username = this.auth.username() ?? '';
     this.newPasskeyName = defaultPasskeyName();
+    this.showSsoResult();
     try {
-      const [passkeys, sessions, apiTokens] = await Promise.all([
+      const [passkeys, sessions, apiTokens, oidc] = await Promise.all([
         this.auth.listPasskeys(),
         this.auth.listSessions(),
         this.auth.listApiTokens(),
+        this.auth.getOidcSettings(),
       ]);
       this.passkeys.set(passkeys);
       this.sessions.set(sessions);
       this.apiTokens.set(apiTokens);
+      this.applyOidc(oidc);
     } catch (error) {
       this.toast.error(error);
+    }
+  }
+
+  /** The result of linking single sign-on, sent back by the server in the address. */
+  private showSsoResult(): void {
+    const error = this.ssoError();
+    if (this.sso() === 'linked') {
+      this.toast.success('Single sign-on linked – you can sign in with it now.');
+      void this.auth.load(); // the sign-in button appears
+    } else if (error) {
+      this.toast.error(error);
+    } else {
+      return;
+    }
+    void this.router.navigate([], {
+      queryParams: { sso: null, ssoError: null },
+      queryParamsHandling: 'merge',
+      replaceUrl: true,
+    });
+  }
+
+  private applyOidc(oidc: OidcSettings): void {
+    this.oidc.set(oidc);
+    this.ssoSaved = { issuer: oidc.issuer ?? '', clientId: oidc.clientId ?? '', name: oidc.name ?? '' };
+    this.ssoIssuer = this.ssoSaved.issuer;
+    this.ssoClientId = this.ssoSaved.clientId;
+    this.ssoName = this.ssoSaved.name;
+    this.ssoClientSecret = '';
+    this.clearSsoSecret.set(false);
+  }
+
+  /** Whether the provider settings differ from the saved ones (the current password alone is no change). */
+  protected ssoChanged(): boolean {
+    return (
+      !sameValues(
+        { issuer: this.ssoIssuer.trim(), clientId: this.ssoClientId.trim(), name: this.ssoName.trim() },
+        this.ssoSaved,
+      ) ||
+      !!this.ssoClientSecret ||
+      this.clearSsoSecret()
+    );
+  }
+
+  protected async saveSso(): Promise<void> {
+    if (!this.ssoPassword) {
+      this.ssoErrors.set({ currentPassword: 'Enter your current password.' });
+      return;
+    }
+    this.ssoErrors.set({});
+    // Only changed fields: an unchanged value from the environment must stay an environment value.
+    const update: OidcSettingsUpdate = { currentPassword: this.ssoPassword };
+    const changed = (value: string, saved: string) => value.trim() !== saved;
+    if (changed(this.ssoIssuer, this.ssoSaved.issuer)) update.issuer = this.ssoIssuer.trim() || null;
+    if (changed(this.ssoClientId, this.ssoSaved.clientId)) update.clientId = this.ssoClientId.trim() || null;
+    if (changed(this.ssoName, this.ssoSaved.name)) update.name = this.ssoName.trim() || null;
+    if (this.ssoClientSecret.trim()) {
+      update.clientSecret = this.ssoClientSecret.trim();
+    } else if (this.clearSsoSecret()) {
+      update.clientSecret = null;
+    }
+    const wasLinked = !!this.oidc()?.link;
+    this.savingSso.set(true);
+    try {
+      const oidc = await this.auth.updateOidcSettings(update);
+      this.applyOidc(oidc);
+      this.ssoPassword = '';
+      const unlinked = wasLinked && !oidc.link;
+      this.toast.success(
+        unlinked
+          ? 'Single sign-on saved – the link was removed because the provider changed.'
+          : 'Single sign-on saved.',
+      );
+      if (unlinked) {
+        await this.reloadSessions();
+      }
+    } catch (error) {
+      const fields = fieldErrors(error);
+      if (fields) {
+        this.ssoErrors.set(fields);
+      } else {
+        this.toast.error(error);
+      }
+    } finally {
+      this.savingSso.set(false);
+    }
+  }
+
+  protected async linkSso(): Promise<void> {
+    this.linkingSso.set(true);
+    try {
+      await this.auth.linkSso(); // leaves the page; the provider sends the browser back here
+    } catch (error) {
+      this.toast.error(error);
+      this.linkingSso.set(false);
+    }
+  }
+
+  protected async unlinkSso(): Promise<void> {
+    this.confirmUnlink.set(false);
+    try {
+      await this.auth.unlinkSso();
+      this.applyOidc(await this.auth.getOidcSettings());
+      this.toast.success('Single sign-on unlinked.');
+      await this.reloadSessions();
+    } catch (error) {
+      this.toast.error(error);
+    }
+  }
+
+  protected async copyRedirectUri(uri: string): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(uri);
+      this.toast.success('Redirect URI copied.');
+    } catch {
+      this.toast.error('Copying failed – select the address and copy it by hand.');
     }
   }
 
@@ -197,7 +341,7 @@ export class AccountPage implements OnInit {
       this.toast.success(
         target
           ? 'Password sign-in turned on.'
-          : 'Password sign-in turned off – only passkeys sign in now.',
+          : 'Password sign-in turned off – sign in with a passkey or single sign-on now.',
       );
       if (!target) {
         await this.reloadSessions();
@@ -315,7 +459,13 @@ export class AccountPage implements OnInit {
   }
 
   protected methodLabel(method: SessionInfo['method']): string {
-    return method === 'passkey' ? 'Passkey' : method === 'setup' ? 'Setup' : 'Password';
+    return method === 'passkey'
+      ? 'Passkey'
+      : method === 'oidc'
+        ? 'Single sign-on'
+        : method === 'setup'
+          ? 'Setup'
+          : 'Password';
   }
 
   /** "Firefox on Windows"-style summary of a user agent. */

@@ -6,7 +6,10 @@ import { describeError } from '../../core/api.service';
 import { AuthService } from '../../core/auth.service';
 import { Icon } from '../../shared/icon';
 
-/** Sign-in with the password or a passkey (passkeys only: the prompt opens right away). */
+/**
+ * Sign-in with the password, a passkey or single sign-on. Without password sign-in and single sign-on the passkey prompt
+ * opens right away.
+ */
 @Component({
   selector: 'app-login-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -20,22 +23,52 @@ export class LoginPage implements OnInit {
 
   /** Where to go after signing in (query parameter set by the guard/interceptor). */
   readonly returnUrl = input<string | undefined>();
+  /** Set by the server when single sign-on failed (it redirects here). */
+  readonly ssoError = input<string | undefined>();
 
   protected username = '';
   protected password = '';
-  protected readonly busy = signal<'password' | 'passkey' | null>(null);
+  protected readonly busy = signal<'password' | 'passkey' | 'sso' | null>(null);
   protected readonly error = signal<string | null>(null);
 
   protected readonly showPasskey = () =>
     this.auth.passkeysSupported && (this.auth.state()?.hasPasskeys ?? false);
-  /** False when only passkeys sign in. */
+  /** False when the password does not sign in. */
   protected readonly passwordLogin = computed(() => this.auth.state()?.passwordLogin ?? true);
+  /** Name of the single sign-on provider, or null when it is not available. */
+  protected readonly sso = computed(() => this.auth.state()?.oidcLogin ?? null);
+  /** What signs in when the password does not: "a passkey", "Pocket ID" or "a passkey or Pocket ID". */
+  protected readonly alternatives = computed(() => {
+    const sso = this.sso();
+    return sso && this.showPasskey() ? `a passkey or ${sso}` : (sso ?? 'a passkey');
+  });
 
   ngOnInit(): void {
-    // Passkeys only: open the prompt without a click – except right after signing out, where it would be in the way.
+    const ssoError = this.ssoError();
+    if (ssoError) {
+      this.error.set(ssoError);
+      // Drop the message from the address bar, so a reload does not show it again.
+      void this.router.navigate([], { queryParams: { ssoError: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
+    // Passkeys only: open the prompt without a click – except right after signing out or a failed single sign-on,
+    // where it would be in the way.
     const signedOut = this.auth.takeSignedOutByUser();
-    if (!this.passwordLogin() && this.auth.passkeysSupported && !signedOut) {
+    if (!this.passwordLogin() && !this.sso() && this.auth.passkeysSupported && !signedOut && !ssoError) {
       void this.signInWithPasskey();
+    }
+  }
+
+  protected async signInWithSso(): Promise<void> {
+    if (this.busy()) {
+      return;
+    }
+    this.busy.set('sso');
+    this.error.set(null);
+    try {
+      await this.auth.loginWithSso(); // leaves the page; the busy state stays until then
+    } catch (error) {
+      this.error.set(describeError(error));
+      this.busy.set(null);
     }
   }
 

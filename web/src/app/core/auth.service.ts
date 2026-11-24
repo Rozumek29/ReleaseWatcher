@@ -8,6 +8,8 @@ import {
   AuthState,
   CreatedApiToken,
   NewApiToken,
+  OidcSettings,
+  OidcSettingsUpdate,
   PasskeyInfo,
   SessionInfo,
 } from './models';
@@ -33,12 +35,19 @@ export const WEBAUTHN = new InjectionToken<WebAuthnClient>('WEBAUTHN', {
   }),
 });
 
+/** Leaves the app for another site (the single sign-on provider) – a token so tests can catch it. */
+export const OPEN_EXTERNAL = new InjectionToken<(url: string) => void>('OPEN_EXTERNAL', {
+  providedIn: 'root',
+  factory: () => (url) => window.location.assign(url),
+});
+
 const SIGNED_OUT: AuthState = {
   setupRequired: false,
   authenticated: false,
   username: null,
   hasPasskeys: false,
   passwordLogin: true,
+  oidcLogin: null,
 };
 
 /** Login state and all /api/auth calls. */
@@ -46,6 +55,7 @@ const SIGNED_OUT: AuthState = {
 export class AuthService {
   private readonly http = inject(HttpClient);
   private readonly webauthn = inject(WEBAUTHN);
+  private readonly openExternal = inject(OPEN_EXTERNAL);
   private readonly baseUrl = '/api/auth';
   private loading: Promise<AuthState> | null = null;
   /** Set by an explicit sign-out, so the login screen does not open the passkey prompt right away. */
@@ -111,6 +121,37 @@ export class AuthService {
         this.http.post<AuthState>(`${this.baseUrl}/passkey/login`, { challengeId, response }),
       ),
     );
+  }
+
+  /** Opens the single sign-on provider; it sends the browser back to the app signed in (or to /login with an error). */
+  async loginWithSso(): Promise<void> {
+    const { url } = await firstValueFrom(
+      this.http.post<{ url: string }>(`${this.baseUrl}/oidc/login`, {}),
+    );
+    this.openExternal(url);
+  }
+
+  getOidcSettings(): Promise<OidcSettings> {
+    return firstValueFrom(this.http.get<OidcSettings>(`${this.baseUrl}/oidc`));
+  }
+
+  async updateOidcSettings(update: OidcSettingsUpdate): Promise<OidcSettings> {
+    const settings = await firstValueFrom(this.http.put<OidcSettings>(`${this.baseUrl}/oidc`, update));
+    await this.load(); // the sign-in button (oidcLogin) may have changed
+    return settings;
+  }
+
+  /** Opens the provider to link its identity to the account; it comes back to /account. */
+  async linkSso(): Promise<void> {
+    const { url } = await firstValueFrom(
+      this.http.post<{ url: string }>(`${this.baseUrl}/oidc/link`, {}),
+    );
+    this.openExternal(url);
+  }
+
+  async unlinkSso(): Promise<void> {
+    await firstValueFrom(this.http.delete<void>(`${this.baseUrl}/oidc/link`));
+    await this.load();
   }
 
   /** True once after the user signed out (consumed by the login screen). */
