@@ -271,6 +271,69 @@ describe('RepositoryStore installed version from machines', () => {
   });
 });
 
+describe('RepositoryStore providers', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'rw-provider-'));
+  });
+  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+  it('rebuilds the repositories with provider and host, keeping links, advisories and triggers', () => {
+    const path = join(dir, 'old.db');
+    const old = new Database(path);
+    for (const migration of MIGRATIONS.slice(0, -1)) old.exec(migration);
+    old.exec(`PRAGMA user_version = ${MIGRATIONS.length - 1}`);
+    const now = '2026-11-01T00:00:00.000Z';
+    old.exec(`
+      INSERT INTO watched_repositories (id, owner, name, created_at, github_token) VALUES
+        (5, 'Acme', 'App', '${now}', NULL),
+        (9, 'acme', 'docker', '${now}', NULL);
+      INSERT INTO containers (id, vmid, name, created_at) VALUES (1, 101, 'vault', '${now}');
+      INSERT INTO container_apps (id, container_id, name, created_at, latest_source, repository_id, version_command, installed_version, checked_at) VALUES
+        (2, 1, 'App', '${now}', 'github', 5, 'cat /v', '1.2.0', '${now}');
+      INSERT INTO docker_containers (id, target_id, name, container_id, image, link_auto, label_repository, installed_version, first_seen_at, last_seen_at) VALUES
+        (1, 1, 'docker', 'c1', 'acme/docker:3.0.0', 1, 'acme/docker', '3.0.0', '${now}', '${now}');
+      UPDATE watched_repositories SET installed_app_id = 2 WHERE id = 5;
+      UPDATE watched_repositories SET installed_docker_id = 1 WHERE id = 9;
+      INSERT INTO repository_advisories (repository_id, advisory_id, source, aliases, summary, severity, html_url, published_at, vulnerabilities, first_seen_at)
+        VALUES (5, 'GHSA-1', 'github', '[]', 'Bug', 'high', 'https://x', '${now}', '[]', '${now}');
+    `);
+    old.close();
+
+    const store = new RepositoryStore(path, box());
+    const app = store.get(5)!;
+    assert.deepEqual([app.provider, app.host, app.owner, app.name], ['github', null, 'Acme', 'App']);
+    assert.deepEqual(app.installedVersionApp, { kind: 'app', id: 2 });
+    assert.equal(store.listAdvisories(5).length, 1);
+    // New repositories continue after the highest id.
+    assert.equal(store.add('acme', 'next', false).id, 10);
+
+    // The triggers read the rebuilt table: a Docker container linked through its labels keeps the version in sync …
+    store.database.exec("UPDATE docker_containers SET installed_version = '3.1.0' WHERE id = 1");
+    assert.equal(store.get(9)!.installedVersion, '3.1.0');
+    // … and is dropped when its labels point elsewhere.
+    store.database.exec("UPDATE docker_containers SET label_repository = 'codeberg.org/acme/docker' WHERE id = 1");
+    assert.equal(store.get(9)!.installedVersionApp, null);
+    // Removing a repository still removes its advisories.
+    store.delete(5);
+    assert.equal(store.database.query<{ n: number }, []>('SELECT count(*) AS n FROM repository_advisories').get()!.n, 0);
+    store.close();
+  });
+
+  it('keeps one repository per host, owner and name', () => {
+    const store = new RepositoryStore(':memory:');
+    const codeberg = store.add('acme', 'docker', false, { provider: 'gitea', host: 'codeberg.org' });
+    store.add('acme', 'docker', false);
+    assert.deepEqual([codeberg.provider, codeberg.host], ['gitea', 'codeberg.org']);
+    assert.equal(store.exists('ACME', 'Docker', 'Codeberg.org'), true);
+    assert.equal(store.exists('acme', 'docker', 'gitlab.com'), false);
+    assert.throws(() => store.add('Acme', 'DOCKER', false, { provider: 'gitlab', host: 'CODEBERG.org' }), /UNIQUE/);
+    // GitHub never has a host, the others always do.
+    assert.throws(() => store.database.exec("INSERT INTO watched_repositories (provider, owner, name, created_at) VALUES ('gitea', 'a', 'b', 'x')"), /CHECK/);
+    store.close();
+  });
+});
+
 describe('ContainerStore run output', () => {
   it('stores the output of finished runs compressed and reads it back', () => {
     const store = new RepositoryStore(':memory:');

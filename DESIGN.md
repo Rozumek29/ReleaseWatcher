@@ -35,8 +35,8 @@ This file does not repeat those; it describes the **shape** of the system, the *
 - **Release sources:** `ReleaseSource` (`src/release-source.ts`) takes a `RepositoryRef` (`provider`, `host`, `owner`,
   `name`); `ProviderReleaseSource` hands each repository to `github.ts`, `gitea.ts` (Gitea and Forgejo) or `gitlab.ts`.
   Only GitHub has security advisories and a global token – a repository on another host is read with its own token
-  only. In the database `owner` holds `host/owner` for those (`dbOwner()` / `splitOwner()` in `db.ts`), so the unique
-  `(owner, name)` and the Docker label match by `lower(owner || '/' || name)` equal `fullName()`.
+  only. `watched_repositories` stores `provider` and `host` (NULL on GitHub); its generated, unique `full_name`
+  (lower-case `fullName()`) is the key repositories are matched by – also by Docker labels and their triggers.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client). A feature folder owns its
