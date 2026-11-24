@@ -80,7 +80,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 - Type-only imports must use `import type` / `type` specifiers (`verbatimModuleSyntax`).
 - Prefer union types / `as const` objects over `enum`/`namespace`.
 - `noUncheckedIndexedAccess` is on – indexed access returns `T | undefined`.
-- The server's only runtime dependency is `@simplewebauthn/server` (passkeys). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
+- The server's only runtime dependencies are `@simplewebauthn/server` (passkeys) and `jose` (OIDC ID tokens). Prefer Bun built-ins (`Bun.serve`, `bun:sqlite`, `Bun.file`,
   `bun:test`, `fetch`) and `node:` modules Bun implements. Ask before adding a dependency.
 - `web/` stays on TypeScript 6 – the Angular compiler requires `>=6.0 <6.1`.
 - The release executable and the Docker image run the server as a `bun build --compile` binary (ESM +
@@ -124,7 +124,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
   behind `KeyTool` – tests use `FakeKeyTool` and `addProxmoxHost()` from `test/helpers.ts`; `deps.shell` in tests
   answers for every host. The former Proxmox settings (`PROXMOX_*`, saved `proxmox*` settings) are only read once by
   `seedProxmoxHost()` to create the first host.
-- Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`),
+- Login lives in `src/auth/`: one account (password via `Bun.password`, passkeys via `@simplewebauthn/server`, single sign-on via OIDC in `oidc.ts`),
   sessions in the `sessions` table (only a SHA-256 of the cookie token). `buildApp` guards every route except
   `PUBLIC_ROUTES` (`src/auth/routes.ts`) and refuses cross-site writes (Origin check). New routes are protected
   automatically; add a path to `PUBLIC_ROUTES` only if it must work signed out. Instead of a session, a request may
@@ -144,7 +144,7 @@ Bun runs the `.ts` files directly. Conventions (`tsconfig.json`, type-checked wi
 ### Secrets
 
 - Installed-version header values, the Discord webhook URL, the SMTP password, the GitHub token (global and per repository), the
-  SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, password hashes, session tokens, API tokens and the setup code are secrets
+  SSH private keys (`ssh_keys`), the Home Assistant access token of a VM, the OIDC client secret, password hashes, session tokens, API tokens and the setup code are secrets
   (a key is exposed only as its public key and fingerprint, a repository token as `hasOwnToken` + masked value, the Home Assistant token as
   `homeAssistant.hasToken` + `tokenMasked`; it is sent only to Home Assistant, never to the node). The API never
   returns them in full: headers expose only names (`hasValue`), other secrets are masked (`maskSecret`).

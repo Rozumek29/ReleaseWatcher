@@ -55,7 +55,7 @@ Get notified about new GitHub releases and keep your Proxmox LXC containers up t
 **App**
 
 - One self-contained executable or a Docker image, one SQLite file, no external services.
-- Password and/or **passkeys**, **API tokens** for dashboards like Homepage, secrets encrypted at rest (AES-256-GCM).
+- Password, **passkeys** and/or **single sign-on** (OpenID Connect: Pocket ID, Authentik, Keycloak…), **API tokens** for dashboards like Homepage, secrets encrypted at rest (AES-256-GCM).
 - Light and dark themes with accent colours; every setting can be changed in the UI without a restart.
 
 <table>
