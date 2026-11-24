@@ -1,0 +1,30 @@
+version: 2
+updates:
+  # Server (root package.json + bun.lock)
+  - package-ecosystem: bun
+    directory: /
+    schedule:
+      interval: daily
+    versioning-strategy: increase
+    groups:
+      server:
+        patterns: ['*']
+        update-types: [minor, patch]
+
+  # UI (web/ workspace)
+  - package-ecosystem: bun
+    directory: /web
+    schedule:
+      interval: daily
+    versioning-strategy: increase
+    ignore:
+      # The Angular compiler requires TypeScript >=6.0 <6.1.
+      - dependency-name: typescript
+        versions: ['>=6.1']
+    groups:
+      angular:
+        patterns: ['@angular/*']
+      web:
+        patterns: ['*']
+        exclude-patterns: ['@angular/*']
+        update-types: [minor, patch]

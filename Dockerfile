@@ -2,7 +2,7 @@
 # The Angular CLI runs on Node; Bun is the package manager and compiles the server.
 # The build stages always run on the build machine's platform ($BUILDPLATFORM): `bun build --compile` cross-compiles
 # for the image's platform, so a multi-platform build (linux/amd64 + linux/arm64) needs no slow emulation here.
-FROM --platform=$BUILDPLATFORM oven/bun:1.4.4-debian AS bun
+FROM --platform=$BUILDPLATFORM oven/bun:1.4.5-debian AS bun
 FROM --platform=$BUILDPLATFORM node:26-trixie-slim AS build
 COPY --from=bun /usr/local/bin/bun /usr/local/bin/bun
 WORKDIR /app

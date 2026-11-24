@@ -4,9 +4,9 @@
   "private": true,
   "description": "Watches GitHub repositories for new releases and notifies Discord (and other channels).",
   "type": "module",
-  "packageManager": "bun@1.4.4",
+  "packageManager": "bun@1.4.5",
   "engines": {
-    "bun": ">=1.4.4"
+    "bun": ">=1.4.5"
   },
   "scripts": {
     "start": "bun scripts/ensure-web.ts && bun src/main.ts",
@@ -31,7 +31,7 @@
     "web"
   ],
   "dependencies": {
-    "@simplewebauthn/server": "14.1.0",
-    "reflect-metadata": "0.2.2"
+    "@simplewebauthn/server": "^14.1.0",
+    "reflect-metadata": "^0.2.2"
   }
 }
