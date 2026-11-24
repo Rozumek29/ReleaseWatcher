@@ -10,7 +10,7 @@ import {
   type AdvisoryVulnerability,
   type SecurityAdvisory,
 } from './advisories.ts';
-import type { WatchedRepository } from './domain.ts';
+import type { MachineAppRef, WatchedRepository } from './domain.ts';
 import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
 
@@ -53,6 +53,8 @@ interface Row {
   installed_version: string | null;
   installed_version_checked_at: string | null;
   installed_version_error: string | null;
+  installed_app_id: number | null;
+  installed_docker_id: number | null;
   github_token: string | null;
   advisories_etag: string | null;
   advisories_checked_at: string | null;
@@ -115,6 +117,12 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   installedVersion: r.installed_version,
   installedVersionCheckedAt: r.installed_version_checked_at,
   installedVersionError: r.installed_version_error,
+  installedVersionApp:
+    r.installed_app_id !== null
+      ? { kind: 'app', id: r.installed_app_id }
+      : r.installed_docker_id !== null
+        ? { kind: 'docker', id: r.installed_docker_id }
+        : null,
   githubToken: secrets.decryptNullable(r.github_token),
   advisoriesEtag: r.advisories_etag,
   advisoriesCheckedAt: r.advisories_checked_at,
@@ -209,8 +217,8 @@ function advisoryWhere(filter: AdvisoryFilter): { where: string[]; params: SQLQu
   return { where, params };
 }
 
-/** Schema migrations, applied in order. Append new entries – never edit existing ones. */
-const MIGRATIONS: readonly string[] = [
+/** Schema migrations, applied in order. Append new entries – never edit existing ones. Exported for migration tests. */
+export const MIGRATIONS: readonly string[] = [
   `CREATE TABLE watched_repositories (
      id                     INTEGER PRIMARY KEY AUTOINCREMENT,
      owner                  TEXT    NOT NULL COLLATE NOCASE,
@@ -541,6 +549,78 @@ const MIGRATIONS: readonly string[] = [
     WHERE apt_enabled = 1 AND last_checked_at IS NOT NULL AND (last_error IS NULL OR last_error NOT LIKE '%apt:%');`,
   // Flatpak / Snap found by the last check with their pending updates (JSON object keyed by store).
   `ALTER TABLE containers ADD COLUMN app_stores TEXT;`,
+  // Installed version read from an app on a machine: a container app or a Docker container. The triggers keep the
+  // repository's installed version equal to the one the app reports, whichever code path (check, settings, backup
+  // import, cascading delete) changes the app. When the app is unlinked, hidden or removed, the repository keeps the last
+  // version as entered by hand and says why in `installed_version_error`.
+  `ALTER TABLE watched_repositories ADD COLUMN installed_app_id INTEGER REFERENCES container_apps (id) ON DELETE SET NULL;
+   ALTER TABLE watched_repositories ADD COLUMN installed_docker_id INTEGER REFERENCES docker_containers (id) ON DELETE SET NULL;
+   CREATE INDEX idx_watched_repositories_installed_app ON watched_repositories (installed_app_id) WHERE installed_app_id IS NOT NULL;
+   CREATE INDEX idx_watched_repositories_installed_docker ON watched_repositories (installed_docker_id) WHERE installed_docker_id IS NOT NULL;
+
+   CREATE TRIGGER container_app_installed_version AFTER UPDATE OF repository_id, installed_version, checked_at, error ON container_apps
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_app_id = NULL,
+            installed_version_error = 'The app on the machine is no longer linked to this repository, so its last version is kept as entered by hand.'
+      WHERE installed_app_id = NEW.id AND id IS NOT NEW.repository_id;
+     UPDATE watched_repositories
+        SET installed_version = coalesce(NEW.installed_version, installed_version),
+            installed_version_checked_at = NEW.checked_at,
+            installed_version_error = NEW.error
+      WHERE installed_app_id = NEW.id;
+   END;
+   CREATE TRIGGER container_app_installed_version_removed BEFORE DELETE ON container_apps
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_app_id = NULL,
+            installed_version_error = 'The app was removed from the machine, so its last version is kept as entered by hand.'
+      WHERE installed_app_id = OLD.id;
+   END;
+
+   CREATE TRIGGER docker_container_installed_version
+   AFTER UPDATE OF installed_version, present, ignored, link_auto, repository_id, label_repository, last_seen_at ON docker_containers
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_docker_id = NULL,
+            installed_version_error = 'The Docker container is hidden or no longer linked to this repository, so its last version is kept as entered by hand.'
+      WHERE installed_docker_id = NEW.id
+        AND (NEW.ignored = 1 OR id IS NOT IIF(NEW.link_auto = 1,
+              (SELECT r.id FROM watched_repositories r WHERE lower(r.owner || '/' || r.name) = +NEW.label_repository),
+              NEW.repository_id));
+     UPDATE watched_repositories
+        SET installed_version = coalesce(NEW.installed_version, installed_version),
+            installed_version_checked_at = NEW.last_seen_at,
+            installed_version_error = IIF(NEW.present = 1, NULL, 'The Docker container was not found by the last check.')
+      WHERE installed_docker_id = NEW.id;
+   END;
+   CREATE TRIGGER docker_container_installed_version_removed BEFORE DELETE ON docker_containers
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_docker_id = NULL,
+            installed_version_error = 'The Docker container was removed, so its last version is kept as entered by hand.'
+      WHERE installed_docker_id = OLD.id;
+   END;
+
+   -- Apps linked before: a repository without a version URL reads its version from the first linked app that reports
+   -- one (as when linking from now on) – an application, else a Docker container linked by hand.
+   UPDATE watched_repositories
+      SET installed_app_id = (SELECT min(a.id) FROM container_apps a
+                               WHERE a.repository_id = watched_repositories.id
+                                 AND (a.version_command IS NOT NULL OR a.installed_version IS NOT NULL))
+    WHERE installed_version_url IS NULL;
+   UPDATE watched_repositories
+      SET installed_docker_id = (SELECT min(d.id) FROM docker_containers d
+                                  WHERE d.link_auto = 0 AND d.repository_id = watched_repositories.id
+                                    AND d.present = 1 AND d.ignored = 0 AND d.installed_version IS NOT NULL)
+    WHERE installed_version_url IS NULL AND installed_app_id IS NULL;
+   UPDATE watched_repositories
+      SET installed_version = coalesce(a.installed_version, watched_repositories.installed_version),
+          installed_version_checked_at = a.checked_at, installed_version_error = a.error
+     FROM container_apps a WHERE a.id = watched_repositories.installed_app_id;
+   UPDATE watched_repositories
+      SET installed_version = d.installed_version, installed_version_checked_at = d.last_seen_at, installed_version_error = NULL
+     FROM docker_containers d WHERE d.id = watched_repositories.installed_docker_id;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -550,6 +630,16 @@ export const SELF_REPOSITORY = { owner: 'rozumek29', name: 'releasewatcher' } as
 const AUTO_VACUUM_INCREMENTAL = 2;
 /** Bytes the WAL file keeps on disk after a checkpoint. */
 const WAL_SIZE_LIMIT = 512 * 1024;
+
+/** The app a repository's installed version is read from, as shown to the user. */
+export interface InstalledVersionAppName extends MachineAppRef {
+  name: string;
+  /** Name of the machine (target) or Docker connection. */
+  machine: string;
+}
+
+/** SQL condition: the installed version of the repository row is read from an app on a machine. */
+const FROM_MACHINE = '(installed_app_id IS NOT NULL OR installed_docker_id IS NOT NULL)';
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
@@ -673,8 +763,12 @@ export class RepositoryStore {
         `UPDATE watched_repositories SET
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            etag = ?, last_checked_at = ?, last_error = ?,
-           installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?, installed_version = ?,
-           installed_version_checked_at = ?, installed_version_error = ?, github_token = ?,
+           installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?,
+           -- A version read from an app on a machine is kept up to date by triggers: never overwrite it with a copy
+           -- that may have been read before the app's last check.
+           installed_version = IIF(${FROM_MACHINE}, installed_version, ?),
+           installed_version_checked_at = IIF(${FROM_MACHINE}, installed_version_checked_at, ?),
+           installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), github_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
            osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?
          WHERE id = ?`,
@@ -703,6 +797,62 @@ export class RepositoryStore {
         repo.icon,
         repo.id,
       );
+  }
+
+  /**
+   * Reads the installed version of a repository from an app on a machine (null = stop; the last version stays as
+   * entered by hand). The version, its check time and error are copied from the app at once; triggers keep them in sync
+   * afterwards. The caller links the app to the repository first – an unlinked app is dropped again by the triggers.
+   */
+  setInstalledVersionApp(repositoryId: number, app: MachineAppRef | null): void {
+    if (app === null) {
+      this.db
+        .query('UPDATE watched_repositories SET installed_app_id = NULL, installed_docker_id = NULL WHERE id = ?')
+        .run(repositoryId);
+    } else if (app.kind === 'app') {
+      this.db
+        .query(
+          `UPDATE watched_repositories
+              SET installed_app_id = a.id, installed_docker_id = NULL,
+                  installed_version = coalesce(a.installed_version, watched_repositories.installed_version),
+                  installed_version_checked_at = a.checked_at, installed_version_error = a.error
+             FROM container_apps a
+            WHERE a.id = ?2 AND watched_repositories.id = ?1`,
+        )
+        .run(repositoryId, app.id);
+    } else {
+      this.db
+        .query(
+          `UPDATE watched_repositories
+              SET installed_docker_id = d.id, installed_app_id = NULL,
+                  installed_version = coalesce(d.installed_version, watched_repositories.installed_version),
+                  installed_version_checked_at = d.last_seen_at,
+                  installed_version_error = IIF(d.present = 1, NULL, 'The Docker container was not found by the last check.')
+             FROM docker_containers d
+            WHERE d.id = ?2 AND watched_repositories.id = ?1`,
+        )
+        .run(repositoryId, app.id);
+    }
+  }
+
+  /** Names of the apps the installed versions are read from, with their machines, by repository id. */
+  installedVersionApps(): Map<number, InstalledVersionAppName> {
+    type NameRow = { repository_id: number; kind: 'app' | 'docker'; id: number; name: string; machine: string | null };
+    const rows = this.db
+      .query<NameRow, []>(
+        `SELECT r.id AS repository_id, 'app' AS kind, a.id, a.name, c.name AS machine
+           FROM watched_repositories r
+           JOIN container_apps a ON a.id = r.installed_app_id
+           JOIN containers c ON c.id = a.container_id
+         UNION ALL
+         SELECT r.id, 'docker', d.id, d.name, coalesce(c.name, e.name)
+           FROM watched_repositories r
+           JOIN docker_containers d ON d.id = r.installed_docker_id
+           LEFT JOIN containers c ON c.id = d.target_id
+           LEFT JOIN docker_endpoints e ON e.id = d.endpoint_id`,
+      )
+      .all();
+    return new Map(rows.map((r) => [r.repository_id, { kind: r.kind, id: r.id, name: r.name, machine: r.machine ?? '' }]));
   }
 
   /**

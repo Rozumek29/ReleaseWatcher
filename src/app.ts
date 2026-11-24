@@ -18,12 +18,13 @@ import { AuthStore } from './auth/store.ts';
 import { backupRoutes } from './backup/routes.ts';
 import { BackupService } from './backup/service.ts';
 import { ReleaseChecker } from './checker.ts';
-import { type AdvisoryCursor, type AdvisoryFilter, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
+import { type AdvisoryCursor, type AdvisoryFilter, type InstalledVersionAppName, type RepositoryStore, SECRET_SETTING_KEYS } from './db.ts';
 import { fullName, ICON_MAX_LENGTH, iconUrls, ownerAvatarUrl, parseRepositoryName, validateIcon, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './github.ts';
 import { errorMessage } from './errors.ts';
 import { noStore, problem, validationProblem } from './http.ts';
 import { createLogger, type Logger } from './log.ts';
+import { MachineApps } from './machine-apps.ts';
 import { CHANNEL_NAMES, CHANNEL_SETTINGS, MASK_VISIBLE_START } from './notifiers/channels.ts';
 import { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import { parseWebhookHeaders } from './notifiers/webhook.ts';
@@ -290,8 +291,10 @@ function decodeAdvisoryCursor(value: string): AdvisoryCursor {
 }
 
 /** A repository without a version URL keeps the installed version entered by hand (`refreshInstalledVersion`). */
-const installedVersionSource = (r: Pick<WatchedRepository, 'installedVersionUrl' | 'installedVersion'>): 'none' | 'url' | 'manual' =>
-  r.installedVersionUrl ? 'url' : r.installedVersion ? 'manual' : 'none';
+const installedVersionSource = (
+  r: Pick<WatchedRepository, 'installedVersionUrl' | 'installedVersion' | 'installedVersionApp'>,
+): 'none' | 'url' | 'manual' | 'machine' =>
+  r.installedVersionApp ? 'machine' : r.installedVersionUrl ? 'url' : r.installedVersion ? 'manual' : 'none';
 
 /** Longest installed version that can be entered by hand. */
 const MANUAL_VERSION_MAX_LENGTH = 100;
@@ -301,6 +304,7 @@ export const toDto = (
   r: WatchedRepository,
   advisories: AdvisorySummary = { total: 0, affecting: 0, highestSeverity: null },
   linkedVersions: readonly (string | null)[] = [],
+  machineApp: InstalledVersionAppName | null = null,
 ) => ({
   id: r.id,
   owner: r.owner,
@@ -324,8 +328,12 @@ export const toDto = (
   // Only names are exposed; values may contain credentials.
   installedVersionHeaders: r.installedVersionHeaders.map((h) => ({ name: h.name, hasValue: h.value.length > 0 })),
   installedVersion: r.installedVersion,
-  /** Where the installed version comes from: the version URL, entered by hand, or nowhere. */
+  /** Where the installed version comes from: the version URL, entered by hand, an app on a machine, or nowhere. */
   installedVersionSource: installedVersionSource(r),
+  /** The app on a machine the installed version is read from (source = machine). */
+  installedVersionApp: r.installedVersionApp
+    ? (machineApp ?? { ...r.installedVersionApp, name: `#${r.installedVersionApp.id}`, machine: '' })
+    : null,
   installedVersionCheckedAt: r.installedVersionCheckedAt,
   installedVersionError: r.installedVersionError,
   /** Versions advisories are compared with: the own installed version plus those of linked container apps. */
@@ -361,6 +369,11 @@ const updateRepositorySchema = body({
   installedVersionHeaders: headersSchema,
   /** Installed version entered by hand (only without a version URL); omit = keep, null/"" = none. */
   installedVersion: z.string().max(MANUAL_VERSION_MAX_LENGTH).nullish(),
+  /**
+   * App on a machine to read the installed version from (it is linked to the repository); omit = keep, null = stop
+   * (the last version stays as entered by hand). Not together with a version URL.
+   */
+  installedVersionApp: z.object({ kind: z.enum(['app', 'docker']), id: z.int() }).nullish(),
   /** Omit = keep, null/"" = remove (use the global token). */
   githubToken: z.string().max(1000).nullish(),
   /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
@@ -455,6 +468,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     others: deps.settings.current.runHistoryUpdates,
   }));
   const dockerStore = new DockerStore(deps.store.database);
+  const machineApps = new MachineApps({ repositories: deps.store, containers: containerStore, docker: dockerStore });
   /** Installed versions of the container apps and Docker containers linked to a repository. */
   const linkedVersions = (repositoryId: number): (string | null)[] => [
     ...containerStore.linkedAppVersions(repositoryId),
@@ -767,7 +781,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const findRepository = (rawId: string) => store.get(parseId(rawId));
   const repositoryDto = (repo: WatchedRepository) => {
     impacts.refresh();
-    return toDto(repo, store.advisorySummaries(repo.id).get(repo.id), linkedVersions(repo.id));
+    return toDto(
+      repo,
+      store.advisorySummaries(repo.id).get(repo.id),
+      linkedVersions(repo.id),
+      repo.installedVersionApp ? (store.installedVersionApps().get(repo.id) ?? null) : null,
+    );
   };
   /**
    * Body of the repository list, serialized again only after a database write (`store.revision()`): building it
@@ -778,7 +797,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     () => {
       const summaries = store.advisorySummaries();
       const linked = linkedAppVersions();
-      return JSON.stringify(store.list().map((r) => toDto(r, summaries.get(r.id), linked.get(r.id))));
+      const apps = store.installedVersionApps();
+      return JSON.stringify(store.list().map((r) => toDto(r, summaries.get(r.id), linked.get(r.id), apps.get(r.id))));
     },
   );
   /** `GET /api/advisories`: one page (keyset pagination) plus, on the first page, the counts of the page header. */
@@ -862,6 +882,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (manualVersion && finalUrl) {
       return validationProblem('installedVersion', 'Remove the version URL to enter the installed version by hand.');
     }
+    const machineApp = body.installedVersionApp;
+    if ((machineApp === undefined ? repo.installedVersionApp : machineApp) && finalUrl) {
+      return validationProblem('installedVersionApp', 'Remove the version URL to read the installed version from an app on a machine.');
+    }
+    if (machineApp && !machineApps.find(machineApp)) {
+      return validationProblem('installedVersionApp', 'The app is not on any machine (any more) – check the machine first.');
+    }
     const icon = body.icon === undefined ? undefined : body.icon?.trim() || null;
     const iconError = icon ? validateIcon(icon) : null;
     if (iconError) {
@@ -885,6 +912,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     repo.includePrereleases = body.includePrereleases;
     repo.isEnabled = body.isEnabled;
+
+    // Reading the version from an app (or no longer): the machine side links the app, the store copies its version.
+    const appChanged =
+      machineApp !== undefined &&
+      (machineApp?.kind !== repo.installedVersionApp?.kind || machineApp?.id !== repo.installedVersionApp?.id);
+    const stopApp = repo.installedVersionApp !== null && (machineApp === null || appChanged);
+    if (stopApp) {
+      // Written to the database together with the rest, below.
+      repo.installedVersionApp = null;
+    }
 
     // Installed-version settings are optional in the body: undefined = keep, null/"" = clear.
     const { installedVersionUrl, installedVersionField, installedVersionHeaders } = body;
@@ -911,6 +948,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       if (!url && repo.installedVersionUrl) {
         // The version read from the removed URL is not one the user entered.
         repo.installedVersion = null;
+        repo.installedVersionError = null;
       }
       repo.installedVersionUrl = url;
       repo.installedVersionField = field;
@@ -919,7 +957,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         await checker.refreshInstalledVersion(repo);
       }
     }
-    if (manualVersion !== undefined && !repo.installedVersionUrl) {
+    if (appChanged || (manualVersion !== undefined && !repo.installedVersionUrl)) {
+      // A note left by a removed app (or an old URL) no longer applies once the source is chosen again.
+      repo.installedVersionError = null;
+      repo.installedVersionCheckedAt = repo.installedVersionUrl ? repo.installedVersionCheckedAt : null;
+    }
+    if (manualVersion !== undefined && !repo.installedVersionUrl && !machineApp) {
       repo.installedVersion = manualVersion;
     }
 
@@ -942,8 +985,15 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       await checker.refreshAdvisories(repo);
     }
 
+    if (stopApp) {
+      store.setInstalledVersionApp(repo.id, null);
+    }
     store.save(repo);
-    return Response.json(repositoryDto(repo));
+    if (machineApp) {
+      machineApps.link(machineApp, repo.id);
+      store.setInstalledVersionApp(repo.id, machineApp);
+    }
+    return Response.json(repositoryDto(store.get(repo.id) ?? repo));
   };
 
   // Sets the installed version entered by hand to the latest release ("Mark as installed").
@@ -954,6 +1004,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     if (repo.installedVersionUrl) {
       return problem(409, 'The installed version is read from the version URL – remove it to set the version by hand.');
+    }
+    if (repo.installedVersionApp) {
+      return problem(409, 'The installed version is read from an app on a machine – check the machine after updating it.');
     }
     if (!repo.lastSeenTag) {
       return problem(409, 'No release of this repository is known yet.');
@@ -1131,6 +1184,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           isProxmoxHost: (hostId) => hostStore.getHost(hostId)?.type === 'proxmox',
           hostName: (hostId) => hostStore.getHost(hostId)?.name ?? null,
           onDockerDisabled: (container) => docker.clearTarget(container),
+          onAppLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
           // A server's host exists only for its one target: removing the server removes the connection too.
           onTargetDeleted: (container) => {
             if (container.kind === 'server' && container.hostId !== null) {
@@ -1139,7 +1193,13 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
           },
         }),
-        ...dockerRoutes({ store: dockerStore, repositories: store, service: docker, job: dockerJob }),
+        ...dockerRoutes({
+          store: dockerStore,
+          repositories: store,
+          service: docker,
+          job: dockerJob,
+          onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
+        }),
         ...backupRoutes({
           service: backup,
           // Imported repositories have no release baseline yet: read it right away.
@@ -1190,6 +1250,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             return jsonBody(repositoriesJson());
           },
           POST: addRepository,
+        },
+        // Apps on machines a repository can read its installed version from.
+        '/api/machine-apps': {
+          GET: () => Response.json(machineApps.list()),
         },
         '/api/repositories/:id': {
           GET: (req) => {

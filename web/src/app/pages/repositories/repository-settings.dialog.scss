@@ -77,3 +77,18 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.machine-empty {
+  margin: 0;
+}
+
+.machine-warning {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--warning);
+
+  strong {
+    color: var(--text);
+  }
+}

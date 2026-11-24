@@ -24,6 +24,12 @@ export interface WatchedRepository {
   installedVersion: string | null;
   installedVersionCheckedAt: string | null;
   installedVersionError: string | null;
+  /**
+   * App on a machine the installed version is read from (then `installedVersion`, `installedVersionCheckedAt` and
+   * `installedVersionError` follow that app); null = the version URL, entered by hand or none. Changed only through
+   * `RepositoryStore.setInstalledVersionApp()`.
+   */
+  installedVersionApp: MachineAppRef | null;
   /** Token used for this repository instead of the global one (private repository of another account). Secret. */
   githubToken: string | null;
   /** GitHub ETag of the security advisories request. */
@@ -41,6 +47,12 @@ export interface WatchedRepository {
   advisoryBaselines: string[];
   /** Custom icon: an image URL or a selfh.st/icons shorthand (`sh:<slug>`); null = the owner's avatar. */
   icon: string | null;
+}
+
+/** An app on a machine: an application of a target (`container_apps`) or a Docker container (`docker_containers`). */
+export interface MachineAppRef {
+  kind: 'app' | 'docker';
+  id: number;
 }
 
 /** Source-agnostic description of a single release. */

@@ -73,6 +73,7 @@ describe('containers API', () => {
       resourcePollMs: 0,
       promptIdleMs: 40,
       homeAssistantFetch: (url, init) => haFetch(url, init),
+      fetchInstalledVersion: async () => ({ version: '9.9.9', preview: '9.9.9' }),
       homeAssistantPollMs: 0,
       machineRestartWaitMs: 0,
       machinePollMs: 0,
@@ -115,6 +116,8 @@ describe('containers API', () => {
       'idx_sessions_expires',
       'idx_watched_repositories_enabled',
       'idx_watched_repositories_full_name',
+      'idx_watched_repositories_installed_app',
+      'idx_watched_repositories_installed_docker',
     ]);
   });
 
@@ -490,6 +493,125 @@ describe('containers API', () => {
     assert.equal(withCommand.status, 409);
     dto = (await request('GET', `/api/containers/${container.id}`)).json();
     assert.equal(dto.apps[0].installedVersion, null); // the command reads it from now on
+  });
+
+  it('reads the installed version of a repository from an app on the machine', async () => {
+    shell.on(/cat \/opt\/widget_version/, { output: '2.0.0\n' });
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    let repo = (await request('GET', '/api/repositories')).json()[0];
+    const put = (body: Record<string, unknown>) =>
+      request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, ...body });
+    assert.equal((await put({ installedVersion: '1.0.0' })).json().installedVersionSource, 'manual');
+
+    // Linked on the machine side: an app that reports its version becomes the source of the installed version.
+    const vaultwarden = (
+      await request('POST', `/api/containers/${container.id}/apps`, {
+        name: 'Vaultwarden',
+        versionCommand: 'cat /opt/vw_version.txt',
+        latestSource: 'github',
+        repositoryId: repo.id,
+      })
+    ).json();
+    repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
+    assert.equal(repo.installedVersionSource, 'machine');
+    assert.deepEqual(repo.installedVersionApp, { kind: 'app', id: vaultwarden.id, name: 'Vaultwarden', machine: 'vaultwarden' });
+    assert.equal(repo.installedVersion, '1.0.0'); // not checked yet
+
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
+    assert.equal(repo.installedVersion, '1.30.0');
+    assert.equal(repo.updateAvailable, true);
+    assert.ok(repo.installedVersionCheckedAt);
+    // A release check keeps it (no URL to read) and "Mark as installed" is refused.
+    await request('POST', `/api/repositories/${repo.id}/check`);
+    assert.equal((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersion, '1.30.0');
+    assert.equal((await request('POST', `/api/repositories/${repo.id}/mark-installed`)).status, 409);
+
+    // Apps on machines to choose from; choosing one in the repository links it.
+    const widget = (
+      await request('POST', `/api/containers/${container.id}/apps`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' })
+    ).json();
+    const machines = (await request('GET', '/api/machine-apps')).json();
+    assert.deepEqual(machines, [
+      {
+        machine: { kind: 'target', id: container.id, name: 'vaultwarden' },
+        apps: [
+          { kind: 'app', id: vaultwarden.id, name: 'Vaultwarden', installedVersion: '1.30.0', checkedAt: machines[0].apps[0].checkedAt, repositoryId: repo.id, repository: 'acme/widget' },
+          { kind: 'app', id: widget.id, name: 'Widget', installedVersion: null, checkedAt: null, repositoryId: null, repository: null },
+        ],
+      },
+    ]);
+    const url = await put({ installedVersionUrl: 'https://widget.lan/version', installedVersionApp: { kind: 'app', id: widget.id } });
+    assert.equal(url.status, 400);
+    assert.ok(url.json().errors.installedVersionApp);
+    assert.equal((await put({ installedVersionApp: { kind: 'app', id: 9999 } })).status, 400);
+    repo = (await put({ installedVersionApp: { kind: 'app', id: widget.id } })).json();
+    assert.equal(repo.installedVersionApp.name, 'Widget');
+    let apps = (await request('GET', `/api/containers/${container.id}`)).json().apps;
+    assert.equal(apps.find((a: { id: number }) => a.id === widget.id).repositoryId, repo.id);
+    assert.equal(apps.find((a: { id: number }) => a.id === widget.id).latestSource, 'github');
+    await request('POST', `/api/containers/${container.id}/check`);
+    await app.containers.wait(container.id);
+    assert.equal((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersion, '2.0.0');
+
+    // Unlinked on the machine side: the last version stays, entered by hand, and the repository says why.
+    await request('PUT', `/api/containers/${container.id}/apps/${widget.id}`, { name: 'Widget', versionCommand: 'cat /opt/widget_version', latestSource: 'none' });
+    repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
+    assert.equal(repo.installedVersionSource, 'manual');
+    assert.equal(repo.installedVersion, '2.0.0');
+    assert.match(repo.installedVersionError, /no longer linked/);
+    // …until the source is chosen again.
+    repo = (await put({ installedVersionApp: { kind: 'app', id: vaultwarden.id } })).json();
+    assert.equal(repo.installedVersion, '1.30.0');
+    assert.equal(repo.installedVersionError, null);
+
+    // Removed with the machine.
+    assert.equal((await request('DELETE', `/api/containers/${container.id}`)).status, 204);
+    repo = (await request('GET', `/api/repositories/${repo.id}`)).json();
+    assert.equal(repo.installedVersionSource, 'manual');
+    assert.equal(repo.installedVersion, '1.30.0');
+    assert.match(repo.installedVersionError, /removed/);
+    repo = (await put({ installedVersionApp: null, installedVersion: '1.31.0' })).json();
+    assert.equal(repo.installedVersion, '1.31.0');
+    assert.equal(repo.installedVersionError, null);
+  });
+
+  it('switches the installed version from an app to a version URL', async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repoId = (await request('GET', '/api/repositories')).json()[0].id;
+    await request('POST', `/api/containers/${container.id}/apps`, {
+      name: 'Vaultwarden',
+      versionCommand: 'cat /opt/vw_version.txt',
+      latestSource: 'github',
+      repositoryId: repoId,
+    });
+    const put = (body: Record<string, unknown>) =>
+      request('PUT', `/api/repositories/${repoId}`, { includePrereleases: false, isEnabled: true, ...body });
+    // The URL needs the app source dropped in the same request.
+    assert.equal((await put({ installedVersionUrl: 'https://vault.lan/api/version' })).status, 400);
+    const repo = (await put({ installedVersionApp: null, installedVersionUrl: 'https://vault.lan/api/version' })).json();
+    assert.equal(repo.installedVersionSource, 'url');
+    assert.equal(repo.installedVersion, '9.9.9');
+    assert.equal(repo.installedVersionApp, null);
+  });
+
+  it('takes only an app that reports a version and keeps the first one when more are linked', async () => {
+    const container = await addContainer();
+    await request('POST', '/api/repositories', { repository: 'acme/widget' });
+    const repo = (await request('GET', '/api/repositories')).json()[0];
+    const addApp = (name: string, repositoryId: number | null, versionCommand: string | null = 'cat /opt/vw_version.txt') =>
+      request('POST', `/api/containers/${container.id}/apps`, { name, versionCommand, latestSource: repositoryId ? 'github' : 'none', repositoryId });
+
+    // An app without a version (no command, none entered) is not a source.
+    await addApp('No version', repo.id, null);
+    assert.equal((await request('GET', `/api/repositories/${repo.id}`)).json().installedVersionSource, 'none');
+    const first = (await addApp('First', repo.id)).json();
+    await addApp('Second', repo.id);
+    const dto = (await request('GET', `/api/repositories/${repo.id}`)).json();
+    assert.equal(dto.installedVersionApp.id, first.id);
   });
 
   const getContainer = async (id: number) => {

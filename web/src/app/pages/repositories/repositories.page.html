@@ -170,9 +170,12 @@
               </span>
             }
             @if (repo.installedVersion) {
-              <span class="meta-item installed" [title]="repo.installedVersionUrl ? 'Read from ' + repo.installedVersionUrl : 'Entered by hand'">
+              <span class="meta-item installed" [title]="installedFrom(repo)">
                 <app-icon name="server" [size]="14" />
                 installed <span class="mono">{{ repo.installedVersion }}</span>
+                @if (repo.installedVersionApp; as a) {
+                  on {{ a.machine }}
+                }
                 @if (repo.updateAvailable) {
                   <span class="arrow">→</span> <span class="mono">{{ repo.lastSeenTag }}</span>
                 }

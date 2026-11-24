@@ -1,5 +1,6 @@
 import type { CronJob } from '../cron-job.ts';
 import type { RepositoryStore } from '../db.ts';
+import type { MachineAppRef } from '../domain.ts';
 import { errorMessage } from '../errors.ts';
 import { problem, validationProblem } from '../http.ts';
 import { body, parseId, readBody, z } from '../validation.ts';
@@ -13,6 +14,8 @@ export interface DockerRoutesDeps {
   service: DockerService;
   /** Scheduled run (`dockerCheckCron`): endpoints and registry checks. */
   job: CronJob;
+  /** Called after a container was linked to a repository by hand. */
+  onLinked?: (app: MachineAppRef, repositoryId: number) => void;
 }
 
 const MAX_NAME_LENGTH = 100;
@@ -161,6 +164,9 @@ export function dockerRoutes(deps: DockerRoutesDeps) {
         }
         const updated = { ...container, ignored: body.ignored ?? container.ignored, linkAuto, repositoryId };
         store.saveChoices(updated);
+        if (repositoryId !== null && !updated.ignored && (container.linkAuto || repositoryId !== container.repositoryId)) {
+          deps.onLinked?.({ kind: 'docker', id: container.id }, repositoryId);
+        }
         const [view] = service.describe([store.getContainer(container.id)!]);
         return Response.json(view);
       },

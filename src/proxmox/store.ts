@@ -450,6 +450,12 @@ export class ContainerStore {
     return row ? toApp(row) : null;
   }
 
+  /** An application of any target. */
+  findApp(appId: number): ContainerApp | null {
+    const row = this.db.query<AppRow, [number]>('SELECT * FROM container_apps WHERE id = ?').get(appId);
+    return row ? toApp(row) : null;
+  }
+
   addApp(containerId: number, input: AppInput): ContainerApp {
     const app = toApp(
       this.db

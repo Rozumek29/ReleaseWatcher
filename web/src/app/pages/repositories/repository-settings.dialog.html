@@ -77,16 +77,18 @@
           </legend>
           <p class="group-hint">
             If you run this app, tell ReleaseWatcher which version you have – read from an endpoint that returns it
-            (e.g. Vaultwarden's <code>/api/version</code>) or entered by hand. You'll see whether an update is
+            (e.g. Vaultwarden's <code>/api/version</code>), from an app on one of your machines, or entered by hand.
+            You'll see whether an update is
             available, notifications show the installed version, releases you already run are not announced and
             vulnerabilities are compared with it.
           </p>
 
           <div class="field">
             <label for="version-source">Installed version from</label>
-            <select id="version-source" class="input" name="source" [(ngModel)]="source">
+            <select id="version-source" class="input" name="source" [ngModel]="source" (ngModelChange)="chooseSource($event)">
               <option value="none">Nothing (no comparison)</option>
               <option value="url">A version URL</option>
+              <option value="machine">An app on a machine</option>
               <option value="manual">Entered by hand</option>
             </select>
           </div>
@@ -99,6 +101,58 @@
                 Update it after upgrading – or use <em>Mark as installed</em> on the repository to set it to the latest release.
               </span>
             </div>
+          }
+
+          @if (source === 'machine') {
+            @if (machines(); as groups) {
+              @if (groups.length === 0) {
+                <p class="hint machine-empty">
+                  @if (machinesError(); as e) {
+                    {{ e }}
+                  } @else {
+                    No apps on your machines yet – add them to a machine on the <em>Machines</em> page, or let the
+                    <em>Docker</em> page find your containers.
+                  }
+                </p>
+              } @else {
+                <div class="field">
+                  <label for="version-machine">Machine</label>
+                  <select id="version-machine" class="input" name="machine" [ngModel]="machine" (ngModelChange)="chooseMachine($event)">
+                    <option value="" disabled>Choose a machine…</option>
+                    @for (g of groups; track machineKey(g.machine)) {
+                      <option [value]="machineKey(g.machine)">{{ g.machine.name }}{{ g.machine.kind === 'endpoint' ? ' (Docker)' : '' }}</option>
+                    }
+                  </select>
+                </div>
+
+                @if (machine) {
+                  <div class="field">
+                    <label for="version-app">App</label>
+                    <select id="version-app" class="input" name="app" [(ngModel)]="app">
+                      <option value="" disabled>Choose an app…</option>
+                      @for (a of appsOf(machine); track appKey(a)) {
+                        <option [value]="appKey(a)">
+                          {{ a.name }}{{ a.kind === 'docker' ? ' (container)' : '' }} – {{ a.installedVersion ?? 'version not known yet' }}
+                        </option>
+                      }
+                    </select>
+                    @if (chosenApp(); as a) {
+                      @if (a.repositoryId !== null && a.repositoryId !== repository()?.id) {
+                        <span class="hint machine-warning">
+                          <app-icon name="alert" [size]="14" />
+                          Linked to <strong>{{ a.repository }}</strong> now – saving links it to this repository instead.
+                        </span>
+                      } @else if (a.repositoryId === null) {
+                        <span class="hint">Saving links it to this repository, so its latest version comes from here too.</span>
+                      }
+                    }
+                    <span class="hint">Updated whenever the machine is checked.</span>
+                  </div>
+                }
+              }
+            } @else {
+              <p class="hint machine-empty">Loading apps on your machines…</p>
+            }
           }
 
           @if (source === 'url') {
