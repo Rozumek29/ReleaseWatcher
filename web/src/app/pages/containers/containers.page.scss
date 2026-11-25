@@ -126,10 +126,18 @@
   font-size: 0.82rem;
 }
 
+// Items line up by the text baseline: centring each piece on its own box shifts a monospace version against
+// the surrounding text, as the fonts have different ascents and descents. The icon then sits on the baseline
+// and is moved down by a fixed part of the font size so it is centred on the lower-case letters.
 .meta-item {
   display: inline-flex;
-  align-items: center;
+  align-items: baseline;
   gap: 5px;
+
+  app-icon {
+    position: relative;
+    top: 0.2em;
+  }
 }
 
 .actions,
