@@ -33,7 +33,8 @@ Get notified about new releases on GitHub, Gitea/Forgejo and GitLab and keep you
 **Releases**
 
 - Watch any public or private repository on **GitHub**, **Gitea/Forgejo** (Codeberg, self-hosted) or **GitLab**
-  (gitlab.com, self-managed); notifications on **Discord**, by **e-mail**, to **ntfy**, **Gotify**,
+  (gitlab.com, self-managed) – by releases or tags – or versions published on a **web page**, **RSS/Atom feed** or
+  **JSON API**; notifications on **Discord**, by **e-mail**, to **ntfy**, **Gotify**,
   **Telegram**, **Slack**, **Pushover** or any **webhook** – one message per release or one summary per check run.
 - **Installed version** of your instance (read from a URL like `/api/version`, or entered by hand): see
   *Update available 1.34.1 → 1.34.3* at a glance and skip releases you already run.

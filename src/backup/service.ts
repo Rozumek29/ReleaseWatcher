@@ -13,12 +13,19 @@ import {
   type RepositoryGroup,
   type RepositoryRef,
   setReleaseSource,
+  setWebSource,
   validateIcon,
+  WEB_OWNER,
+  normalizeWebSourceName,
+  webSourceHost,
+  webSourceNameError,
   type WatchedRepository,
 } from '../domain.ts';
 import { DEFAULT_SSH_PORT, DEFAULT_SSH_USER, HOST_TYPES, type Host, type HostType, validateHost } from '../hosts/domain.ts';
 import type { HostStore } from '../hosts/store.ts';
 import { normalizePattern, validatePattern } from '../pattern.ts';
+import { validateWebSource, type WebSourceConfig } from '../web-source/domain.ts';
+import { normalizeWebSource } from '../web-source/routes.ts';
 import { normalizeHomeAssistantUrl } from '../proxmox/home-assistant.ts';
 import {
   capabilities,
@@ -204,6 +211,7 @@ function exportRepository(r: WatchedRepository, groups: Map<number, RepositoryGr
     includePrereleases: r.includePrereleases,
     releaseSource: r.releaseSource,
     versionPattern: r.versionPattern,
+    webSource: r.webSource,
     isEnabled: r.isEnabled,
     icon: r.icon,
     groupName: group?.name ?? null,
@@ -523,6 +531,19 @@ class ImportPlanner {
       this.error(`${path}.versionPattern`, patternError);
       ok = false;
     }
+    let webSource: WebSourceConfig | null = null;
+    if (parsed.provider === 'web') {
+      webSource = raw.webSource ? normalizeWebSource(raw.webSource) : null;
+      const errors = webSource ? validateWebSource(webSource, versionPattern) : { url: ['A web source needs its URL and locators.'] };
+      for (const [field, messages] of Object.entries(errors ?? {})) {
+        if (field !== 'pattern') messages.forEach((m) => this.error(`${path}.webSource.${field}`, m));
+        ok = false;
+      }
+      if (webSource && ok && webSourceHost(webSource.url) !== parsed.host) {
+        this.error(`${path}.host`, `The host must be the one of the URL (${webSourceHost(webSource.url)}).`);
+        ok = false;
+      }
+    }
     if (!ok) return null;
     return {
       provider: parsed.provider,
@@ -532,6 +553,7 @@ class ImportPlanner {
       includePrereleases: raw.includePrereleases ?? false,
       releaseSource: raw.releaseSource ?? 'releases',
       versionPattern,
+      webSource,
       isEnabled: raw.isEnabled ?? true,
       icon,
       groupName,
@@ -963,12 +985,19 @@ class ImportPlanner {
   }
 }
 
-/** Repository of a backup entry: GitHub (no host) or a Gitea/Forgejo or GitLab instance; null when invalid. */
+/**
+ * Repository of a backup entry: GitHub (no host), a Gitea/Forgejo or GitLab instance, or a web source (host of its URL,
+ * owner `web`, its name); null when invalid.
+ */
 function backupRepositoryRef(raw: NonNullable<BackupInput['repositories']>[number]): RepositoryRef | null {
   const provider = raw.provider ?? 'github';
   const host = blank(raw.host);
   const owner = raw.owner.trim();
   const name = raw.name.trim();
+  if (provider === 'web') {
+    const webName = normalizeWebSourceName(name);
+    return host && owner === WEB_OWNER && webSourceNameError(webName) === null ? { provider, host: host.toLowerCase(), owner, name: webName! } : null;
+  }
   if (provider === 'github') {
     const parsed = host === null ? parseRepositoryName(`${owner}/${name}`) : null;
     return parsed ? { provider, host: null, ...parsed } : null;
@@ -986,7 +1015,11 @@ function applyRepository(repo: WatchedRepository, item: BackupRepository, store:
     repo.releasesEtag = null;
   }
   repo.includePrereleases = item.includePrereleases;
-  setReleaseSource(repo, item.releaseSource, item.versionPattern);
+  if (repo.provider === 'web' && item.webSource) {
+    setWebSource(repo, item.webSource, item.versionPattern);
+  } else {
+    setReleaseSource(repo, item.releaseSource, item.versionPattern);
+  }
   repo.isEnabled = item.isEnabled;
   repo.icon = item.icon;
   // The group is found by name (or created); its icon is the one in the file.

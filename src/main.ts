@@ -17,6 +17,7 @@ import { ProviderReleaseSource } from './release-source.ts';
 import { KEY_FILE_NAME, loadSecretBox } from './secret-box.ts';
 import { SettingsService } from './settings.ts';
 import { localVersionUrl } from './version.ts';
+import { WebReleaseSource } from './web-source/source.ts';
 
 // `--version` / `-v` prints the version and exits before touching the configuration, the database or the port –
 // usable as the version command of the container app that runs ReleaseWatcher itself.
@@ -81,6 +82,7 @@ const app = await buildApp({
     github: new GitHubReleaseSource({ ...config.github, token: () => settings.current.githubToken }),
     gitea: new GiteaReleaseSource({ releasesPerPage: config.github.releasesPerPage }),
     gitlab: new GitLabReleaseSource({ releasesPerPage: config.github.releasesPerPage }),
+    web: new WebReleaseSource(),
   }),
   osv: new OsvApiClient(),
   notifiers,

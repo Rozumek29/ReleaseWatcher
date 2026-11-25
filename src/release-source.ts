@@ -10,8 +10,11 @@ import {
 import { matchPattern } from './pattern.ts';
 import { isPrereleaseTag, looksLikeVersionTag, parseVersion } from './version.ts';
 
-/** A repository and what of it is read: releases (default) or tags, filtered by an optional version pattern. */
-export type ReleaseQuery = RepositoryRef & Partial<Pick<WatchedRepository, 'releaseSource' | 'versionPattern'>>;
+/**
+ * A repository and what of it is read: releases (default) or tags, filtered by an optional version pattern; for a web
+ * source (provider `web`) the page and its locators.
+ */
+export type ReleaseQuery = RepositoryRef & Partial<Pick<WatchedRepository, 'releaseSource' | 'versionPattern' | 'webSource'>>;
 
 export interface ReleaseFetchResult {
   releases: ReleaseInfo[];
@@ -44,7 +47,7 @@ export interface RateLimit {
   resetAt: string;
 }
 
-/** Fetches releases from a remote provider (GitHub, Gitea/Forgejo, GitLab). */
+/** Fetches releases from a remote provider (GitHub, Gitea/Forgejo, GitLab) or a web source. */
 export interface ReleaseSource {
   /** Current API quota (GitHub), or null when the provider doesn't report one. */
   getRateLimit?(): Promise<RateLimit | null>;
@@ -87,7 +90,9 @@ export class ProviderReleaseSource implements ReleaseSource {
   }
 
   async getRecentReleases(repo: ReleaseQuery, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
-    return applyVersionPattern(await this.sources[repo.provider].getRecentReleases(repo, etag, token), repo);
+    const result = await this.sources[repo.provider].getRecentReleases(repo, etag, token);
+    // A web source applies its pattern while reading the page.
+    return repo.provider === 'web' ? result : applyVersionPattern(result, repo);
   }
 
   getSecurityAdvisories(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {

@@ -6,6 +6,7 @@
 import { PROVIDERS, RELEASE_SOURCES } from '../domain.ts';
 import { MAX_PATTERN_LENGTH } from '../pattern.ts';
 import { z } from '../validation.ts';
+import { WEB_SOURCE_FORMATS } from '../web-source/domain.ts';
 import { GROUP_NAME_MAX_LENGTH } from '../domain.ts';
 
 const text = (maxLength: number) => z.string().max(maxLength).nullish();
@@ -54,6 +55,16 @@ const hostSchema = z.object({
   targets: z.array(targetSchema).max(5000).nullish(),
 });
 
+const webSourceSchema = z.object({
+  url: z.string().max(4096),
+  format: z.enum(WEB_SOURCE_FORMATS),
+  items: text(1000),
+  version: text(1000),
+  date: text(1000),
+  link: text(1000),
+  userAgent: text(600),
+});
+
 const repositorySchema = z.object({
   provider: z.enum(PROVIDERS).nullish(),
   host: text(260),
@@ -62,6 +73,8 @@ const repositorySchema = z.object({
   includePrereleases: z.boolean().nullish(),
   releaseSource: z.enum(RELEASE_SOURCES).nullish(),
   versionPattern: text(MAX_PATTERN_LENGTH),
+  /** Page and locators of a web source (provider `web`). */
+  webSource: webSourceSchema.nullish(),
   isEnabled: z.boolean().nullish(),
   icon: text(2000),
   groupName: text(GROUP_NAME_MAX_LENGTH),

@@ -9,7 +9,10 @@ export interface ReleaseNotification {
   /** Host of a Gitea/Forgejo or GitLab instance; omitted/null = GitHub. */
   host?: string | null;
   owner: string;
+  /** Repository name, or the name of a web source. */
   repository: string;
+  /** Page a web source reads (provider `web`); omitted for repositories. */
+  pageUrl?: string | null;
   release: ReleaseInfo;
   /** Custom icon of the repository (URL or `sh:<slug>`); null/omitted = the owner's avatar. */
   icon?: string | null;
@@ -87,13 +90,14 @@ export type NotificationEvent =
   | { type: 'update-result'; result: UpdateResultNotification }
   | { type: 'docker-updates'; docker: DockerUpdatesNotification };
 
-type NotificationRepository = Pick<ReleaseNotification, 'host' | 'owner' | 'repository'>;
+type NotificationRepository = Pick<ReleaseNotification, 'provider' | 'host' | 'owner' | 'repository' | 'pageUrl'>;
 
-/** `owner/repo` on GitHub, `host/owner/repo` elsewhere. */
+/** `owner/repo` on GitHub, `host/owner/repo` elsewhere, the given name of a web source. */
 export const notificationFullName = (n: NotificationRepository): string =>
-  fullName({ host: n.host ?? null, owner: n.owner, name: n.repository });
+  n.provider === 'web' ? n.repository : fullName({ host: n.host ?? null, owner: n.owner, name: n.repository });
+/** Repository page, or the page a web source reads. */
 export const notificationRepoUrl = (n: NotificationRepository): string =>
-  repositoryUrl({ host: n.host ?? null, owner: n.owner, name: n.repository });
+  n.provider === 'web' ? (n.pageUrl ?? `https://${n.host}`) : repositoryUrl({ host: n.host ?? null, owner: n.owner, name: n.repository });
 
 /** "CT 105 (nextcloud)", "VM 137 (debian)", "Proxmox host (pve)" or a server's own name. */
 export const targetName = (n: { vmid: number; targetKind: TargetKind; containerName: string }): string =>

@@ -171,6 +171,7 @@ describe('backup', () => {
       includePrereleases: true,
       releaseSource: 'releases',
       versionPattern: null,
+      webSource: null,
       isEnabled: true,
       icon: 'sh:frigate',
       groupName: 'Home lab',

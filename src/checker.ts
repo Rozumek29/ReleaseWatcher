@@ -317,6 +317,7 @@ export class ReleaseChecker {
               host: repo.host,
               owner: repo.owner,
               repository: repo.name,
+              pageUrl: repo.webSource?.url ?? null,
               release,
               icon: repo.icon,
               installedVersion: repo.installedVersion,

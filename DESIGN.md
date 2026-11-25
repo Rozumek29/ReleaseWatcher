@@ -31,15 +31,24 @@ This file does not repeat those; it describes the **shape** of the system, the *
 ```
 
 - **One process, one SQLite file.** No queue, no cache, no external services besides GitHub (and the Gitea/Forgejo or
-  GitLab instances of watched repositories), OSV.dev, Discord, the user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
+  GitLab instances of watched repositories, and the pages of web sources), OSV.dev, Discord, the user's SMTP server and the Proxmox node over SSH. Keep it that way; the app must stay a single executable that runs in a small LXC.
 - **Release sources:** `ReleaseSource` (`src/release-source.ts`) takes a `RepositoryRef` (`provider`, `host`, `owner`,
   `name`); `ProviderReleaseSource` hands each repository to `github.ts`, `gitea.ts` (Gitea and Forgejo) or `gitlab.ts`.
   Only GitHub has security advisories and a global token – a repository on another host is read with its own token
   only. `watched_repositories` stores `provider` and `host` (NULL on GitHub); its generated, unique `full_name`
   (lower-case `fullName()`) is the key repositories are matched by – also by Docker labels and their triggers.
+  A repository is watched by its releases (newest by date) or its tags (`releaseSource`, newest by version –
+  `selectNewVersions()`), optionally filtered by a user `versionPattern`; user regexes only run through `matchPattern()`
+  (`src/pattern.ts`: a worker with a timeout), never `new RegExp()` on page-sized input in the main thread.
+- **Web sources** (`src/web-source/`, provider `web`): versions read from a web page, feed or JSON API, stored like a
+  repository (`host` = URL host, `owner` = `web`, `name` = the user's name, page and locators in `web_source`). Show them
+  with `displayName()` / `sourcePageUrl()`, not `fullName()`. `fetch.ts` reads pages politely (own User-Agent,
+  ETag/Last-Modified, size and time limits), `extract.ts` pulls versions out (text + regex, JSON paths, CSS selectors via
+  `HTMLRewriter` for HTML and XML), `source.ts` is the `ReleaseSource`; newest by date when every entry has one,
+  otherwise by version (`ReleaseFetchResult.order`).
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
-- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client). A feature folder owns its
+- **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client), `web-source/` (web pages, feeds and JSON APIs as release sources). A feature folder owns its
   `domain.ts` (pure logic), `store.ts` (SQL), `service.ts` (orchestration), `routes.ts` (HTTP) – follow
   `src/proxmox/` as the template for any new large feature instead of growing `app.ts`.
 

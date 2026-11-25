@@ -152,7 +152,7 @@ describe('ProviderReleaseSource', () => {
     const github = new FakeSource();
     const gitea = new FakeSource();
     const gitlabSource: ReleaseSource = { repositoryExists: async () => true, getRecentReleases: gitea.getRecentReleases.bind(gitea) };
-    const source = new ProviderReleaseSource({ github, gitea, gitlab: gitlabSource });
+    const source = new ProviderReleaseSource({ github, gitea, gitlab: gitlabSource, web: new FakeSource() });
 
     await source.getRecentReleases(codeberg, null);
     assert.equal(gitea.calls, 1);
@@ -251,7 +251,7 @@ describe('tags', () => {
   it('applies the pattern through ProviderReleaseSource', async () => {
     const gitea = new FakeSource();
     gitea.releases = [release('v1.0.0', 1), release('nightly-5', 2)];
-    const source = new ProviderReleaseSource({ github: new FakeSource(), gitea, gitlab: new FakeSource() });
+    const source = new ProviderReleaseSource({ github: new FakeSource(), gitea, gitlab: new FakeSource(), web: new FakeSource() });
     const result = await source.getRecentReleases({ ...codeberg, versionPattern: '^v' }, null);
     assert.deepEqual(result.releases.map((r) => r.tag), ['v1.0.0']);
     assert.equal(result.order, 'date');

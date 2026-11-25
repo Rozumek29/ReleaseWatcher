@@ -13,6 +13,7 @@ import {
 import { fullName, PROVIDERS, type MachineAppRef, type RepositoryGroup, type RepositoryProvider, type RepositoryRef, type WatchedRepository } from './domain.ts';
 import { parseJson, parseStringArray } from './json.ts';
 import { SecretBox, SecretDecryptionError } from './secret-box.ts';
+import { WEB_SOURCE_FORMATS, type WebSourceConfig, type WebSourceFormat } from './web-source/domain.ts';
 
 /** Settings whose values are secrets and are stored encrypted. */
 export const SECRET_SETTING_KEYS: ReadonlySet<string> = new Set([
@@ -68,6 +69,7 @@ interface Row {
   group_id: number | null;
   release_source: string;
   version_pattern: string | null;
+  web_source: string | null;
 }
 
 interface AdvisoryRow {
@@ -102,6 +104,24 @@ const toAdvisory = (r: AdvisoryRow): SecurityAdvisory => ({
 function parseVulnerabilities(json: string): AdvisoryVulnerability[] {
   const parsed = parseJson<unknown>(json, null);
   return Array.isArray(parsed) ? (parsed as AdvisoryVulnerability[]) : [];
+}
+
+/** The `web_source` JSON of a row; null for repositories or an unreadable value. */
+function toWebSource(json: string | null): WebSourceConfig | null {
+  const value = json === null ? null : parseJson<Partial<Record<keyof WebSourceConfig, unknown>> | null>(json, null);
+  if (!value || typeof value.url !== 'string') {
+    return null;
+  }
+  const text = (v: unknown): string | null => (typeof v === 'string' ? v : null);
+  return {
+    url: value.url,
+    format: (WEB_SOURCE_FORMATS as readonly unknown[]).includes(value.format) ? (value.format as WebSourceFormat) : 'text',
+    items: text(value.items),
+    version: text(value.version),
+    date: text(value.date),
+    link: text(value.link),
+    userAgent: text(value.userAgent),
+  };
 }
 
 /** Provider of a row; an unknown value (written by a newer version) is read as GitHub's without a host. */
@@ -145,6 +165,7 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   groupId: r.group_id,
   releaseSource: r.release_source === 'tags' ? 'tags' : 'releases',
   versionPattern: r.version_pattern,
+  webSource: toWebSource(r.web_source),
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -802,6 +823,9 @@ export const MIGRATIONS: readonly string[] = [
   // Watching tags instead of releases, and a version pattern tags must match.
   `ALTER TABLE watched_repositories ADD COLUMN release_source TEXT NOT NULL DEFAULT 'releases';
    ALTER TABLE watched_repositories ADD COLUMN version_pattern TEXT;`,
+  // Web sources (provider 'web'): versions read from a web page, feed or JSON API. `web_source` holds the URL and the
+  // locators as JSON; `host` is the URL's host, `owner` is 'web' and `name` the name the user gave the source.
+  `ALTER TABLE watched_repositories ADD COLUMN web_source TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -963,7 +987,9 @@ export class RepositoryStore {
            installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), access_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
            osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?, group_id = ?,
-           release_source = ?, version_pattern = ?
+           release_source = ?, version_pattern = ?, web_source = ?,
+           -- A web source can be renamed or moved to another host; a repository's identity never changes.
+           host = IIF(provider = 'web', ?, host), name = IIF(provider = 'web', ?, name)
          WHERE id = ?`,
       )
       .run(
@@ -991,6 +1017,9 @@ export class RepositoryStore {
         repo.groupId,
         repo.releaseSource,
         repo.versionPattern,
+        repo.webSource ? JSON.stringify(repo.webSource) : null,
+        repo.host,
+        repo.name,
         repo.id,
       );
   }

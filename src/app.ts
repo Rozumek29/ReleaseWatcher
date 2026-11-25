@@ -28,18 +28,26 @@ import {
   lastSeenUrl,
   normalizeGroupName,
   parseRepositoryReference,
+  GIT_PROVIDERS,
+  normalizeWebSourceName,
+  webSourceNameError,
   PROVIDER_LABELS,
-  PROVIDERS,
   RELEASE_SOURCES,
   repositoryAvatarUrl,
   repositoryUrl,
   setReleaseSource,
+  setWebSource,
+  sourcePageUrl,
+  WEB_OWNER,
+  WEB_SOURCE_NAME_MAX_LENGTH,
+  webSourceHost,
   validateIcon,
   type RepositoryProvider,
   type RepositoryRef,
   type WatchedRepository,
 } from './domain.ts';
 import { normalizePattern, validatePattern } from './pattern.ts';
+import { checkWebSource, normalizeWebSource, webSourceRoutes, webSourceSchema } from './web-source/routes.ts';
 import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import { noStore, problem, validationProblem } from './http.ts';
@@ -129,6 +137,8 @@ export interface AppDeps {
     field: string | null,
     headers: readonly HttpHeader[],
   ) => Promise<{ version: string; preview: string }>;
+  /** Fetch used by the web source preview (`POST /api/web-sources/preview`); defaults to the real one. */
+  fetchWebSource?: typeof fetch;
   /** OSV.dev client for security advisories of packages; without it OSV.dev is not queried. */
   osv?: OsvClient | null;
   /** Directory with the built Angular UI; skipped when missing. */
@@ -327,14 +337,17 @@ export const toDto = (
   machineApp: InstalledVersionAppName | null = null,
 ) => ({
   id: r.id,
-  /** Where the repository lives: `github`, `gitea` (Gitea/Forgejo) or `gitlab`. */
+  /** Where the repository lives: `github`, `gitea` (Gitea/Forgejo), `gitlab` or `web` (a web source). */
   provider: r.provider,
-  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  /** Host of a Gitea/Forgejo or GitLab instance or of a web source's URL; null on GitHub. */
   host: r.host,
+  /** `web` for a web source. */
   owner: r.owner,
+  /** Repository name, or the name the user gave a web source. */
   name: r.name,
   fullName: fullName(r),
-  url: repositoryUrl(r),
+  /** Repository page, or the URL a web source reads. */
+  url: sourcePageUrl(r),
   /** Owner's avatar; null when the provider has none without an API call (GitLab). */
   avatarUrl: repositoryAvatarUrl(r),
   /** Custom icon as entered (URL or `sh:<slug>`); null = the owner's avatar. */
@@ -348,6 +361,8 @@ export const toDto = (
   releaseSource: r.releaseSource,
   /** Regular expression tags must match; with tags its group picks the version. Null = none. */
   versionPattern: r.versionPattern,
+  /** Page and locators of a web source; null for repositories. */
+  webSource: r.webSource,
   isEnabled: r.isEnabled,
   lastSeenTag: r.lastSeenTag,
   /** Page of the latest release or tag; null without one or for a version picked by a pattern from tags. */
@@ -389,9 +404,13 @@ export const toDto = (
 });
 
 const addRepositorySchema = body({
-  repository: z.string().max(500),
+  /** `owner/repo` or a repository URL; omitted for a web source. */
+  repository: z.string().max(500).optional(),
   /** Provider of a host that is not well known (detected when omitted); ignored for github.com, gitlab.com, codeberg.org … */
-  provider: z.enum(PROVIDERS).nullish(),
+  provider: z.enum(GIT_PROVIDERS).nullish(),
+  /** Name of a web source (with `webSource`, instead of `repository`). */
+  name: z.string().max(WEB_SOURCE_NAME_MAX_LENGTH * 2).optional(),
+  webSource: webSourceSchema.optional(),
   includePrereleases: z.boolean().optional(),
   /** Releases (default) or tags. */
   releaseSource: z.enum(RELEASE_SOURCES).nullish(),
@@ -406,6 +425,10 @@ const updateRepositorySchema = body({
   releaseSource: z.enum(RELEASE_SOURCES).nullish(),
   /** Omit = keep, null/"" = none. */
   versionPattern: z.string().max(2000).nullish(),
+  /** Web sources only: new name; omit = keep. */
+  name: z.string().max(WEB_SOURCE_NAME_MAX_LENGTH * 2).optional(),
+  /** Web sources only: page and locators; omit = keep. A change (except the User-Agent) sets a new baseline silently. */
+  webSource: webSourceSchema.optional(),
   installedVersionUrl: z.string().max(2000).nullish(),
   installedVersionField: z.string().max(200).nullish(),
   installedVersionHeaders: headersSchema,
@@ -888,6 +911,9 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (patternError) {
       return validationProblem('versionPattern', patternError);
     }
+    if (body.webSource) {
+      return addWebSource(body.name, body.webSource, versionPattern, body.includePrereleases ?? false);
+    }
     const parsed = parseRepositoryReference(body.repository);
     if (!parsed) {
       return validationProblem(
@@ -946,6 +972,36 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     return Response.json(repositoryDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
   };
 
+  /** Adds a web source (provider `web`) and reads it once to set the baseline. */
+  const addWebSource = async (
+    rawName: string | undefined,
+    input: z.output<typeof webSourceSchema>,
+    versionPattern: string | null,
+    includePrereleases: boolean,
+  ) => {
+    const name = normalizeWebSourceName(rawName);
+    const nameError = webSourceNameError(name);
+    if (nameError) {
+      return validationProblem('name', nameError);
+    }
+    const config = normalizeWebSource(input);
+    const invalid = checkWebSource(config, versionPattern);
+    if (invalid) {
+      return invalid;
+    }
+    const host = webSourceHost(config.url);
+    if (store.exists(WEB_OWNER, name!, host)) {
+      return problem(409, `A web source named ${name} on ${host} is already being watched.`);
+    }
+    const repo = store.add(WEB_OWNER, name!, includePrereleases, { provider: 'web', host });
+    repo.webSource = config;
+    repo.versionPattern = versionPattern;
+    store.save(repo);
+    // Establish the baseline right away so the UI shows the current version.
+    await checker.check(repo);
+    return Response.json(repositoryDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
+  };
+
   const updateRepository = async (req: Request, rawId: string) => {
     const repo = findRepository(rawId);
     const body = await readBody(req, updateRepositorySchema);
@@ -974,11 +1030,39 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (patternError) {
       return validationProblem('versionPattern', patternError);
     }
-    const sourceChanged = setReleaseSource(
-      repo,
-      body.releaseSource === undefined ? repo.releaseSource : (body.releaseSource ?? 'releases'),
-      versionPattern,
-    );
+    let sourceChanged = false;
+    if (repo.provider === 'web') {
+      const name = body.name === undefined ? repo.name : normalizeWebSourceName(body.name);
+      const nameError = webSourceNameError(name);
+      if (nameError) {
+        return validationProblem('name', nameError);
+      }
+      const config = body.webSource === undefined ? repo.webSource : normalizeWebSource(body.webSource);
+      if (!config) {
+        return validationProblem('webSource', 'Enter the URL of the page.');
+      }
+      const invalid = checkWebSource(config, versionPattern);
+      if (invalid) {
+        return invalid;
+      }
+      const host = webSourceHost(config.url);
+      const moved = name!.toLowerCase() !== repo.name.toLowerCase() || host !== repo.host;
+      if (moved && store.exists(WEB_OWNER, name!, host)) {
+        return problem(409, `A web source named ${name} on ${host} is already being watched.`);
+      }
+      sourceChanged = setWebSource(repo, config, versionPattern);
+      repo.name = name!;
+      repo.host = host;
+    } else {
+      if (body.webSource !== undefined || body.name !== undefined) {
+        return validationProblem('webSource', 'Only web sources have a URL and a name that can be changed.');
+      }
+      sourceChanged = setReleaseSource(
+        repo,
+        body.releaseSource === undefined ? repo.releaseSource : (body.releaseSource ?? 'releases'),
+        versionPattern,
+      );
+    }
     if (icon !== undefined) {
       repo.icon = icon;
     }
@@ -1084,7 +1168,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       store.setInstalledVersionApp(repo.id, machineApp);
     }
     if (sourceChanged && repo.isEnabled) {
-      // Set the new baseline right away (silently), so the latest release does not stay empty until the next check.
+      // Set the new baseline right away (silently), so the latest version does not stay empty until the next check.
       await checker.check(store.get(repo.id) ?? repo);
     }
     return Response.json(repositoryDto(store.get(repo.id) ?? repo));
@@ -1295,6 +1379,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
         }),
         ...repositoryGroupRoutes({ store }),
+        ...webSourceRoutes(deps.fetchWebSource ? { fetch: deps.fetchWebSource } : {}),
         ...backupRoutes({
           service: backup,
           // Imported repositories have no release baseline yet: read it right away.

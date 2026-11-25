@@ -4,6 +4,7 @@
  */
 import { fullName, type ReleaseSourceKind, type RepositoryProvider } from '../domain.ts';
 import type { SettingKey } from '../settings.ts';
+import type { WebSourceConfig } from '../web-source/domain.ts';
 
 /** Marks a JSON file as a ReleaseWatcher backup. */
 export const BACKUP_FORMAT = 'releasewatcher-backup';
@@ -20,7 +21,7 @@ export type ImportMode = (typeof IMPORT_MODES)[number];
 
 /** A watched repository without its state (releases seen, check results) and without secrets. */
 export interface BackupRepository {
-  /** `github`, `gitea` (Gitea/Forgejo) or `gitlab`; missing in older files = GitHub. */
+  /** `github`, `gitea` (Gitea/Forgejo), `gitlab` or `web` (a web source); missing in older files = GitHub. */
   provider: RepositoryProvider;
   /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
   host: string | null;
@@ -30,6 +31,8 @@ export interface BackupRepository {
   /** `releases` or `tags`; missing in older files = releases. */
   releaseSource: ReleaseSourceKind;
   versionPattern: string | null;
+  /** Page and locators of a web source; null for repositories (and in older files). */
+  webSource: WebSourceConfig | null;
   isEnabled: boolean;
   icon: string | null;
   /** Custom group on the Repositories page, and the group's icon. */
