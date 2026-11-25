@@ -2,33 +2,6 @@
   display: block;
 }
 
-.add-card {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 12px 16px;
-  padding: 12px;
-  margin-bottom: 24px;
-}
-
-.add-input {
-  position: relative;
-  flex: 1 1 320px;
-
-  .add-icon {
-    position: absolute;
-    top: 50%;
-    left: 12px;
-    transform: translateY(-50%);
-    color: var(--text-muted);
-    pointer-events: none;
-  }
-
-  .input {
-    padding-left: 38px;
-  }
-}
-
 .toolbar-right {
   display: flex;
   flex-wrap: wrap;
@@ -437,23 +410,12 @@
   }
 }
 
-.add-token {
-  flex: 1 1 260px;
-}
-
-.add-provider {
-  flex: 0 1 260px;
-}
-
-.link-btn {
-  padding: 0;
-  border: none;
-  background: none;
-  color: var(--accent-strong);
-  font: inherit;
-  font-size: 0.85rem;
-  cursor: pointer;
-  text-decoration: underline;
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 14px;
 }
 
 /* Host of a web source next to its name. */

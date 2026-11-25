@@ -156,18 +156,27 @@ describe('RepositoriesPage', () => {
     expect(el.querySelector('.row .installed')?.textContent).toContain('1.32.0');
   });
 
-  it('keeps repositories sorted by repository name, not by owner', async () => {
+  const headerButton = (el: HTMLElement, text: string) =>
+    [...el.querySelectorAll<HTMLButtonElement>('.page-header button')].find((b) => b.textContent?.trim() === text)!;
+
+  it('adds a repository from its dialog and keeps the list sorted by repository name, not by owner', async () => {
     const { el, fixture } = await render([repo(1, 'zeta/alpha'), repo(2, 'acme/widget')]);
-    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
+    expect(el.querySelector('app-add-repository-dialog form')).toBeNull();
+    headerButton(el, 'Add repository').click();
+    await settle(fixture);
+    const dialog = el.querySelector('app-add-repository-dialog')!;
+    expect(dialog.querySelector('h2')?.textContent).toContain('Add repository');
+    const input = dialog.querySelector<HTMLInputElement>('#add-repo')!;
     input.value = 'aaa/middle';
     input.dispatchEvent(new Event('input'));
     await settle(fixture);
-    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
+    dialog.querySelector('form')!.dispatchEvent(new Event('submit'));
     await settle(fixture);
     http.expectOne({ method: 'POST', url: '/api/repositories' }).flush(repo(3, 'aaa/middle'));
     await settle(fixture);
     http.match('/api/status').forEach((r) => r.flush({}));
 
+    expect(el.querySelector('app-add-repository-dialog form')).toBeNull();
     const names = [...el.querySelectorAll('.row')].map((r) => r.textContent ?? '');
     expect(names.map((t) => ['alpha', 'middle', 'widget'].find((n) => t.includes(n)))).toEqual([
       'alpha',
@@ -176,34 +185,13 @@ describe('RepositoriesPage', () => {
     ]);
   });
 
-  it('offers a provider choice only for a host it does not know', async () => {
+  it('offers both ways to add in the empty state', async () => {
     const { el, fixture } = await render([]);
-    const input = el.querySelector<HTMLInputElement>('#new-repo')!;
-    const type = async (value: string) => {
-      input.value = value;
-      input.dispatchEvent(new Event('input'));
-      await settle(fixture);
-    };
-
-    await type('https://codeberg.org/forgejo/forgejo');
-    expect(el.querySelector('#new-provider')).toBeNull();
-    await type('https://git.example.com/me/app');
-    const select = el.querySelector<HTMLSelectElement>('#new-provider')!;
-    expect(select).not.toBeNull();
-    select.value = 'gitlab';
-    select.dispatchEvent(new Event('change'));
+    const actions = [...el.querySelectorAll<HTMLButtonElement>('.empty .empty-actions button')];
+    expect(actions.map((b) => b.textContent?.trim())).toEqual(['Add web page', 'Add repository']);
+    actions[0]!.click();
     await settle(fixture);
-
-    el.querySelector<HTMLFormElement>('form.add-card')!.dispatchEvent(new Event('submit'));
-    await settle(fixture);
-    const request = http.expectOne({ method: 'POST', url: '/api/repositories' });
-    expect(request.request.body).toEqual({ repository: 'https://git.example.com/me/app', includePrereleases: false, provider: 'gitlab' });
-    request.flush(repo(3, 'me/app', { provider: 'gitlab', host: 'git.example.com', fullName: 'git.example.com/me/app', avatarUrl: null }));
-    await settle(fixture);
-    http.match('/api/status').forEach((r) => r.flush({}));
-
-    expect(el.querySelector('.row')?.textContent).toContain('git.example.com/me/app');
-    expect(el.querySelector('#new-provider')).toBeNull();
+    expect(el.querySelector('app-web-source-dialog form')).not.toBeNull();
   });
 
   it('shows a web source by its name and the host of its page', async () => {
@@ -247,7 +235,7 @@ describe('RepositoriesPage', () => {
   it('adds a web page from its own dialog', async () => {
     const { el, fixture } = await render([repo(1, 'zeta/zulu')]);
     expect(el.querySelector('app-web-source-dialog form')).toBeNull();
-    [...el.querySelectorAll<HTMLButtonElement>('.add-card button')].find((b) => b.textContent?.includes('Web page'))!.click();
+    headerButton(el, 'Add web page').click();
     await settle(fixture);
     const dialog = el.querySelector('app-web-source-dialog')!;
     expect(dialog.querySelector('h2')?.textContent).toContain('Watch a web page');

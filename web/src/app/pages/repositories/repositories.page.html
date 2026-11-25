@@ -3,7 +3,21 @@
     <h1>Repositories</h1>
     <p>Repositories on GitHub, Gitea/Forgejo and GitLab – and web pages that list versions – watched for new releases.</p>
   </div>
+  <div class="header-actions">
+    <ng-container *ngTemplateOutlet="addActions" />
+  </div>
 </header>
+
+<ng-template #addActions>
+  <button type="button" class="btn btn-secondary" (click)="addingWebSource.set(true)" title="Watch versions published on a web page, in a feed or by a JSON API">
+    <app-icon name="globe" [size]="16" />
+    Add web page
+  </button>
+  <button type="button" class="btn" (click)="addingRepository.set(true)">
+    <app-icon name="plus" [size]="16" />
+    Add repository
+  </button>
+</ng-template>
 
 @if (!loading() && !hasEnabledNotifier()) {
   <div class="callout">
@@ -15,65 +29,6 @@
     </div>
   </div>
 }
-
-<form class="card add-card" (ngSubmit)="add()">
-  <div class="add-input">
-    <app-icon name="repo" class="add-icon" />
-    <label for="new-repo" class="visually-hidden">Repository</label>
-    <input
-      id="new-repo"
-      class="input"
-      name="repository"
-      [(ngModel)]="newRepository"
-      placeholder="owner/repo or a GitHub, Codeberg, Gitea, Forgejo or GitLab URL"
-      autocomplete="off"
-      spellcheck="false"
-      required
-    />
-  </div>
-  @if (newHost(); as host) {
-    <div class="add-provider">
-      <label for="new-provider" class="visually-hidden">Software on {{ host }}</label>
-      <select id="new-provider" class="input" name="provider" [(ngModel)]="newProvider" [title]="'Software that runs ' + host">
-        <option value="">Detect Gitea/Forgejo or GitLab</option>
-        <option value="gitea">Gitea / Forgejo</option>
-        <option value="gitlab">GitLab</option>
-      </select>
-    </div>
-  }
-  <app-switch
-    label="Include pre-releases"
-    [checked]="newIncludePrereleases"
-    (toggled)="newIncludePrereleases = !newIncludePrereleases"
-  />
-  @if (showNewToken()) {
-    <div class="add-token">
-      <label for="new-token" class="visually-hidden">Token for this repository</label>
-      <input
-        id="new-token"
-        class="input mono"
-        type="password"
-        name="accessToken"
-        [(ngModel)]="newToken"
-        placeholder="Access token (only for this repository)"
-        autocomplete="off"
-        spellcheck="false"
-      />
-    </div>
-  } @else {
-    <button type="button" class="link-btn" (click)="showNewToken.set(true)" title="For a private repository: one the global GitHub token cannot read, or one on another host">
-      Private repository? Add a token
-    </button>
-  }
-  <button type="submit" class="btn" [disabled]="adding() || !newRepository().trim()">
-    <app-icon name="plus" [size]="16" />
-    {{ adding() ? 'Adding…' : 'Watch' }}
-  </button>
-  <button type="button" class="btn btn-secondary" (click)="addingWebSource.set(true)" title="Watch versions published on a web page, in a feed or by a JSON API">
-    <app-icon name="globe" [size]="16" />
-    Web page
-  </button>
-</form>
 
 <div class="toolbar">
   <div class="tabs" role="tablist" aria-label="Filter repositories">
@@ -137,7 +92,10 @@
   <div class="card empty">
     <span class="empty-icon"><app-icon name="repo" [size]="22" /></span>
     <h2>No repositories yet</h2>
-    <p>Add one above, e.g. <code>angular/angular</code> or <code>nodejs/node</code> – or a web page that lists versions.</p>
+    <p>Watch a repository, e.g. <code>angular/angular</code> or <code>nodejs/node</code> – or a web page that lists versions.</p>
+    <div class="empty-actions">
+      <ng-container *ngTemplateOutlet="addActions" />
+    </div>
   </div>
 } @else if (visible().length === 0) {
   <div class="card empty">
@@ -354,5 +312,6 @@
 
 <app-advisories-dialog [repository]="viewingAdvisories()" (closed)="viewingAdvisories.set(null)" />
 <app-repository-settings-dialog [repository]="editing()" [groups]="customGroups()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />
+<app-add-repository-dialog [open]="addingRepository()" (saved)="onRepositoryAdded($event)" (closed)="addingRepository.set(false)" />
 <app-web-source-dialog [open]="addingWebSource()" (saved)="onWebSourceAdded($event)" (closed)="addingWebSource.set(false)" />
 <app-repository-group-dialog [group]="editingGroup()" (saved)="onGroupSaved($event)" (removed)="onGroupRemoved($event)" (closed)="editingGroup.set(null)" />

@@ -8,19 +8,19 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { firstValueFrom } from 'rxjs';
 import { ApiService } from '../../core/api.service';
-import { Notifier, RepositoryGroup, RepositoryProvider, WatchedRepository } from '../../core/models';
+import { Notifier, RepositoryGroup, WatchedRepository } from '../../core/models';
 import { PreferencesService, type RepositoryGrouping } from '../../core/preferences.service';
 import { StatusService } from '../../core/status.service';
 import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
-import { repositoryLabel, unknownRepositoryHost } from '../../shared/repository-host';
+import { repositoryLabel } from '../../shared/repository-host';
 import { Switch } from '../../shared/switch';
+import { AddRepositoryDialog } from './add-repository.dialog';
 import { AdvisoriesDialog } from './advisories.dialog';
 import { groupKeys, groupRepositories } from './grouping';
 import { RepositoryGroupDialog } from './repository-group.dialog';
@@ -32,7 +32,7 @@ type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors'
 @Component({
   selector: 'app-repositories-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DatePipe, NgTemplateOutlet, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, RepositoryGroupDialog, AdvisoriesDialog, WebSourceDialog],
+  imports: [DatePipe, NgTemplateOutlet, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, RepositoryGroupDialog, AdvisoriesDialog, AddRepositoryDialog, WebSourceDialog],
   templateUrl: './repositories.page.html',
   styleUrl: './repositories.page.scss',
 })
@@ -50,7 +50,6 @@ export class RepositoriesPage {
   protected readonly editingGroup = signal<RepositoryGroup | null>(null);
   protected readonly loading = signal(true);
   protected readonly busyIds = signal<ReadonlySet<number>>(new Set());
-  protected readonly adding = signal(false);
   protected readonly confirmDeleteId = signal<number | null>(null);
   /** Repository whose settings dialog is open. */
   protected readonly editing = signal<WatchedRepository | null>(null);
@@ -60,14 +59,8 @@ export class RepositoriesPage {
   protected readonly query = signal('');
   protected readonly filter = signal<Filter>('all');
 
-  protected readonly newRepository = signal('');
-  /** Host of the entered URL when its provider is not known (then Gitea/Forgejo or GitLab can be chosen). */
-  protected readonly newHost = computed(() => unknownRepositoryHost(this.newRepository()));
-  protected newProvider: '' | Exclude<RepositoryProvider, 'github' | 'web'> = '';
-  protected newIncludePrereleases = false;
-  /** Optional token of a private repository the global token cannot read. */
-  protected newToken = '';
-  protected readonly showNewToken = signal(false);
+  /** Whether the dialog that adds a repository is open. */
+  protected readonly addingRepository = signal(false);
   /** Whether the dialog that adds a web page is open. */
   protected readonly addingWebSource = signal(false);
   protected readonly label = repositoryLabel;
@@ -162,35 +155,11 @@ export class RepositoriesPage {
     }
   }
 
-  protected async add(): Promise<void> {
-    const repository = this.newRepository().trim();
-    if (!repository || this.adding()) {
-      return;
-    }
-
-    this.adding.set(true);
-    try {
-      const created = await firstValueFrom(
-        this.api.addRepository({
-          repository,
-          includePrereleases: this.newIncludePrereleases,
-          ...(this.newHost() && this.newProvider ? { provider: this.newProvider } : {}),
-          ...(this.newToken.trim() ? { accessToken: this.newToken.trim() } : {}),
-        }),
-      );
-      this.repositories.update((list) => [...list, created].sort(byName));
-      this.newRepository.set('');
-      this.newProvider = '';
-      this.newIncludePrereleases = false;
-      this.newToken = '';
-      this.showNewToken.set(false);
-      this.toast.success(`Watching ${created.fullName}.`);
-      void this.statusService.refresh();
-    } catch (error) {
-      this.toast.error(error);
-    } finally {
-      this.adding.set(false);
-    }
+  protected onRepositoryAdded(created: WatchedRepository): void {
+    this.repositories.update((list) => [...list, created].sort(byName));
+    this.addingRepository.set(false);
+    this.toast.success(`Watching ${created.fullName}.`);
+    void this.statusService.refresh();
   }
 
   protected onWebSourceAdded(created: WatchedRepository): void {

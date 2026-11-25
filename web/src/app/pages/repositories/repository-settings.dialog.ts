@@ -45,6 +45,7 @@ import { OSV_ECOSYSTEMS } from '../../shared/severity';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
+import { versionPatternError } from '../../shared/version-pattern';
 import { WebSourceDraft, WebSourceForm } from './web-source-form';
 
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
@@ -209,16 +210,7 @@ export class RepositorySettingsDialog {
 
   /** Why the version pattern can't be used (same checks as the server, which also limits its run time); null = fine. */
   protected patternError(): string | null {
-    const pattern = this.versionPattern.trim();
-    if (!pattern) {
-      return null;
-    }
-    try {
-      new RegExp(pattern, 'i');
-      return null;
-    } catch {
-      return 'This is not a valid regular expression.';
-    }
+    return versionPatternError(this.versionPattern);
   }
 
   /** Whether the form differs from the saved repository (read by the template on every check). */

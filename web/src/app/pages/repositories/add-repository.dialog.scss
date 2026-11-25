@@ -1,0 +1,32 @@
+.dialog {
+  width: min(600px, calc(100vw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+/* Watch and version pattern side by side where there is room. */
+.pair {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+  gap: 18px 12px;
+}
+
+@media (max-width: 480px) {
+  .pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.token-row {
+  display: flex;
+  gap: 6px;
+
+  .input {
+    flex: 1;
+    min-width: 0;
+  }
+}
