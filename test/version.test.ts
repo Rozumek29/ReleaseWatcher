@@ -3,7 +3,6 @@ import { describe, it } from 'bun:test';
 import {
   compareVersions,
   extractVersion,
-  fetchInstalledVersion,
   InstalledVersionError,
   localVersionUrl,
   parseVersion,
@@ -84,31 +83,6 @@ describe('extractVersion', () => {
   it('reports a missing field', () => {
     assert.throws(() => extractVersion('{"a":1}', 'version'), InstalledVersionError);
     assert.throws(() => extractVersion('{"a":1}', null), /No version found/);
-  });
-});
-
-describe('fetchInstalledVersion', () => {
-  it('returns the version and a preview', async () => {
-    const fetch = (async () => new Response('"1.32.0"', { status: 200 })) as unknown as typeof globalThis.fetch;
-    assert.deepEqual(await fetchInstalledVersion('https://vault.lan/api/version', null, [], fetch), {
-      version: '1.32.0',
-      preview: '"1.32.0"',
-    });
-  });
-
-  it('wraps HTTP errors', async () => {
-    const fetch = (async () => new Response('nope', { status: 401 })) as unknown as typeof globalThis.fetch;
-    await assert.rejects(fetchInstalledVersion('https://x.lan/v', null, [], fetch), /HTTP 401.*authorization/);
-  });
-
-  it('sends custom headers', async () => {
-    let sent: Headers | undefined;
-    const fetch = (async (_url: string, init: RequestInit) => {
-      sent = new Headers(init.headers);
-      return new Response('{"version":"2.0.0"}');
-    }) as unknown as typeof globalThis.fetch;
-    await fetchInstalledVersion('https://x.lan/v', null, [{ name: 'Authorization', value: 'Bearer abc' }], fetch);
-    assert.equal(sent?.get('authorization'), 'Bearer abc');
   });
 });
 

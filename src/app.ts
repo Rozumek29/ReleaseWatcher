@@ -46,7 +46,8 @@ import {
   type RepositoryRef,
   type WatchedRepository,
 } from './domain.ts';
-import { normalizePattern, validatePattern } from './pattern.ts';
+import { MAX_PATTERN_LENGTH, normalizePattern, validatePattern } from './pattern.ts';
+import { MAX_SELECTOR_LENGTH, WEB_SOURCE_FORMATS } from './web-source/domain.ts';
 import { checkWebSource, normalizeWebSource, webSourceRoutes, webSourceSchema } from './web-source/routes.ts';
 import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
@@ -89,8 +90,13 @@ import {
 import { scanDirectory, StaticUi } from './static-ui.ts';
 import { body, parseId, readBody, readOptionalBody, RequestValidationError, z } from './validation.ts';
 import {
-  compareVersions,
   fetchInstalledVersion,
+  type InstalledVersionLocator,
+  normalizeLocator,
+  validateLocator,
+} from './installed-version.ts';
+import {
+  compareVersions,
   type HttpHeader,
   InstalledVersionError,
   MAX_CUSTOM_HEADERS,
@@ -134,7 +140,7 @@ export interface AppDeps {
   /** Override for tests; defaults to a real HTTP fetch. */
   fetchInstalledVersion?: (
     url: string,
-    field: string | null,
+    locator: InstalledVersionLocator,
     headers: readonly HttpHeader[],
   ) => Promise<{ version: string; preview: string }>;
   /** Fetch used by the web source preview (`POST /api/web-sources/preview`); defaults to the real one. */
@@ -372,7 +378,12 @@ export const toDto = (
   lastError: r.lastError,
   createdAt: r.createdAt,
   installedVersionUrl: r.installedVersionUrl,
+  /** Path (JSON) or CSS selector (HTML/XML) of the version; null = auto-detect / the whole response. */
   installedVersionField: r.installedVersionField,
+  /** `text`, `json`, `html` or `xml`; null = auto (JSON or the first version in the text). */
+  installedVersionFormat: r.installedVersionFormat,
+  /** Regular expression that picks the version out of the located text; null = none. */
+  installedVersionPattern: r.installedVersionPattern,
   // Only names are exposed; values may contain credentials.
   installedVersionHeaders: r.installedVersionHeaders.map((h) => ({ name: h.name, hasValue: h.value.length > 0 })),
   installedVersion: r.installedVersion,
@@ -430,7 +441,12 @@ const updateRepositorySchema = body({
   /** Web sources only: page and locators; omit = keep. A change (except the User-Agent) sets a new baseline silently. */
   webSource: webSourceSchema.optional(),
   installedVersionUrl: z.string().max(2000).nullish(),
-  installedVersionField: z.string().max(200).nullish(),
+  /** Path or selector; omit = keep, null/"" = none. */
+  installedVersionField: z.string().max(MAX_SELECTOR_LENGTH * 2).nullish(),
+  /** Omit = keep, null = auto. */
+  installedVersionFormat: z.enum(WEB_SOURCE_FORMATS).nullish(),
+  /** Omit = keep, null/"" = none. */
+  installedVersionPattern: z.string().max(MAX_PATTERN_LENGTH * 2).nullish(),
   installedVersionHeaders: headersSchema,
   /** Installed version entered by hand (only without a version URL); omit = keep, null/"" = none. */
   installedVersion: z.string().max(MANUAL_VERSION_MAX_LENGTH).nullish(),
@@ -452,7 +468,10 @@ const updateRepositorySchema = body({
 
 const testInstalledVersionSchema = body({
   url: z.string().max(2000),
-  field: z.string().max(200).nullish(),
+  field: z.string().max(MAX_SELECTOR_LENGTH * 2).nullish(),
+  /** Null/omitted = auto. */
+  format: z.enum(WEB_SOURCE_FORMATS).nullish(),
+  pattern: z.string().max(MAX_PATTERN_LENGTH * 2).nullish(),
   headers: headersSchema,
   repositoryId: z.int().nullish(),
 });
@@ -1093,13 +1112,27 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
 
     // Installed-version settings are optional in the body: undefined = keep, null/"" = clear.
-    const { installedVersionUrl, installedVersionField, installedVersionHeaders } = body;
-    if (installedVersionUrl !== undefined || installedVersionField !== undefined || installedVersionHeaders !== undefined) {
+    const { installedVersionUrl, installedVersionField, installedVersionFormat, installedVersionPattern, installedVersionHeaders } = body;
+    if (
+      installedVersionUrl !== undefined ||
+      installedVersionField !== undefined ||
+      installedVersionFormat !== undefined ||
+      installedVersionPattern !== undefined ||
+      installedVersionHeaders !== undefined
+    ) {
       const url = installedVersionUrl === undefined ? repo.installedVersionUrl : installedVersionUrl?.trim() || null;
-      const field = installedVersionField === undefined ? repo.installedVersionField : installedVersionField?.trim() || null;
+      const { format, field, pattern } = normalizeLocator({
+        format: installedVersionFormat === undefined ? repo.installedVersionFormat : installedVersionFormat,
+        field: installedVersionField === undefined ? repo.installedVersionField : installedVersionField,
+        pattern: installedVersionPattern === undefined ? repo.installedVersionPattern : installedVersionPattern,
+      });
       const urlError = url ? validateVersionUrl(url) : null;
       if (urlError) {
         return validationProblem('installedVersionUrl', urlError);
+      }
+      const locatorErrors = url ? validateLocator({ format, field, pattern }) : null;
+      if (locatorErrors) {
+        return problem(400, 'One or more validation errors occurred.', { errors: locatorErrors });
       }
       let headers = repo.installedVersionHeaders;
       if (installedVersionHeaders !== undefined) {
@@ -1113,6 +1146,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       const changed =
         url !== repo.installedVersionUrl ||
         field !== repo.installedVersionField ||
+        format !== repo.installedVersionFormat ||
+        pattern !== repo.installedVersionPattern ||
         JSON.stringify(headers) !== JSON.stringify(repo.installedVersionHeaders);
       if (!url && repo.installedVersionUrl) {
         // The version read from the removed URL is not one the user entered.
@@ -1121,6 +1156,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       }
       repo.installedVersionUrl = url;
       repo.installedVersionField = field;
+      repo.installedVersionFormat = format;
+      repo.installedVersionPattern = pattern;
       repo.installedVersionHeaders = headers;
       if (changed) {
         await checker.refreshInstalledVersion(repo);
@@ -1208,9 +1245,14 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (headerError) {
       return validationProblem('installedVersionHeaders', headerError);
     }
+    const locator = normalizeLocator({ format: body.format ?? null, field: body.field ?? null, pattern: body.pattern ?? null });
+    const locatorErrors = validateLocator(locator);
+    if (locatorErrors) {
+      return problem(400, 'One or more validation errors occurred.', { errors: locatorErrors });
+    }
     try {
       return Response.json(
-        await (deps.fetchInstalledVersion ?? fetchInstalledVersion)(body.url.trim(), body.field?.trim() || null, resolved as HttpHeader[]),
+        await (deps.fetchInstalledVersion ?? fetchInstalledVersion)(body.url.trim(), locator, resolved as HttpHeader[]),
       );
     } catch (error) {
       if (error instanceof InstalledVersionError) {

@@ -9,6 +9,7 @@ import { silentLogger } from '../src/log.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { loadConfig } from '../src/config.ts';
 import { SettingsService } from '../src/settings.ts';
+import type { InstalledVersionLocator } from '../src/installed-version.ts';
 import { ContainerStore } from '../src/proxmox/store.ts';
 import { addProxmoxHost, advisory, FakeSource, RecordingNotifier, release } from './helpers.ts';
 
@@ -18,6 +19,7 @@ describe('HTTP API', () => {
   let notifier: RecordingNotifier;
   let store: RepositoryStore;
   let lastHeaders: readonly { name: string; value: string }[] = [];
+  let lastLocator: InstalledVersionLocator | null = null;
   let baseUrl: URL;
 
   /** Sends a request to the running server (the shape mirrors Fastify's former `inject`). */
@@ -46,8 +48,9 @@ describe('HTTP API', () => {
       notifiers: [notifier],
       log: silentLogger,
       auth: { requireAuth: false },
-      fetchInstalledVersion: async (url, _field, headers) => {
+      fetchInstalledVersion: async (url, locator, headers) => {
         lastHeaders = headers;
+        lastLocator = locator;
         if (url.includes('down')) {
           const { InstalledVersionError } = await import('../src/version.ts');
           throw new InstalledVersionError('Could not reach it');
@@ -803,6 +806,40 @@ describe('HTTP API', () => {
     assert.equal(kept.json().installedVersionUrl, 'https://widget.lan/api/version');
   });
 
+  it('reads the installed version with a format, a path or selector and a pattern', async () => {
+    const { id } = (await add('acme/widget')).json();
+    const put = (payload: object) =>
+      inject({ method: 'PUT', url: `/api/repositories/${id}`, payload: { includePrereleases: false, isEnabled: true, ...payload } });
+
+    const saved = await put({
+      installedVersionUrl: 'https://widget.lan/about',
+      installedVersionFormat: 'html',
+      installedVersionField: ' footer .version ',
+      installedVersionPattern: String.raw`v(\d+)`,
+    });
+    assert.equal(saved.statusCode, 200);
+    const body = saved.json();
+    assert.equal(body.installedVersionFormat, 'html');
+    assert.equal(body.installedVersionField, 'footer .version');
+    assert.equal(body.installedVersionPattern, String.raw`v(\d+)`);
+    assert.deepEqual(lastLocator, { format: 'html', field: 'footer .version', pattern: String.raw`v(\d+)` });
+
+    // Omitted = keep; the text format needs a pattern and has no path.
+    assert.equal((await put({ installedVersionPattern: null, installedVersionFormat: 'text' })).statusCode, 400);
+    const text = (await put({ installedVersionFormat: 'text' })).json();
+    assert.equal(text.installedVersionField, null);
+    assert.equal(text.installedVersionPattern, String.raw`v(\d+)`);
+
+    // HTML needs a selector; auto (null) drops the pattern.
+    const missing = await put({ installedVersionFormat: 'html', installedVersionField: null });
+    assert.equal(missing.statusCode, 400);
+    assert.ok(missing.json().errors.installedVersionField);
+    const auto = (await put({ installedVersionFormat: null, installedVersionField: 'data.version' })).json();
+    assert.equal(auto.installedVersionFormat, null);
+    assert.equal(auto.installedVersionPattern, null);
+    assert.deepEqual(lastLocator, { format: null, field: 'data.version', pattern: null });
+  });
+
   it('takes an installed version entered by hand when no URL is set', async () => {
     const { id } = (await add('acme/widget')).json();
     const put = (payload: object) =>
@@ -867,6 +904,18 @@ describe('HTTP API', () => {
   it('tests an installed-version URL without saving it', async () => {
     const ok = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v' } });
     assert.deepEqual(ok.json(), { version: '0.9.0', preview: '"0.9.0"' });
+    assert.deepEqual(lastLocator, { format: null, field: null, pattern: null });
+
+    const page = await inject({
+      method: 'POST',
+      url: '/api/installed-version/test',
+      payload: { url: 'https://a.lan/about', format: 'json', field: 'items[0].version' },
+    });
+    assert.equal(page.statusCode, 200);
+    assert.deepEqual(lastLocator, { format: 'json', field: 'items[0].version', pattern: null });
+    const invalid = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://a.lan/v', format: 'text' } });
+    assert.equal(invalid.statusCode, 400);
+    assert.ok(invalid.json().errors.installedVersionPattern);
 
     const down = await inject({ method: 'POST', url: '/api/installed-version/test', payload: { url: 'https://down.lan/v' } });
     assert.equal(down.statusCode, 422);

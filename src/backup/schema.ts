@@ -6,7 +6,7 @@
 import { PROVIDERS, RELEASE_SOURCES } from '../domain.ts';
 import { MAX_PATTERN_LENGTH } from '../pattern.ts';
 import { z } from '../validation.ts';
-import { WEB_SOURCE_FORMATS } from '../web-source/domain.ts';
+import { MAX_SELECTOR_LENGTH, WEB_SOURCE_FORMATS } from '../web-source/domain.ts';
 import { GROUP_NAME_MAX_LENGTH } from '../domain.ts';
 
 const text = (maxLength: number) => z.string().max(maxLength).nullish();
@@ -80,7 +80,9 @@ const repositorySchema = z.object({
   groupName: text(GROUP_NAME_MAX_LENGTH),
   groupIcon: text(2000),
   installedVersionUrl: text(2000),
-  installedVersionField: text(200),
+  installedVersionField: text(MAX_SELECTOR_LENGTH),
+  installedVersionFormat: z.enum(WEB_SOURCE_FORMATS).nullish(),
+  installedVersionPattern: text(MAX_PATTERN_LENGTH),
   installedVersionHeaderNames: z.array(z.string().max(100)).max(50).nullish(),
   installedVersion: text(100),
   osvEcosystem: text(50),

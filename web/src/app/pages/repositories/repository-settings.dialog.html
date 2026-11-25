@@ -295,10 +295,90 @@
             </div>
 
             <div class="field">
-              <label for="version-field">JSON field <span class="optional">optional</span></label>
-              <input id="version-field" class="input mono" name="field" [(ngModel)]="field" placeholder="auto-detect, or e.g. data.version" autocomplete="off" spellcheck="false" />
-              <span class="hint">Leave empty to detect it automatically (plain text, a JSON string, or keys like <code>version</code>).</span>
+              <label for="version-format">Format</label>
+              <select id="version-format" class="input" name="format" [(ngModel)]="format">
+                <option value="">Auto (JSON or plain text)</option>
+                @for (f of formats; track f.value) {
+                  <option [value]="f.value">{{ f.label }}</option>
+                }
+              </select>
+              <span class="hint">
+                @switch (format) {
+                  @case ('text') { Finds the version in the text of the response (HTML tags removed) with the version pattern. }
+                  @case ('json') { Reads the version from a path in a JSON response. }
+                  @case ('html') { Reads the version from an element of a web page, e.g. the footer or an About page. }
+                  @case ('xml') { Reads the version from an element of an XML response. }
+                  @default { Detects a JSON string, keys like <code>version</code> or the first version in the text. }
+                }
+              </span>
             </div>
+
+            @if (format !== 'text') {
+              <div class="field">
+                @switch (format) {
+                  @case ('json') {
+                    <label for="version-field">Version path <span class="optional">optional</span></label>
+                  }
+                  @case ('') {
+                    <label for="version-field">JSON field <span class="optional">optional</span></label>
+                  }
+                  @default {
+                    <label for="version-field">Version selector</label>
+                  }
+                }
+                <input
+                  id="version-field"
+                  class="input mono"
+                  name="field"
+                  [(ngModel)]="field"
+                  [placeholder]="
+                    format === '' ? 'auto-detect, or e.g. data.version' : format === 'json' ? 'data.version or components[0].version' : 'footer .version'
+                  "
+                  maxlength="500"
+                  autocomplete="off"
+                  spellcheck="false"
+                  [required]="format === 'html' || format === 'xml'"
+                />
+                <span class="hint">
+                  @switch (format) {
+                    @case ('json') { A dot path with <code>[0]</code> for array items. Leave empty when the response is the version itself. }
+                    @case ('') { Leave empty to detect it automatically. }
+                    @default { A CSS selector of the element; its text is used (find it with the browser's <em>Inspect</em>). }
+                  }
+                </span>
+              </div>
+            }
+
+            @if (format) {
+              <div class="field">
+                <label for="version-url-pattern">
+                  Version pattern
+                  @if (format !== 'text') {
+                    <span class="optional">optional</span>
+                  }
+                </label>
+                <input
+                  id="version-url-pattern"
+                  class="input mono"
+                  name="urlPattern"
+                  [(ngModel)]="pattern"
+                  [class.invalid]="!!urlPatternError() && (format !== 'text' || !!pattern.trim())"
+                  [placeholder]="format === 'text' ? 'Version:\\s*(\\d+\\.\\d+\\.\\d+)' : 'v(\\d+\\.\\d+\\.\\d+)'"
+                  maxlength="500"
+                  autocomplete="off"
+                  spellcheck="false"
+                  [required]="format === 'text'"
+                />
+                @if (urlPatternError(); as e) {
+                  @if (format !== 'text' || pattern.trim()) {
+                    <span class="error">{{ e }}</span>
+                  }
+                }
+                <span class="hint">
+                  A regular expression (case-insensitive); its first group – or a group named <code>version</code> – is the version.
+                </span>
+              </div>
+            }
 
             <div class="field">
               <div class="headers-head">

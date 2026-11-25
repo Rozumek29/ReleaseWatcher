@@ -31,6 +31,8 @@ const repo: WatchedRepository = {
   createdAt: '2026-01-01T00:00:00Z',
   installedVersionUrl: null,
   installedVersionField: null,
+  installedVersionFormat: null,
+  installedVersionPattern: null,
   installedVersionHeaders: [],
   installedVersion: null,
   installedVersionSource: 'none',
@@ -238,12 +240,70 @@ describe('RepositorySettingsDialog', () => {
     expect(request.request.method).toBe('PUT');
     expect(request.request.body.installedVersionUrl).toBe('https://vault.lan/api/version');
     expect(request.request.body.installedVersionField).toBeNull();
+    expect(request.request.body.installedVersionFormat).toBeNull();
+    expect(request.request.body.installedVersionPattern).toBeNull();
     expect(request.request.body.installedVersionHeaders).toEqual([]);
     expect('accessToken' in request.request.body).toBe(false); // untouched token field = keep
     request.flush({ ...repo, installedVersionUrl: 'https://vault.lan/api/version', installedVersion: '1.31.0', updateAvailable: true });
     await settle(fixture);
 
     expect(saved[0]?.installedVersion).toBe('1.31.0');
+  });
+
+  it('reads the version URL as a web page with a selector and a pattern', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', {
+      ...repo,
+      installedVersionSource: 'url',
+      installedVersionUrl: 'https://vault.lan/about',
+    });
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    expect(el.querySelector('#version-url-pattern')).toBeNull(); // auto has no pattern
+    const format = el.querySelector<HTMLSelectElement>('#version-format')!;
+    format.value = 'text';
+    format.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(el.querySelector('#version-field')).toBeNull(); // text has no path or selector
+
+    // The text format needs a pattern before testing.
+    el.querySelector<HTMLButtonElement>('.test-row button')!.click();
+    await settle(fixture);
+    http.expectNone('/api/installed-version/test');
+    expect(el.textContent).toContain('Fix the version pattern first.');
+
+    format.value = 'html';
+    format.dispatchEvent(new Event('change'));
+    await settle(fixture);
+    expect(el.querySelector('label[for=version-field]')?.textContent).toContain('Version selector');
+    const field = el.querySelector<HTMLInputElement>('#version-field')!;
+    field.value = ' footer .version ';
+    field.dispatchEvent(new Event('input'));
+    const pattern = el.querySelector<HTMLInputElement>('#version-url-pattern')!;
+    pattern.value = String.raw`v(\d+)`;
+    pattern.dispatchEvent(new Event('input'));
+    await settle(fixture);
+
+    el.querySelector<HTMLButtonElement>('.test-row button')!.click();
+    const test = http.expectOne('/api/installed-version/test');
+    expect(test.request.body).toEqual(
+      expect.objectContaining({ url: 'https://vault.lan/about', format: 'html', field: 'footer .version', pattern: String.raw`v(\d+)` }),
+    );
+    test.flush({ version: '4.2', preview: '<html>…' });
+    await settle(fixture);
+    expect(el.textContent).toContain('Detected 4.2');
+
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.installedVersionFormat).toBe('html');
+    expect(request.request.body.installedVersionField).toBe('footer .version');
+    expect(request.request.body.installedVersionPattern).toBe(String.raw`v(\d+)`);
   });
 
   it('keeps saved header values unless they are re-entered', async () => {

@@ -25,6 +25,7 @@ import {
   HostInput,
   ImportMode,
   ImportResponse,
+  InstalledVersionLocator,
   InstalledVersionTestResult,
   MachineAppGroup,
   Notifier,
@@ -174,13 +175,13 @@ export class ApiService {
 
   testInstalledVersion(
     url: string,
-    field: string | null,
+    locator: InstalledVersionLocator,
     headers: HeaderInput[],
     repositoryId: number | null,
   ): Observable<InstalledVersionTestResult> {
     return this.http.post<InstalledVersionTestResult>(`${this.baseUrl}/installed-version/test`, {
       url,
-      field,
+      ...locator,
       headers,
       repositoryId,
     });

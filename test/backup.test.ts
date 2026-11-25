@@ -93,6 +93,8 @@ describe('backup', () => {
       accessToken: GITHUB_TOKEN,
       installedVersionUrl: 'https://widget.example.com/api/version',
       installedVersionField: 'version',
+      installedVersionFormat: 'json',
+      installedVersionPattern: String.raw`(\d+\.\d+)`,
       installedVersionHeaders: [{ name: 'Authorization', value: HEADER_SECRET }],
       osvEcosystem: 'npm',
       osvPackage: 'widget',
@@ -178,6 +180,8 @@ describe('backup', () => {
       groupIcon: 'sh:homelab',
       installedVersionUrl: 'https://widget.example.com/api/version',
       installedVersionField: 'version',
+      installedVersionFormat: 'json',
+      installedVersionPattern: String.raw`(\d+\.\d+)`,
       installedVersionHeaderNames: ['Authorization'],
       installedVersion: null,
       osvEcosystem: 'npm',
@@ -447,6 +451,7 @@ describe('backup', () => {
         { owner: 'acme', name: 'widget' },
         { owner: 'acme', name: 'gadget', icon: 'not an icon' },
         { owner: 'acme', name: 'tool', releaseSource: 'tags', versionPattern: '(' },
+        { owner: 'acme', name: 'page', installedVersionUrl: 'https://page.lan/about', installedVersionFormat: 'html' },
       ],
       hosts: [{ type: 'proxmox', name: 'pve', address: 'pve.lan', targets: [{ kind: 'server', vmid: 0, name: 'x' }] }],
       dockerEndpoints: [{ name: 'Bad', url: 'ftp://nas' }],
@@ -459,6 +464,7 @@ describe('backup', () => {
       'hosts[0].targets[0].kind',
       'repositories[1].icon',
       'repositories[2].versionPattern',
+      'repositories[3].installedVersionField',
       'settings.releaseCheckCron',
     ]);
     assert.equal(target.store.list().length, 0);

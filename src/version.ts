@@ -184,41 +184,6 @@ export function validateHeaders(headers: readonly HttpHeader[]): string | null {
   return null;
 }
 
-/** Fetches the installed version from a URL such as https://vault.lan/api/version. */
-export async function fetchInstalledVersion(
-  url: string,
-  field: string | null,
-  headers: readonly HttpHeader[] = [],
-  fetchFn: typeof fetch = globalThis.fetch,
-): Promise<InstalledVersionResult> {
-  let response: Response;
-  try {
-    response = await fetchFn(url, {
-      headers: {
-        Accept: 'application/json, text/plain;q=0.9, */*;q=0.5',
-        'User-Agent': 'ReleaseWatcher/1.0',
-        ...Object.fromEntries(headers.map((h) => [h.name, h.value])),
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-  } catch (error) {
-    const cause = error instanceof Error ? ((error.cause as Error | undefined)?.message ?? error.message) : String(error);
-    throw new InstalledVersionError(`Could not reach ${url}: ${cause}`);
-  }
-
-  const body = await response.text();
-  if (!response.ok) {
-    const hint = response.status === 401 || response.status === 403 ? ' Check the authorization headers.' : '';
-    throw new InstalledVersionError(`${url} returned HTTP ${response.status}.${hint}`);
-  }
-
-  const version = extractVersion(body, field);
-  if (!version) {
-    throw new InstalledVersionError('The version field is empty.');
-  }
-  return { version, preview: body.length > 300 ? `${body.slice(0, 300)}…` : body };
-}
-
 /**
  * URL of this server's own `/api/version` endpoint as reachable from the same machine. A wildcard bind address
  * (`0.0.0.0`, `::`) is replaced by the loopback address; IPv6 addresses are put in brackets.

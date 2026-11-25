@@ -23,6 +23,7 @@ import {
 } from '../domain.ts';
 import { DEFAULT_SSH_PORT, DEFAULT_SSH_USER, HOST_TYPES, type Host, type HostType, validateHost } from '../hosts/domain.ts';
 import type { HostStore } from '../hosts/store.ts';
+import { autoLocator, normalizeLocator, validateLocator } from '../installed-version.ts';
 import { normalizePattern, validatePattern } from '../pattern.ts';
 import { validateWebSource, type WebSourceConfig } from '../web-source/domain.ts';
 import { normalizeWebSource } from '../web-source/routes.ts';
@@ -218,6 +219,8 @@ function exportRepository(r: WatchedRepository, groups: Map<number, RepositoryGr
     groupIcon: group?.icon ?? null,
     installedVersionUrl: r.installedVersionUrl,
     installedVersionField: r.installedVersionField,
+    installedVersionFormat: r.installedVersionFormat,
+    installedVersionPattern: r.installedVersionPattern,
     installedVersionHeaderNames: r.installedVersionHeaders.map((h) => h.name),
     installedVersion: r.installedVersionUrl ? null : r.installedVersion,
     osvEcosystem: r.osvEcosystem,
@@ -515,6 +518,17 @@ class ImportPlanner {
       this.error(`${path}.installedVersionUrl`, urlError);
       ok = false;
     }
+    const locator = url
+      ? normalizeLocator({
+          format: raw.installedVersionFormat ?? null,
+          field: raw.installedVersionField ?? null,
+          pattern: raw.installedVersionPattern ?? null,
+        })
+      : autoLocator();
+    for (const [field, messages] of Object.entries(validateLocator(locator) ?? {})) {
+      messages.forEach((m) => this.error(`${path}.${field}`, m));
+      ok = false;
+    }
     const ecosystem = blank(raw.osvEcosystem);
     const osvPackage = blank(raw.osvPackage);
     if (ecosystem && !(OSV_ECOSYSTEMS as readonly string[]).includes(ecosystem)) {
@@ -561,7 +575,9 @@ class ImportPlanner {
       groupName,
       groupIcon: groupName ? groupIcon : null,
       installedVersionUrl: url,
-      installedVersionField: url ? blank(raw.installedVersionField) : null,
+      installedVersionField: locator.field,
+      installedVersionFormat: locator.format,
+      installedVersionPattern: locator.pattern,
       installedVersionHeaderNames: url ? (raw.installedVersionHeaderNames ?? []).map((n) => n.trim()).filter(Boolean) : [],
       installedVersion: url ? null : blank(raw.installedVersion),
       osvEcosystem: ecosystem,
@@ -1027,7 +1043,12 @@ function applyRepository(repo: WatchedRepository, item: BackupRepository, store:
   // The group is found by name (or created); its icon is the one in the file.
   repo.groupId = item.groupName ? store.ensureGroup(item.groupName) : null;
   if (repo.groupId !== null) store.updateGroup(repo.groupId, { icon: item.groupIcon });
-  if (repo.installedVersionUrl !== item.installedVersionUrl || repo.installedVersionField !== item.installedVersionField) {
+  if (
+    repo.installedVersionUrl !== item.installedVersionUrl ||
+    repo.installedVersionField !== item.installedVersionField ||
+    repo.installedVersionFormat !== item.installedVersionFormat ||
+    repo.installedVersionPattern !== item.installedVersionPattern
+  ) {
     // Read again by the next check.
     repo.installedVersion = null;
     repo.installedVersionCheckedAt = null;
@@ -1035,6 +1056,8 @@ function applyRepository(repo: WatchedRepository, item: BackupRepository, store:
   }
   repo.installedVersionUrl = item.installedVersionUrl;
   repo.installedVersionField = item.installedVersionField;
+  repo.installedVersionFormat = item.installedVersionFormat;
+  repo.installedVersionPattern = item.installedVersionPattern;
   // Header values are secrets: keep the saved ones the file still names, drop the others.
   const names = new Set(item.installedVersionHeaderNames.map((n) => n.toLowerCase()));
   repo.installedVersionHeaders = item.installedVersionUrl ? repo.installedVersionHeaders.filter((h) => names.has(h.name.toLowerCase())) : [];

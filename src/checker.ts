@@ -16,11 +16,12 @@ import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import type { NotificationDispatcher } from './notifiers/dispatcher.ts';
 import type { OsvClient } from './osv.ts';
-import { compareVersions, fetchInstalledVersion, type HttpHeader, type InstalledVersionResult } from './version.ts';
+import { fetchInstalledVersion, type InstalledVersionLocator } from './installed-version.ts';
+import { compareVersions, type HttpHeader, type InstalledVersionResult } from './version.ts';
 
 export type InstalledVersionFetcher = (
   url: string,
-  field: string | null,
+  locator: InstalledVersionLocator,
   headers: readonly HttpHeader[],
 ) => Promise<InstalledVersionResult>;
 
@@ -81,7 +82,7 @@ export class ReleaseChecker {
     this.dispatcher = deps.dispatcher;
     this.log = deps.log;
     this.now = deps.now ?? (() => new Date());
-    this.fetchInstalled = deps.fetchInstalledVersion ?? ((url, field, headers) => fetchInstalledVersion(url, field, headers));
+    this.fetchInstalled = deps.fetchInstalledVersion ?? ((url, locator, headers) => fetchInstalledVersion(url, locator, headers));
     this.osv = deps.osv ?? null;
     this.advisorySources = deps.advisorySources ?? (() => ({ github: true, osv: true }));
     this.linkedVersions = deps.linkedVersions ?? (() => []);
@@ -119,7 +120,11 @@ export class ReleaseChecker {
     try {
       const { version } = await this.fetchInstalled(
         repo.installedVersionUrl,
-        repo.installedVersionField,
+        {
+          format: repo.installedVersionFormat,
+          field: repo.installedVersionField,
+          pattern: repo.installedVersionPattern,
+        },
         repo.installedVersionHeaders,
       );
       repo.installedVersion = version;

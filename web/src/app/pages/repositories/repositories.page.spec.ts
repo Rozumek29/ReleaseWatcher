@@ -33,6 +33,8 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     createdAt: '2026-01-01T00:00:00Z',
     installedVersionUrl: null,
     installedVersionField: null,
+    installedVersionFormat: null,
+    installedVersionPattern: null,
   installedVersionHeaders: [],
     installedVersion: null,
     installedVersionSource: 'none',

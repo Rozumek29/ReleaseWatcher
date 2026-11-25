@@ -1,5 +1,5 @@
 import { compareVersions, parseVersion } from './version.ts';
-import type { WebSourceConfig } from './web-source/domain.ts';
+import type { WebSourceConfig, WebSourceFormat } from './web-source/domain.ts';
 
 /**
  * Where releases of a repository are read from: GitHub, a Gitea/Forgejo instance (Codeberg …), a GitLab instance or a
@@ -58,8 +58,12 @@ export interface WatchedRepository extends RepositoryRef {
   createdAt: string;
   /** Optional endpoint of the self-hosted app returning its version, e.g. https://vault.lan/api/version. */
   installedVersionUrl: string | null;
-  /** Dot path to the version in a JSON response; null = auto-detect. */
+  /** Path (JSON) or CSS selector (HTML/XML) of the version in the response; null = auto-detect / the whole response. */
   installedVersionField: string | null;
+  /** How the response of the version URL is read: null = auto (JSON or the first version in the text), or a web format. */
+  installedVersionFormat: WebSourceFormat | null;
+  /** Regular expression that picks the version out of the located text (required for `text`); null = none. */
+  installedVersionPattern: string | null;
   /** Extra request headers for the version URL (e.g. Authorization). Values are secrets – never returned by the API. */
   installedVersionHeaders: { name: string; value: string }[];
   installedVersion: string | null;

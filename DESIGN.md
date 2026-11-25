@@ -47,6 +47,9 @@ This file does not repeat those; it describes the **shape** of the system, the *
   `HTMLRewriter` for HTML and XML), `source.ts` is the `ReleaseSource`; newest by date when the source has a date
   locator (undated entries are skipped), otherwise by version (`ReleaseFetchResult.order`) – the order follows the
   settings, never a single response, so it can't flip between checks.
+  The version URL of an installed app reuses the same extraction (`src/installed-version.ts`): format `null` keeps the
+  original auto-detection (JSON or the first version in the text), the other formats call `extractReleases()` and take
+  the first version found.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client), `web-source/` (web pages, feeds and JSON APIs as release sources). A feature folder owns its

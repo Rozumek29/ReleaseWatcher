@@ -17,6 +17,7 @@ import { ApiService, describeError } from '../../core/api.service';
 import {
   HeaderInput,
   RepositoryGroup,
+  InstalledVersionLocator,
   InstalledVersionSource,
   InstalledVersionTestResult,
   MachineAppGroup,
@@ -24,6 +25,7 @@ import {
   MachineAppRef,
   ReleaseSourceKind,
   WatchedRepository,
+  WebSourceFormat,
 } from '../../core/models';
 
 /** Key of a machine (`target:3`, `endpoint:1`) or an app (`app:5`, `docker:7`) in the selects. */
@@ -46,7 +48,7 @@ import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 import { versionPatternError } from '../../shared/version-pattern';
-import { WebSourceDraft, WebSourceForm } from './web-source-form';
+import { WEB_SOURCE_FORMATS, WebSourceDraft, WebSourceForm } from './web-source-form';
 
 /** Per-repository settings, including the URL of the installed (self-hosted) app's version endpoint. */
 @Component({
@@ -79,7 +81,13 @@ export class RepositorySettingsDialog {
   /** Installed version entered by hand (source = manual). */
   protected manualVersion = '';
   protected url = '';
+  /** How the version URL is read; '' = auto (JSON or the first version in the text). */
+  protected format: WebSourceFormat | '' = '';
+  /** JSON field (auto), path (JSON) or CSS selector (HTML/XML); unused for text. */
   protected field = '';
+  /** Regular expression that picks the version out of the located text (not for auto). */
+  protected pattern = '';
+  protected readonly formats = WEB_SOURCE_FORMATS;
   /** Machine and app the installed version is read from (source = machine); keys as built by `machineKey` / `appKey`. */
   protected machine = '';
   protected app = '';
@@ -146,7 +154,9 @@ export class RepositorySettingsDialog {
       this.machine,
       this.app,
       this.url,
+      this.format,
       this.field,
+      this.pattern.trim(),
       this.includePrereleases,
       this.releaseSource,
       this.versionPattern.trim(),
@@ -213,6 +223,23 @@ export class RepositorySettingsDialog {
     return versionPatternError(this.versionPattern);
   }
 
+  /** Why the pattern of the version URL can't be used; null = fine. */
+  protected urlPatternError(): string | null {
+    return this.format === 'text' && !this.pattern.trim()
+      ? 'Enter a version pattern – the text format finds the version only with it.'
+      : versionPatternError(this.pattern);
+  }
+
+  /** How the version URL is read, as sent to the server (values a format does not use are left out). */
+  private locator(): InstalledVersionLocator {
+    const format = this.format || null;
+    return {
+      format,
+      field: format === 'text' ? null : this.field.trim() || null,
+      pattern: format === null ? null : this.pattern.trim() || null,
+    };
+  }
+
   /** Whether the form differs from the saved repository (read by the template on every check). */
   protected changed(): boolean {
     return !sameValues(this.values(), this.savedValues);
@@ -229,7 +256,9 @@ export class RepositorySettingsDialog {
         const current = repo.installedVersionApp;
         this.app = current ? appKey(current) : '';
         this.machine = '';
+        this.format = repo.installedVersionFormat ?? '';
         this.field = repo.installedVersionField ?? '';
+        this.pattern = repo.installedVersionPattern ?? '';
         this.includePrereleases = repo.includePrereleases;
         this.releaseSource = repo.releaseSource;
         this.versionPattern = repo.versionPattern ?? '';
@@ -323,13 +352,17 @@ export class RepositorySettingsDialog {
     if (!this.url.trim()) {
       return;
     }
+    if (this.urlPatternError()) {
+      this.testError.set('Fix the version pattern first.');
+      return;
+    }
     this.testing.set(true);
     this.testResult.set(null);
     this.testError.set(null);
     try {
       this.testResult.set(
         await firstValueFrom(
-          this.api.testInstalledVersion(this.url.trim(), this.field.trim() || null, this.headerInputs(), this.repository()?.id ?? null),
+          this.api.testInstalledVersion(this.url.trim(), this.locator(), this.headerInputs(), this.repository()?.id ?? null),
         ),
       );
     } catch (error) {
@@ -353,7 +386,7 @@ export class RepositorySettingsDialog {
     }
     const web = repo.webSource ? this.webDraft() : null;
     // The pattern of a web source is part of its form and checked by the server.
-    if (!web && this.patternError()) {
+    if ((!web && this.patternError()) || (fromUrl && this.urlPatternError())) {
       this.saveError.set('Fix the version pattern first.');
       return;
     }
@@ -361,6 +394,7 @@ export class RepositorySettingsDialog {
     this.saveError.set(null);
     web?.errors.set({});
     const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
+    const locator: InstalledVersionLocator = fromUrl ? this.locator() : { format: null, field: null, pattern: null };
     try {
       const updated = await firstValueFrom(
         this.api.updateRepository(repo.id, {
@@ -369,7 +403,9 @@ export class RepositorySettingsDialog {
           // Web sources have no releases or tags; their pattern comes with the page below.
           ...(web ? {} : { releaseSource: this.releaseSource, versionPattern: this.versionPattern.trim() || null }),
           installedVersionUrl: fromUrl ? this.url.trim() || null : null,
-          installedVersionField: fromUrl ? this.field.trim() || null : null,
+          installedVersionFormat: locator.format,
+          installedVersionField: locator.field,
+          installedVersionPattern: locator.pattern,
           installedVersionHeaders: fromUrl ? this.headerInputs() : [],
           // A version read from the URL or an app is not sent back; otherwise the value entered by hand (or none).
           ...(fromUrl || fromMachine ? {} : { installedVersion: this.source === 'manual' ? this.manualVersion.trim() || null : null }),

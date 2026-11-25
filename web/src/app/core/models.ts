@@ -60,7 +60,12 @@ export interface WatchedRepository {
   lastError: string | null;
   createdAt: string;
   installedVersionUrl: string | null;
+  /** Path (JSON) or CSS selector (HTML/XML) of the version; null = auto-detect / the whole response. */
   installedVersionField: string | null;
+  /** How the version URL is read; null = auto (JSON or the first version in the text). */
+  installedVersionFormat: WebSourceFormat | null;
+  /** Regular expression that picks the version out of the located text; null = none. */
+  installedVersionPattern: string | null;
   /** Header names only – values are secrets and never leave the server. */
   installedVersionHeaders: { name: string; hasValue: boolean }[];
   installedVersion: string | null;
@@ -216,6 +221,8 @@ export interface UpdateRepositoryRequest {
   /** Omit to keep, null to clear. */
   installedVersionUrl?: string | null;
   installedVersionField?: string | null;
+  installedVersionFormat?: WebSourceFormat | null;
+  installedVersionPattern?: string | null;
   installedVersionHeaders?: HeaderInput[] | null;
   /** Installed version entered by hand (only without a URL); omit to keep, null to clear. */
   installedVersion?: string | null;
@@ -267,6 +274,15 @@ export interface SelfhstIcon {
 export interface HeaderInput {
   name: string;
   value: string | null;
+}
+
+/** How the version is found in the response of a version URL (`POST /api/installed-version/test`). */
+export interface InstalledVersionLocator {
+  /** null = auto. */
+  format: WebSourceFormat | null;
+  /** JSON path or CSS selector; null = auto-detect / the whole response. */
+  field: string | null;
+  pattern: string | null;
 }
 
 export interface InstalledVersionTestResult {

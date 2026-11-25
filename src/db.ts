@@ -52,6 +52,8 @@ interface Row {
   created_at: string;
   installed_version_url: string | null;
   installed_version_field: string | null;
+  installed_version_format: string | null;
+  installed_version_pattern: string | null;
   installed_version_headers: string | null;
   installed_version: string | null;
   installed_version_checked_at: string | null;
@@ -144,6 +146,10 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   createdAt: r.created_at,
   installedVersionUrl: r.installed_version_url,
   installedVersionField: r.installed_version_field,
+  installedVersionFormat: (WEB_SOURCE_FORMATS as readonly (string | null)[]).includes(r.installed_version_format)
+    ? (r.installed_version_format as WebSourceFormat)
+    : null,
+  installedVersionPattern: r.installed_version_pattern,
   installedVersionHeaders: parseHeaders(secrets.decryptNullable(r.installed_version_headers)),
   installedVersion: r.installed_version,
   installedVersionCheckedAt: r.installed_version_checked_at,
@@ -826,6 +832,10 @@ export const MIGRATIONS: readonly string[] = [
   // Web sources (provider 'web'): versions read from a web page, feed or JSON API. `web_source` holds the URL and the
   // locators as JSON; `host` is the URL's host, `owner` is 'web' and `name` the name the user gave the source.
   `ALTER TABLE watched_repositories ADD COLUMN web_source TEXT;`,
+  // How the version URL is read: NULL = auto (JSON or the first version in the text), or a web source format with
+  // `installed_version_field` as its path/selector and an optional version pattern.
+  `ALTER TABLE watched_repositories ADD COLUMN installed_version_format TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN installed_version_pattern TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -979,7 +989,8 @@ export class RepositoryStore {
         `UPDATE watched_repositories SET
            include_prereleases = ?, is_enabled = ?, last_seen_tag = ?, last_seen_published_at = ?,
            releases_etag = ?, last_checked_at = ?, last_error = ?,
-           installed_version_url = ?, installed_version_field = ?, installed_version_headers = ?,
+           installed_version_url = ?, installed_version_field = ?, installed_version_format = ?,
+           installed_version_pattern = ?, installed_version_headers = ?,
            -- A version read from an app on a machine is kept up to date by triggers: never overwrite it with a copy
            -- that may have been read before the app's last check.
            installed_version = IIF(${FROM_MACHINE}, installed_version, ?),
@@ -1002,6 +1013,8 @@ export class RepositoryStore {
         repo.lastError,
         repo.installedVersionUrl,
         repo.installedVersionField,
+        repo.installedVersionFormat,
+        repo.installedVersionPattern,
         repo.installedVersionHeaders.length > 0 ? this.secrets.encrypt(JSON.stringify(repo.installedVersionHeaders)) : null,
         repo.installedVersion,
         repo.installedVersionCheckedAt,

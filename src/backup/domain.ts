@@ -4,7 +4,7 @@
  */
 import { fullName, type ReleaseSourceKind, type RepositoryProvider } from '../domain.ts';
 import type { SettingKey } from '../settings.ts';
-import type { WebSourceConfig } from '../web-source/domain.ts';
+import type { WebSourceConfig, WebSourceFormat } from '../web-source/domain.ts';
 
 /** Marks a JSON file as a ReleaseWatcher backup. */
 export const BACKUP_FORMAT = 'releasewatcher-backup';
@@ -40,6 +40,9 @@ export interface BackupRepository {
   groupIcon: string | null;
   installedVersionUrl: string | null;
   installedVersionField: string | null;
+  /** How the version URL is read; null = auto. */
+  installedVersionFormat: WebSourceFormat | null;
+  installedVersionPattern: string | null;
   /** Names of the headers sent to the version URL; their values are secrets and are not exported. */
   installedVersionHeaderNames: string[];
   /** Installed version entered by hand (only without a version URL). */
