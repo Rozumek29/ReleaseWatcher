@@ -1,7 +1,7 @@
 <header class="page-header">
   <div>
     <h1>Repositories</h1>
-    <p>Repositories on GitHub, Gitea/Forgejo and GitLab watched for new releases.</p>
+    <p>Repositories on GitHub, Gitea/Forgejo and GitLab – and web pages that list versions – watched for new releases.</p>
   </div>
 </header>
 
@@ -69,6 +69,10 @@
     <app-icon name="plus" [size]="16" />
     {{ adding() ? 'Adding…' : 'Watch' }}
   </button>
+  <button type="button" class="btn btn-secondary" (click)="addingWebSource.set(true)" title="Watch versions published on a web page, in a feed or by a JSON API">
+    <app-icon name="globe" [size]="16" />
+    Web page
+  </button>
 </form>
 
 <div class="toolbar">
@@ -133,7 +137,7 @@
   <div class="card empty">
     <span class="empty-icon"><app-icon name="repo" [size]="22" /></span>
     <h2>No repositories yet</h2>
-    <p>Add one above, e.g. <code>angular/angular</code> or <code>nodejs/node</code>.</p>
+    <p>Add one above, e.g. <code>angular/angular</code> or <code>nodejs/node</code> – or a web page that lists versions.</p>
   </div>
 } @else if (visible().length === 0) {
   <div class="card empty">
@@ -215,12 +219,19 @@
 
 <ng-template #card let-repo let-i="index">
   <li class="card row enter" [style.--i]="i" [class.paused]="!repo.isEnabled" [class.has-error]="!!repo.lastError">
-    <app-avatar class="avatar" [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+    <app-avatar class="avatar" [icons]="repo.iconUrls" [src]="repo.avatarUrl" [name]="repo.webSource ? repo.name : repo.owner" [size]="40" />
     <div class="main">
       <div class="title-line">
-        <a [href]="repo.url" target="_blank" rel="noopener" class="name">
-          <span class="owner">{{ repo.host ? repo.host + '/' : '' }}{{ repo.owner }}/</span>{{ repo.name }}
-        </a>
+        @if (repo.webSource; as web) {
+          <a [href]="web.url" target="_blank" rel="noopener" class="name">{{ repo.name }}</a>
+          <span class="badge web-badge" [title]="'Versions read from ' + web.url">
+            <app-icon name="globe" [size]="12" /> {{ repo.host }}
+          </span>
+        } @else {
+          <a [href]="repo.url" target="_blank" rel="noopener" class="name">
+            <span class="owner">{{ repo.host ? repo.host + '/' : '' }}{{ repo.owner }}/</span>{{ repo.name }}
+          </a>
+        }
         @if (!repo.isEnabled) {
           <span class="badge">Paused</span>
         }
@@ -329,10 +340,10 @@
             <app-icon name="refresh" [size]="14" [class.spin]="isBusy(repo.id)" />
             Check
           </button>
-          <button type="button" class="icon-btn" (click)="editing.set(repo)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Settings of ' + repo.fullName" title="Settings">
+          <button type="button" class="icon-btn" (click)="editing.set(repo)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Settings of ' + label(repo)" title="Settings">
             <app-icon name="sliders" [size]="16" />
           </button>
-          <button type="button" class="icon-btn" (click)="confirmDeleteId.set(repo.id)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Remove ' + repo.fullName" title="Remove">
+          <button type="button" class="icon-btn" (click)="confirmDeleteId.set(repo.id)" [disabled]="isBusy(repo.id)" [attr.aria-label]="'Remove ' + label(repo)" title="Remove">
             <app-icon name="trash" [size]="16" />
           </button>
         }
@@ -343,4 +354,5 @@
 
 <app-advisories-dialog [repository]="viewingAdvisories()" (closed)="viewingAdvisories.set(null)" />
 <app-repository-settings-dialog [repository]="editing()" [groups]="customGroups()" (saved)="onSettingsSaved($event)" (closed)="editing.set(null)" />
+<app-web-source-dialog [open]="addingWebSource()" (saved)="onWebSourceAdded($event)" (closed)="addingWebSource.set(false)" />
 <app-repository-group-dialog [group]="editingGroup()" (saved)="onGroupSaved($event)" (removed)="onGroupRemoved($event)" (closed)="editingGroup.set(null)" />

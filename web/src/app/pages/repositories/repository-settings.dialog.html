@@ -2,10 +2,15 @@
   @if (repository(); as repo) {
     <form class="dialog-card" (ngSubmit)="save()">
       <header class="dialog-head">
-        <app-avatar [icons]="iconPreview()" [src]="repo.avatarUrl" [name]="repo.owner" [size]="40" />
+        <app-avatar [icons]="iconPreview()" [src]="repo.avatarUrl" [name]="repo.webSource ? repo.name : repo.owner" [size]="40" />
         <div class="head-text">
-          <h2 id="repo-settings-title">Repository settings</h2>
-          <p class="mono">{{ repo.fullName }}</p>
+          @if (repo.webSource) {
+            <h2 id="repo-settings-title">Web page settings</h2>
+            <p>{{ repo.name }} · <span class="mono">{{ repo.host }}</span></p>
+          } @else {
+            <h2 id="repo-settings-title">Repository settings</h2>
+            <p class="mono">{{ repo.fullName }}</p>
+          }
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close">
           <app-icon name="close" />
@@ -18,46 +23,59 @@
           <app-switch label="Include pre-releases" [checked]="includePrereleases" (toggled)="includePrereleases = !includePrereleases" />
         </div>
 
-        <div class="field">
-          <label for="repo-release-source">Watch</label>
-          <select id="repo-release-source" class="input" name="releaseSource" [(ngModel)]="releaseSource">
-            <option value="releases">Releases</option>
-            <option value="tags">Tags</option>
-          </select>
-          <span class="hint">
-            @if (releaseSource === 'tags') {
-              For projects that tag versions without publishing releases. The highest version is the newest; tags that
-              are no version are skipped.
-            } @else {
-              Published releases, newest by date. Choose tags for a project that only tags its versions.
-            }
-            @if (releaseSource !== repo.releaseSource || versionPattern.trim() !== (repo.versionPattern ?? '')) {
-              The next check sets a new baseline without notifying.
-            }
-          </span>
-        </div>
+        @if (repo.webSource) {
+          <fieldset class="group">
+            <legend>
+              <app-icon name="globe" [size]="16" />
+              Web page
+            </legend>
+            <p class="group-hint">Where the versions are read from. Changes take effect without notifying about the versions found.</p>
+            <app-web-source-form [draft]="webDraft()" [includePrereleases]="includePrereleases" idPrefix="repo-web" />
+          </fieldset>
+        }
 
-        <div class="field">
-          <label for="repo-version-pattern">Version pattern <span class="optional">optional</span></label>
-          <input
-            id="repo-version-pattern"
-            class="input mono"
-            name="versionPattern"
-            [class.invalid]="patternError()"
-            [(ngModel)]="versionPattern"
-            placeholder="^TS-(.+)$"
-            maxlength="500"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          @if (patternError(); as error) {
-            <span class="error">{{ error }}</span>
-          }
-          <span class="hint">
-            Regular expression; tags that don't match are skipped. A group like <code>(\d+\.\d+\.\d+)</code> or
-            <code>(?&lt;version&gt;…)</code> picks the version, e.g. <code>^TS-(.+)$</code>.
-          </span>
-        </div>
+        @if (!repo.webSource) {
+          <div class="field">
+            <label for="repo-release-source">Watch</label>
+            <select id="repo-release-source" class="input" name="releaseSource" [(ngModel)]="releaseSource">
+              <option value="releases">Releases</option>
+              <option value="tags">Tags</option>
+            </select>
+            <span class="hint">
+              @if (releaseSource === 'tags') {
+                For projects that tag versions without publishing releases. The highest version is the newest; tags that
+                are no version are skipped.
+              } @else {
+                Published releases, newest by date. Choose tags for a project that only tags its versions.
+              }
+              @if (releaseSource !== repo.releaseSource || versionPattern.trim() !== (repo.versionPattern ?? '')) {
+                The next check sets a new baseline without notifying.
+              }
+            </span>
+          </div>
+
+          <div class="field">
+            <label for="repo-version-pattern">Version pattern <span class="optional">optional</span></label>
+            <input
+              id="repo-version-pattern"
+              class="input mono"
+              name="versionPattern"
+              [class.invalid]="patternError()"
+              [(ngModel)]="versionPattern"
+              placeholder="^TS-(.+)$"
+              maxlength="500"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            @if (patternError(); as error) {
+              <span class="error">{{ error }}</span>
+            }
+            <span class="hint">
+              Regular expression; tags that don't match are skipped. A group like <code>(\d+\.\d+\.\d+)</code> or
+              <code>(?&lt;version&gt;…)</code> picks the version, e.g. <code>^TS-(.+)$</code>.
+            </span>
+          </div>
+        }
 
         <div class="field">
           <label for="repo-icon">Icon <span class="optional">optional</span></label>
@@ -80,8 +98,12 @@
           <span class="hint">
             An image URL or an icon name from
             <a href="https://selfh.st/icons/" target="_blank" rel="noopener noreferrer">selfh.st/icons</a> with the
-            <code>sh:</code> prefix, e.g. <code>sh:frigate</code> or <code>sh:frigate-light</code>. Leave empty to use the
-            owner's avatar (also shown when the icon can't be loaded).
+            <code>sh:</code> prefix, e.g. <code>sh:frigate</code> or <code>sh:frigate-light</code>.
+            @if (repo.webSource) {
+              Leave empty to show the first letter of the name.
+            } @else {
+              Leave empty to use the owner's avatar (also shown when the icon can't be loaded).
+            }
           </span>
         </div>
 
@@ -141,43 +163,45 @@
           </span>
         </div>
 
-        <div class="field">
-          <label for="repo-token">{{ repo.provider === 'github' ? 'GitHub token' : 'Access token' }} <span class="optional">optional</span></label>
-          <input
-            id="repo-token"
-            class="input mono"
-            type="password"
-            name="token"
-            [(ngModel)]="token"
-            [placeholder]="repo.hasAccessToken && !removeToken ? (repo.accessTokenMasked ?? 'saved') + ' – type to replace' : tokenPlaceholder(repo)"
-            autocomplete="off"
-            spellcheck="false"
-          />
-          <span class="hint">
-            @if (repo.provider !== 'github') {
-              @if (repo.hasAccessToken && !removeToken) {
+        @if (!repo.webSource) {
+          <div class="field">
+            <label for="repo-token">{{ repo.provider === 'github' ? 'GitHub token' : 'Access token' }} <span class="optional">optional</span></label>
+            <input
+              id="repo-token"
+              class="input mono"
+              type="password"
+              name="token"
+              [(ngModel)]="token"
+              [placeholder]="repo.hasAccessToken && !removeToken ? (repo.accessTokenMasked ?? 'saved') + ' – type to replace' : tokenPlaceholder(repo)"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <span class="hint">
+              @if (repo.provider !== 'github') {
+                @if (repo.hasAccessToken && !removeToken) {
+                  This repository uses its own token.
+                  <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
+                  to read it without one.
+                } @else if (removeToken) {
+                  The token will be removed on save – the repository is read without one.
+                } @else {
+                  Only needed for a private repository: a token of {{ repo.host }}
+                  ({{ repo.provider === 'gitlab' ? 'User settings → Access tokens, scope read_api' : 'Settings → Applications → Access tokens, repository: Read' }}).
+                  The global GitHub token is never sent to other hosts.
+                }
+              } @else if (repo.hasAccessToken && !removeToken) {
                 This repository uses its own token.
                 <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
-                to read it without one.
+                to use the global token again.
               } @else if (removeToken) {
-                The token will be removed on save – the repository is read without one.
+                The token will be removed on save – the global token (Settings) is used.
               } @else {
-                Only needed for a private repository: a token of {{ repo.host }}
-                ({{ repo.provider === 'gitlab' ? 'User settings → Access tokens, scope read_api' : 'Settings → Applications → Access tokens, repository: Read' }}).
-                The global GitHub token is never sent to other hosts.
+                Uses the global token from Settings. Set one here only for a private repository the global token cannot
+                read, e.g. one owned by another account (fine-grained token of the owner, Contents: Read-only).
               }
-            } @else if (repo.hasAccessToken && !removeToken) {
-              This repository uses its own token.
-              <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
-              to use the global token again.
-            } @else if (removeToken) {
-              The token will be removed on save – the global token (Settings) is used.
-            } @else {
-              Uses the global token from Settings. Set one here only for a private repository the global token cannot
-              read, e.g. one owned by another account (fine-grained token of the owner, Contents: Read-only).
-            }
-          </span>
-        </div>
+            </span>
+          </div>
+        }
 
         <fieldset class="group">
           <legend>
@@ -347,47 +371,49 @@
           }
         </fieldset>
 
-        <fieldset class="group">
-          <legend>
-            <app-icon name="shield" [size]="16" />
-            Vulnerabilities from OSV.dev
-          </legend>
-          <p class="group-hint">
-            @if (repo.provider === 'github') {
-              GitHub security advisories of this repository are read automatically.
-            } @else {
-              Gitea/Forgejo and GitLab publish no security advisories, so OSV.dev is the only source for this repository.
-            }
-            For more sources (Go, PyPI and npm
-            advisories, CVEs) name the package the app is published as – find it on
-            <a href="https://osv.dev/list" target="_blank" rel="noopener">osv.dev</a>, e.g. <code>npm</code> /
-            <code>n8n</code> or <code>Go</code> / <code>github.com/gitea/gitea</code>.
-          </p>
-          <div class="osv-row">
-            <div class="field">
-              <label for="osv-ecosystem">Ecosystem</label>
-              <select id="osv-ecosystem" class="input" name="osvEcosystem" [(ngModel)]="osvEcosystem">
-                <option value="">None</option>
-                @for (e of ecosystems; track e) {
-                  <option [value]="e">{{ e }}</option>
-                }
-              </select>
+        @if (!repo.webSource) {
+          <fieldset class="group">
+            <legend>
+              <app-icon name="shield" [size]="16" />
+              Vulnerabilities from OSV.dev
+            </legend>
+            <p class="group-hint">
+              @if (repo.provider === 'github') {
+                GitHub security advisories of this repository are read automatically.
+              } @else {
+                Gitea/Forgejo and GitLab publish no security advisories, so OSV.dev is the only source for this repository.
+              }
+              For more sources (Go, PyPI and npm
+              advisories, CVEs) name the package the app is published as – find it on
+              <a href="https://osv.dev/list" target="_blank" rel="noopener">osv.dev</a>, e.g. <code>npm</code> /
+              <code>n8n</code> or <code>Go</code> / <code>github.com/gitea/gitea</code>.
+            </p>
+            <div class="osv-row">
+              <div class="field">
+                <label for="osv-ecosystem">Ecosystem</label>
+                <select id="osv-ecosystem" class="input" name="osvEcosystem" [(ngModel)]="osvEcosystem">
+                  <option value="">None</option>
+                  @for (e of ecosystems; track e) {
+                    <option [value]="e">{{ e }}</option>
+                  }
+                </select>
+              </div>
+              <div class="field">
+                <label for="osv-package">Package</label>
+                <input
+                  id="osv-package"
+                  class="input mono"
+                  name="osvPackage"
+                  [(ngModel)]="osvPackage"
+                  [disabled]="!osvEcosystem"
+                  placeholder="e.g. n8n"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </div>
             </div>
-            <div class="field">
-              <label for="osv-package">Package</label>
-              <input
-                id="osv-package"
-                class="input mono"
-                name="osvPackage"
-                [(ngModel)]="osvPackage"
-                [disabled]="!osvEcosystem"
-                placeholder="e.g. n8n"
-                autocomplete="off"
-                spellcheck="false"
-              />
-            </div>
-          </div>
-        </fieldset>
+          </fieldset>
+        }
 
         @if (saveError(); as e) {
           <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>

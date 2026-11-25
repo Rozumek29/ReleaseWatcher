@@ -42,6 +42,8 @@ import {
   UpdateRepositoryGroupRequest,
   UpdateRepositoryRequest,
   WatchedRepository,
+  WebSourcePreview,
+  WebSourcePreviewRequest,
   AppStore,
 } from './models';
 
@@ -93,6 +95,11 @@ export class ApiService {
 
   updateRepository(id: number, request: UpdateRepositoryRequest): Observable<WatchedRepository> {
     return this.http.put<WatchedRepository>(`${this.baseUrl}/repositories/${id}`, request);
+  }
+
+  /** Reads a web page, feed or JSON API with the given settings and lists the versions found (nothing is saved). */
+  previewWebSource(request: WebSourcePreviewRequest): Observable<WebSourcePreview> {
+    return this.http.post<WebSourcePreview>(`${this.baseUrl}/web-sources/preview`, request);
   }
 
   /** Apps on machines a repository can read its installed version from. */

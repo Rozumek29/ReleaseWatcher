@@ -77,3 +77,12 @@ describe('groupRepositories', () => {
     expect(groupKeys(all, 'none')).toEqual([]);
   });
 });
+
+describe('grouping web sources by owner', () => {
+  it('groups the web pages of one host under the host, never under "web"', () => {
+    const web = (id: number, host: string, name: string) =>
+      repo(id, 'web', name, { provider: 'web', host, fullName: `${host}/web/${name}`, avatarUrl: null });
+    const all = [web(1, 'ui.com', 'UniFi Network'), web(2, 'ui.com', 'UniFi Protect'), web(3, 'www.truenas.com', 'TrueNAS')];
+    expect(shape(groupRepositories(all, all, 'owner', []))).toEqual(['ui.com: 1,2', 3]);
+  });
+});

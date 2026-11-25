@@ -59,7 +59,7 @@
                 <option value="auto">From labels{{ c.linkAuto && c.repository ? ' (' + c.repository.fullName + ')' : '' }}</option>
                 <option value="none">No repository</option>
                 @for (r of repos; track r.id) {
-                  <option [value]="r.id">{{ r.fullName }}</option>
+                  <option [value]="r.id">{{ label(r) }}</option>
                 }
               </select>
               <button type="button" class="btn btn-sm btn-ghost" (click)="linking.set(null)">Cancel</button>

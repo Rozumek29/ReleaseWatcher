@@ -455,3 +455,9 @@
   cursor: pointer;
   text-decoration: underline;
 }
+
+/* Host of a web source next to its name. */
+.web-badge {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}

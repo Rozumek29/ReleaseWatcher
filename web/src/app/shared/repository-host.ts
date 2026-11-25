@@ -22,3 +22,11 @@ export function unknownRepositoryHost(input: string): string | null {
   const segments = url.pathname.split('/').filter(Boolean);
   return looksLikeHost && segments.length >= 2 && !KNOWN_HOSTS.has(host) ? host : null;
 }
+
+/**
+ * Name of a watched repository as shown to the user: its full name (`owner/name`, with the host outside GitHub), or
+ * only the display name of a web source – its host is shown separately, never as `host/web/name`.
+ */
+export function repositoryLabel(repository: { provider: string; name: string; fullName: string }): string {
+  return repository.provider === 'web' ? repository.name : repository.fullName;
+}

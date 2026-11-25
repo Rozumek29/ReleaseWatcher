@@ -19,19 +19,20 @@ import { ToastService } from '../../core/toast.service';
 import { Avatar } from '../../shared/avatar';
 import { Icon } from '../../shared/icon';
 import { RelativeTimePipe } from '../../shared/relative-time.pipe';
-import { unknownRepositoryHost } from '../../shared/repository-host';
+import { repositoryLabel, unknownRepositoryHost } from '../../shared/repository-host';
 import { Switch } from '../../shared/switch';
 import { AdvisoriesDialog } from './advisories.dialog';
 import { groupKeys, groupRepositories } from './grouping';
 import { RepositoryGroupDialog } from './repository-group.dialog';
 import { RepositorySettingsDialog } from './repository-settings.dialog';
+import { WebSourceDialog } from './web-source.dialog';
 
 type Filter = 'all' | 'enabled' | 'paused' | 'updates' | 'vulnerable' | 'errors';
 
 @Component({
   selector: 'app-repositories-page',
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [FormsModule, DatePipe, NgTemplateOutlet, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, RepositoryGroupDialog, AdvisoriesDialog],
+  imports: [FormsModule, DatePipe, NgTemplateOutlet, RouterLink, Avatar, Icon, Switch, RelativeTimePipe, RepositorySettingsDialog, RepositoryGroupDialog, AdvisoriesDialog, WebSourceDialog],
   templateUrl: './repositories.page.html',
   styleUrl: './repositories.page.scss',
 })
@@ -62,11 +63,14 @@ export class RepositoriesPage {
   protected readonly newRepository = signal('');
   /** Host of the entered URL when its provider is not known (then Gitea/Forgejo or GitLab can be chosen). */
   protected readonly newHost = computed(() => unknownRepositoryHost(this.newRepository()));
-  protected newProvider: '' | RepositoryProvider = '';
+  protected newProvider: '' | Exclude<RepositoryProvider, 'github' | 'web'> = '';
   protected newIncludePrereleases = false;
   /** Optional token of a private repository the global token cannot read. */
   protected newToken = '';
   protected readonly showNewToken = signal(false);
+  /** Whether the dialog that adds a web page is open. */
+  protected readonly addingWebSource = signal(false);
+  protected readonly label = repositoryLabel;
 
   protected readonly hasEnabledNotifier = computed(() => this.notifiers().some((n) => n.isEnabled));
 
@@ -102,7 +106,10 @@ export class RepositoriesPage {
     const f = this.filter();
     return this.repositories().filter(
       (r) =>
-        (!q || r.fullName.toLowerCase().includes(q) || r.lastSeenTag?.toLowerCase().includes(q)) &&
+        (!q ||
+          r.fullName.toLowerCase().includes(q) ||
+          r.name.toLowerCase().includes(q) ||
+          r.lastSeenTag?.toLowerCase().includes(q)) &&
         (f === 'all' ||
           (f === 'enabled' && r.isEnabled) ||
           (f === 'paused' && !r.isEnabled) ||
@@ -186,6 +193,13 @@ export class RepositoriesPage {
     }
   }
 
+  protected onWebSourceAdded(created: WatchedRepository): void {
+    this.repositories.update((list) => [...list, created].sort(byName));
+    this.addingWebSource.set(false);
+    this.toast.success(`Watching ${created.name}.`);
+    void this.statusService.refresh();
+  }
+
   protected async toggle(repo: WatchedRepository, field: 'isEnabled' | 'includePrereleases'): Promise<void> {
     await this.withBusy(repo.id, async () => {
       const updated = await firstValueFrom(
@@ -209,11 +223,11 @@ export class RepositoriesPage {
       if (result.repository.lastError) {
         this.toast.error(result.repository.lastError);
       } else if (result.notifiedCount > 0) {
-        this.toast.success(`${repo.fullName}: sent ${result.notifiedCount} notification(s).${containers}`);
+        this.toast.success(`${repositoryLabel(repo)}: sent ${result.notifiedCount} notification(s).${containers}`);
       } else if (containers) {
-        this.toast.success(`${repo.fullName}: new release found.${containers}`);
+        this.toast.success(`${repositoryLabel(repo)}: new release found.${containers}`);
       } else {
-        this.toast.info(`${repo.fullName}: no new releases.`);
+        this.toast.info(`${repositoryLabel(repo)}: no new releases.`);
       }
     });
   }
@@ -241,7 +255,7 @@ export class RepositoriesPage {
     await this.withBusy(repo.id, async () => {
       const updated = await firstValueFrom(this.api.markRepositoryInstalled(repo.id));
       this.replace(updated);
-      this.toast.success(`${repo.fullName}: ${updated.installedVersion} marked as installed.`);
+      this.toast.success(`${repositoryLabel(repo)}: ${updated.installedVersion} marked as installed.`);
       void this.statusService.refresh();
     });
   }
@@ -251,7 +265,7 @@ export class RepositoriesPage {
     await this.withBusy(repo.id, async () => {
       await firstValueFrom(this.api.deleteRepository(repo.id));
       this.repositories.update((list) => list.filter((r) => r.id !== repo.id));
-      this.toast.success(`Stopped watching ${repo.fullName}.`);
+      this.toast.success(`Stopped watching ${repositoryLabel(repo)}.`);
       void this.statusService.refresh();
     });
   }
@@ -264,7 +278,7 @@ export class RepositoriesPage {
     this.toast.success(
       updated.installedVersionError
         ? `Saved, but the installed version could not be read: ${updated.installedVersionError}`
-        : `Settings of ${updated.fullName} saved.`,
+        : `Settings of ${repositoryLabel(updated)} saved.`,
     );
     void this.statusService.refresh();
   }

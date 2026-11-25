@@ -1,0 +1,304 @@
+@let d = draft();
+@let errors = d.errors();
+<div class="field">
+  <label [attr.for]="id('name')">Name</label>
+  <input
+    [id]="id('name')"
+    class="input"
+    name="webName"
+    [ngModel]="d.name()"
+    (ngModelChange)="d.name.set($event)"
+    [class.invalid]="!!errors.name"
+    [attr.aria-invalid]="!!errors.name"
+    placeholder="e.g. UniFi Network"
+    maxlength="100"
+    autocomplete="off"
+    required
+  />
+  @if (errors.name; as e) {
+    <span class="error">{{ e }}</span>
+  }
+</div>
+
+<div class="field">
+  <label [attr.for]="id('url')">URL</label>
+  <input
+    [id]="id('url')"
+    class="input mono"
+    type="url"
+    name="webUrl"
+    [ngModel]="d.url()"
+    (ngModelChange)="d.url.set($event)"
+    [class.invalid]="!!errors.url"
+    [attr.aria-invalid]="!!errors.url"
+    placeholder="https://www.truenas.com/docs/softwarereleases/"
+    autocomplete="off"
+    spellcheck="false"
+    required
+  />
+  @if (errors.url; as e) {
+    <span class="error">{{ e }}</span>
+  }
+  <span class="hint">A release notes page, an RSS or Atom feed, or a JSON API that lists versions.</span>
+</div>
+
+<div class="field">
+  <label [attr.for]="id('format')">Format</label>
+  <select [id]="id('format')" class="input" name="webFormat" [ngModel]="d.format()" (ngModelChange)="d.format.set($event)">
+    @for (f of formats; track f.value) {
+      <option [value]="f.value">{{ f.label }}</option>
+    }
+  </select>
+  <span class="hint">
+    Fill in the fields for an
+    <button type="button" class="link-btn" (click)="d.applyPreset('rss')">RSS feed</button> or an
+    <button type="button" class="link-btn" (click)="d.applyPreset('atom')">Atom feed</button>.
+    @if (d.isText()) {
+      Text reads the whole response with the version pattern – for pages without a usable structure.
+    }
+  </span>
+</div>
+
+@if (copy(); as c) {
+  <div class="pair">
+    <div class="field">
+      <label [attr.for]="id('items')">Items {{ c.kind }} <span class="optional">optional</span></label>
+      <input
+        [id]="id('items')"
+        class="input mono"
+        name="webItems"
+        [ngModel]="d.items()"
+        (ngModelChange)="d.items.set($event)"
+        [class.invalid]="!!errors.items"
+        [attr.aria-invalid]="!!errors.items"
+        [placeholder]="c.items"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      @if (errors.items; as e) {
+        <span class="error">{{ e }}</span>
+      }
+      <span class="hint">
+        @switch (d.format()) {
+          @case ('json') {
+            Path of the releases, e.g. <code>downloads[*]</code> for every element of an array. Leave empty when the
+            response holds one version.
+          }
+          @case ('xml') {
+            Element of each release: <code>item</code> in RSS, <code>entry</code> in Atom.
+          }
+          @default {
+            CSS selector of each release, e.g. <code>.release</code>. Leave empty when the page shows one version.
+          }
+        }
+      </span>
+    </div>
+
+    <div class="field">
+      <label [attr.for]="id('version')">Version {{ c.kind }}</label>
+      <input
+        [id]="id('version')"
+        class="input mono"
+        name="webVersion"
+        [ngModel]="d.version()"
+        (ngModelChange)="d.version.set($event)"
+        [class.invalid]="!!errors.version"
+        [attr.aria-invalid]="!!errors.version"
+        [placeholder]="c.version"
+        autocomplete="off"
+        spellcheck="false"
+        required
+      />
+      @if (errors.version; as e) {
+        <span class="error">{{ e }}</span>
+      }
+      <span class="hint">
+        @switch (d.format()) {
+          @case ('json') {
+            Path of the version inside each item, e.g. <code>version</code>.
+          }
+          @case ('xml') {
+            Element with the version inside each item, e.g. <code>title</code>.
+          }
+          @default {
+            Inside each item when set, e.g. <code>dt a.gdoc-props__title</code> on the TrueNAS release notes.
+          }
+        }
+      </span>
+    </div>
+
+    <div class="field">
+      <label [attr.for]="id('date')">Date {{ c.kind }} <span class="optional">optional</span></label>
+      <input
+        [id]="id('date')"
+        class="input mono"
+        name="webDate"
+        [ngModel]="d.date()"
+        (ngModelChange)="d.date.set($event)"
+        [class.invalid]="!!errors.date"
+        [attr.aria-invalid]="!!errors.date"
+        [placeholder]="c.date"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      @if (errors.date; as e) {
+        <span class="error">{{ e }}</span>
+      }
+      <span class="hint">
+        Several, separated by commas, are tried in order (<code>updated, published</code>). Without dates the
+        highest version is the newest.
+      </span>
+    </div>
+
+    <div class="field">
+      <label [attr.for]="id('link')">Link {{ c.kind }} <span class="optional">optional</span></label>
+      <input
+        [id]="id('link')"
+        class="input mono"
+        name="webLink"
+        [ngModel]="d.link()"
+        (ngModelChange)="d.link.set($event)"
+        [class.invalid]="!!errors.link"
+        [attr.aria-invalid]="!!errors.link"
+        [placeholder]="c.link"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      @if (errors.link; as e) {
+        <span class="error">{{ e }}</span>
+      }
+      <span class="hint">Link to the release notes of each version, e.g. <code>{{ c.link }}</code>.</span>
+    </div>
+  </div>
+}
+
+<div class="field">
+  <label [attr.for]="id('pattern')">
+    Version pattern
+    @if (!d.isText()) {
+      <span class="optional">optional</span>
+    }
+  </label>
+  <input
+    [id]="id('pattern')"
+    class="input mono"
+    name="webPattern"
+    [ngModel]="d.pattern()"
+    (ngModelChange)="d.pattern.set($event)"
+    [class.invalid]="!!errors.versionPattern"
+    [attr.aria-invalid]="!!errors.versionPattern"
+    [placeholder]="d.isText() ? 'UniFi Network Application (\\d+\\.\\d+\\.\\d+)' : 'v(\\d+\\.\\d+\\.\\d+) Release Notes'"
+    maxlength="500"
+    autocomplete="off"
+    spellcheck="false"
+    [required]="d.isText()"
+  />
+  @if (errors.versionPattern; as e) {
+    <span class="error">{{ e }}</span>
+  }
+  <span class="hint">
+    @if (d.isText()) {
+      A regular expression that finds every version in the response, e.g.
+      <code>UniFi Network Application (\d+\.\d+\.\d+)</code>.
+    } @else {
+      A regular expression that picks the version out of the text found, e.g.
+      <code>v(\d+\.\d+\.\d+) Release Notes</code> for the titles of an RSS feed.
+    }
+    The version is the group named <code>version</code>, else the first group, else the whole match; letter case is
+    ignored.
+  </span>
+</div>
+
+@if (userAgentOpen() || d.userAgent()) {
+  <div class="field">
+    <label [attr.for]="id('user-agent')">User-Agent <span class="optional">optional</span></label>
+    <input
+      [id]="id('user-agent')"
+      class="input mono"
+      name="webUserAgent"
+      [ngModel]="d.userAgent()"
+      (ngModelChange)="d.userAgent.set($event)"
+      [class.invalid]="!!errors.userAgent"
+      [attr.aria-invalid]="!!errors.userAgent"
+      [placeholder]="defaultUserAgent()"
+      maxlength="500"
+      autocomplete="off"
+      spellcheck="false"
+    />
+    @if (errors.userAgent; as e) {
+      <span class="error">{{ e }}</span>
+    }
+    <span class="hint">Some sites block automated requests – a browser's User-Agent may help. Leave empty for the default.</span>
+  </div>
+} @else {
+  <button type="button" class="link-btn more" (click)="userAgentOpen.set(true)">Blocked by the site? Set a User-Agent</button>
+}
+
+<div class="test-row">
+  <button type="button" class="btn btn-secondary btn-sm" (click)="test()" [disabled]="testing() || !d.url().trim()">
+    <app-icon name="refresh" [size]="14" [class.spin]="testing()" />
+    {{ testing() ? 'Testing…' : 'Test' }}
+  </button>
+  @if (d.preview(); as p) {
+    @if (p.newest) {
+      <span class="test-ok">
+        <app-icon name="check" [size]="14" />
+        Newest <strong class="mono">{{ p.newest }}</strong>
+      </span>
+    } @else {
+      <span class="test-error"><app-icon name="alert" [size]="14" /> No versions found</span>
+    }
+  }
+  @if (d.previewError(); as e) {
+    <span class="test-error"><app-icon name="alert" [size]="14" /> {{ e }}</span>
+  }
+</div>
+
+@if (d.preview(); as p) {
+  <section class="preview fade-in" aria-label="Test result">
+    <p class="preview-meta">
+      <span>Read {{ size(p.bytes) }} of <span class="mono">{{ p.contentType }}</span> – looks like {{ formatLabel(p.detectedFormat) }}.</span>
+      @if (p.detectedFormat !== d.format()) {
+        <button type="button" class="btn btn-secondary btn-sm" (click)="useFormat(p.detectedFormat)">
+          Use {{ formatLabel(p.detectedFormat) }}
+        </button>
+      }
+    </p>
+    @if (p.releases.length === 0) {
+      <p class="preview-empty">
+        Nothing matched – check the {{ d.isText() ? 'version pattern' : 'selectors and the version pattern' }}.
+      </p>
+    } @else {
+      <p class="preview-meta">
+        {{ p.releases.length }} {{ p.releases.length === 1 ? 'version' : 'versions' }} found, newest by
+        {{ p.order === 'date' ? 'date' : 'version number' }}:
+      </p>
+      <ul class="releases">
+        @for (r of p.releases; track $index) {
+          <li class="release" [class.newest]="$index === newestIndex()">
+            <span class="release-main">
+              <span class="mono version">{{ r.version }}</span>
+              @if ($index === newestIndex()) {
+                <span class="badge badge-success">Newest</span>
+              }
+              @if (r.isPrerelease) {
+                <span class="badge badge-accent">Pre-release</span>
+              }
+              @if (r.title && r.title !== r.version) {
+                <span class="release-title">{{ r.title }}</span>
+              }
+            </span>
+            @if (r.publishedAt) {
+              <time class="release-date" [attr.datetime]="r.publishedAt" [title]="r.publishedAt | date: 'medium'">{{ r.publishedAt | date: 'mediumDate' }}</time>
+            }
+            @if (r.url) {
+              <a class="icon-btn" [href]="r.url" target="_blank" rel="noopener noreferrer" [attr.aria-label]="'Open ' + r.version" title="Open the release">
+                <app-icon name="external" [size]="14" />
+              </a>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+}

@@ -20,6 +20,9 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     icon: null,
     groupId: null,
     iconUrls: [],
+    releaseSource: 'releases',
+    versionPattern: null,
+    webSource: null,
     includePrereleases: false,
     releaseSource: 'releases',
     versionPattern: null,
@@ -203,6 +206,81 @@ describe('RepositoriesPage', () => {
 
     expect(el.querySelector('.row')?.textContent).toContain('git.example.com/me/app');
     expect(el.querySelector('#new-provider')).toBeNull();
+  });
+
+  it('shows a web source by its name and the host of its page', async () => {
+    const web = repo(5, 'web/UniFi Network', {
+      provider: 'web',
+      host: 'ui.com',
+      fullName: 'ui.com/web/unifi network',
+      url: 'https://ui.com/download/releases/network-server',
+      avatarUrl: null,
+      lastSeenTag: '9.5.21',
+      webSource: {
+        url: 'https://ui.com/download/releases/network-server',
+        format: 'text',
+        items: null,
+        version: null,
+        date: null,
+        link: null,
+        userAgent: null,
+      },
+      versionPattern: 'UniFi Network Application (\\d+\\.\\d+\\.\\d+)',
+    });
+    const { el, fixture } = await render([web]);
+    const row = el.querySelector('.row')!;
+    const name = row.querySelector<HTMLAnchorElement>('a.name')!;
+    expect(name.textContent?.trim()).toBe('UniFi Network');
+    expect(name.getAttribute('href')).toBe('https://ui.com/download/releases/network-server');
+    expect(row.textContent).not.toContain('/web/');
+    expect(row.querySelector('.web-badge')?.textContent).toContain('ui.com');
+    expect(row.querySelector('.meta a.mono')?.getAttribute('href')).toBe('https://ui.com/download/releases/network-server');
+    expect(row.querySelector('button[aria-label="Settings of UniFi Network"]')).not.toBeNull();
+
+    // The search finds it by its display name.
+    const search = el.querySelector<HTMLInputElement>('#search')!;
+    search.value = 'unifi net';
+    search.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelectorAll('.row').length).toBe(1);
+  });
+
+  it('adds a web page from its own dialog', async () => {
+    const { el, fixture } = await render([repo(1, 'zeta/zulu')]);
+    expect(el.querySelector('app-web-source-dialog form')).toBeNull();
+    [...el.querySelectorAll<HTMLButtonElement>('.add-card button')].find((b) => b.textContent?.includes('Web page'))!.click();
+    await settle(fixture);
+    const dialog = el.querySelector('app-web-source-dialog')!;
+    expect(dialog.querySelector('h2')?.textContent).toContain('Watch a web page');
+
+    const type = async (id: string, value: string) => {
+      const input = dialog.querySelector<HTMLInputElement>(`#${id}`)!;
+      input.value = value;
+      input.dispatchEvent(new Event('input'));
+      await settle(fixture);
+    };
+    await type('new-web-name', 'TrueNAS');
+    await type('new-web-url', 'https://www.truenas.com/docs/softwarereleases/');
+    await type('new-web-version', 'dt a.gdoc-props__title');
+    dialog.querySelector('form')!.dispatchEvent(new Event('submit'));
+    await settle(fixture);
+
+    const request = http.expectOne({ method: 'POST', url: '/api/repositories' });
+    expect(request.request.body.name).toBe('TrueNAS');
+    request.flush(
+      repo(2, 'web/TrueNAS', {
+        provider: 'web',
+        host: 'www.truenas.com',
+        fullName: 'www.truenas.com/web/truenas',
+        avatarUrl: null,
+        webSource: { ...request.request.body.webSource },
+      }),
+    );
+    await settle(fixture);
+    http.match('/api/status').forEach((r) => r.flush({}));
+
+    expect(el.querySelector('app-web-source-dialog form')).toBeNull();
+    expect([...el.querySelectorAll('.row a.name')].map((a) => a.textContent?.trim())).toEqual(['TrueNAS', 'zeta/zulu']);
   });
 
   it('switches to the grid layout', async () => {

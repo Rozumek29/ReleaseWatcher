@@ -29,6 +29,7 @@ import { targetLabel } from './target';
 import { Icon } from '../../shared/icon';
 import { Switch } from '../../shared/switch';
 import { BackdropClose } from '../../shared/backdrop-close';
+import { repositoryLabel } from '../../shared/repository-host';
 import { UnsavedChanges, sameValues } from '../../shared/unsaved-changes';
 
 /** Editable state of the application form. */
@@ -113,6 +114,7 @@ export class ContainerSettingsDialog {
   protected readonly label = targetLabel;
   protected readonly apps = signal<ContainerApp[]>([]);
   protected readonly repositories = signal<WatchedRepository[]>([]);
+  protected readonly repoLabel = repositoryLabel;
   protected readonly appForm = signal<AppForm | null>(null);
   /** The application form as it was opened, to tell whether it has unsaved changes. */
   private readonly appFormInitial = signal<AppForm | null>(null);

@@ -1,0 +1,40 @@
+<dialog #dialog class="dialog" (close)="close()" appBackdropClose [keepOpen]="changed()" (backdropClose)="close()" aria-labelledby="web-source-title">
+  @if (open()) {
+    <form class="dialog-card" (ngSubmit)="save()">
+      <header class="dialog-head">
+        <app-icon name="globe" [size]="22" />
+        <div class="head-text">
+          <h2 id="web-source-title">Watch a web page</h2>
+          <p>Versions published on a page, in a feed or by a JSON API – for software without releases on GitHub, Gitea or GitLab.</p>
+        </div>
+        <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
+          <app-icon name="close" />
+        </button>
+      </header>
+
+      <div class="dialog-body">
+        <app-web-source-form [draft]="draft()" [includePrereleases]="includePrereleases()" idPrefix="new-web" />
+
+        <app-switch
+          label="Include pre-releases"
+          [checked]="includePrereleases()"
+          (toggled)="includePrereleases.set(!includePrereleases())"
+        />
+
+        @if (saveError(); as e) {
+          <div class="save-error"><app-icon name="alert" [size]="14" /> {{ e }}</div>
+        }
+      </div>
+
+      <footer class="dialog-foot">
+        @if (changed()) {
+          <app-unsaved-changes />
+        }
+        <button type="button" class="btn btn-ghost" (click)="close()">Cancel</button>
+        <button type="submit" class="btn" [disabled]="saving()">
+          {{ saving() ? 'Adding…' : 'Watch' }}
+        </button>
+      </footer>
+    </form>
+  }
+</dialog>

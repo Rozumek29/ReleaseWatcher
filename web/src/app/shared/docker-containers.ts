@@ -5,6 +5,7 @@ import { DockerContainer, DockerContainerRequest, WatchedRepository } from '../c
 import { ToastService } from '../core/toast.service';
 import { Avatar } from './avatar';
 import { Icon } from './icon';
+import { repositoryLabel } from './repository-host';
 
 interface ComposeGroup {
   /** Compose project; null = containers started on their own. */
@@ -43,6 +44,7 @@ export class DockerContainers {
   /** Container whose repository link is being edited. */
   protected readonly linking = signal<number | null>(null);
   protected readonly repositories = signal<WatchedRepository[] | null>(null);
+  protected readonly label = repositoryLabel;
 
   protected readonly ignoredCount = computed(() => this.containers().filter((c) => c.ignored).length);
 
@@ -80,7 +82,7 @@ export class DockerContainers {
     if (this.repositories() === null) {
       try {
         const repositories = await firstValueFrom(this.api.getRepositories());
-        this.repositories.set([...repositories].sort((a, b) => a.fullName.localeCompare(b.fullName)));
+        this.repositories.set([...repositories].sort((a, b) => repositoryLabel(a).localeCompare(repositoryLabel(b))));
       } catch (error) {
         this.toast.error(error);
         this.linking.set(null);

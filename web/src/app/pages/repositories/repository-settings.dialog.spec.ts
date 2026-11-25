@@ -18,6 +18,9 @@ const repo: WatchedRepository = {
   icon: null,
   groupId: null,
   iconUrls: [],
+  releaseSource: 'releases',
+  versionPattern: null,
+  webSource: null,
   includePrereleases: false,
   releaseSource: 'releases',
   versionPattern: null,
@@ -478,5 +481,96 @@ describe('RepositorySettingsDialog', () => {
     const request = http.expectOne('/api/repositories/7');
     expect(request.request.body.installedVersionUrl).toBe('https://vault.lan/api/version');
     expect('installedVersion' in request.request.body).toBe(false);
+  });
+
+  describe('of a web source', () => {
+    const web: WatchedRepository = {
+      ...repo,
+      provider: 'web',
+      host: 'www.truenas.com',
+      owner: 'web',
+      name: 'TrueNAS',
+      fullName: 'www.truenas.com/web/truenas',
+      url: 'https://www.truenas.com/docs/softwarereleases/',
+      avatarUrl: null,
+      versionPattern: null,
+      webSource: {
+        url: 'https://www.truenas.com/docs/softwarereleases/',
+        format: 'html',
+        items: null,
+        version: 'dt a.gdoc-props__title',
+        date: null,
+        link: null,
+        userAgent: null,
+      },
+    };
+
+    async function open(repository: WatchedRepository) {
+      await TestBed.configureTestingModule({
+        imports: [RepositorySettingsDialog],
+        providers: [provideHttpClient(), provideHttpClientTesting()],
+      }).compileComponents();
+      const http = TestBed.inject(HttpTestingController);
+      const fixture = TestBed.createComponent(RepositorySettingsDialog);
+      fixture.componentRef.setInput('repository', repository);
+      await settle(fixture);
+      return { http, fixture, el: fixture.nativeElement as HTMLElement };
+    }
+
+    it('edits the page and pattern and leaves out settings of git repositories', async () => {
+      const { http, fixture, el } = await open(web);
+      expect(el.querySelector('.dialog-head h2')?.textContent).toContain('Web page settings');
+      expect(el.querySelector('.dialog-head')?.textContent).toContain('www.truenas.com');
+      expect(el.querySelector('.dialog-head')?.textContent).not.toContain('/web/');
+      expect(el.querySelector('#repo-token')).toBeNull();
+      expect(el.querySelector('#osv-ecosystem')).toBeNull();
+      expect(el.querySelector('#repo-release-source')).toBeNull();
+      expect(el.querySelector('#repo-version-pattern')).toBeNull();
+      expect(el.querySelector<HTMLInputElement>('#repo-web-name')!.value).toBe('TrueNAS');
+      expect(el.querySelector<HTMLInputElement>('#repo-web-version')!.value).toBe('dt a.gdoc-props__title');
+      expect(el.querySelector('app-unsaved-changes')).toBeNull();
+
+      const pattern = el.querySelector<HTMLInputElement>('#repo-web-pattern')!;
+      pattern.value = '(\\d+\\.\\d+(?:\\.\\d+)?)';
+      pattern.dispatchEvent(new Event('input'));
+      await settle(fixture);
+      expect(el.querySelector('.dialog-foot app-unsaved-changes')).not.toBeNull();
+
+      el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+      const request = http.expectOne('/api/repositories/7');
+      expect(request.request.body.name).toBe('TrueNAS');
+      expect(request.request.body.webSource).toEqual(web.webSource);
+      expect(request.request.body.versionPattern).toBe('(\\d+\\.\\d+(?:\\.\\d+)?)');
+      expect('accessToken' in request.request.body).toBe(false);
+      expect('releaseSource' in request.request.body).toBe(false);
+    });
+
+    it('shows validation errors at the web page fields', async () => {
+      const { http, fixture, el } = await open(web);
+      el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+      http.expectOne('/api/repositories/7').flush(
+        { status: 409, title: 'Conflict', errors: { name: ['A web page named TrueNAS is already watched on www.truenas.com.'] } },
+        { status: 409, statusText: 'Conflict' },
+      );
+      await settle(fixture);
+      expect(el.querySelector('#repo-web-name')!.parentElement!.querySelector('.error')?.textContent).toContain('already watched');
+      expect(el.querySelector('.save-error')).toBeNull();
+
+      el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+      http.expectOne('/api/repositories/7').flush(
+        { status: 409, title: 'Conflict', detail: 'A web page named TrueNAS is already watched.' },
+        { status: 409, statusText: 'Conflict' },
+      );
+      await settle(fixture);
+      expect(el.querySelector('.save-error')?.textContent).toContain('already watched');
+    });
+
+    it('tests the page with the pre-release setting of the repository', async () => {
+      const { http, fixture, el } = await open({ ...web, includePrereleases: true });
+      [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.trim() === 'Test')!.click();
+      await settle(fixture);
+      const request = http.expectOne('/api/web-sources/preview');
+      expect(request.request.body).toEqual({ webSource: web.webSource, versionPattern: null, includePrereleases: true });
+    });
   });
 });

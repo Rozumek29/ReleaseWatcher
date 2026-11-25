@@ -1,5 +1,25 @@
-/** Where a repository lives: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
-export type RepositoryProvider = 'github' | 'gitea' | 'gitlab';
+/**
+ * Where a repository lives: GitHub, a Gitea/Forgejo instance (Codeberg …), a GitLab instance – or `web`: versions
+ * read from a web page, feed or JSON API (`webSource`).
+ */
+export type RepositoryProvider = 'github' | 'gitea' | 'gitlab' | 'web';
+
+/** How the response of a web source is read. */
+export type WebSourceFormat = 'text' | 'json' | 'html' | 'xml';
+
+/** A web page, feed or JSON API versions are read from (provider `web`). */
+export interface WebSource {
+  url: string;
+  format: WebSourceFormat;
+  /** Selector (HTML, XML) or path (JSON) of each release; null = the whole document is one item. */
+  items: string | null;
+  /** Selector or path of the version inside an item; null for the text format (the pattern finds it). */
+  version: string | null;
+  date: string | null;
+  link: string | null;
+  /** User-Agent sent to the site; null = ReleaseWatcher's own. */
+  userAgent: string | null;
+}
 
 /** What of a repository is watched: its releases, or its tags (projects that tag versions without releases). */
 export type ReleaseSourceKind = 'releases' | 'tags';
@@ -7,10 +27,14 @@ export type ReleaseSourceKind = 'releases' | 'tags';
 export interface WatchedRepository {
   id: number;
   provider: RepositoryProvider;
-  /** Host of a Gitea/Forgejo or GitLab instance; null on GitHub. */
+  /** Host of a Gitea/Forgejo or GitLab instance, or of a web source's URL; null on GitHub. */
   host: string | null;
+  /** `web` for a web source. */
   owner: string;
+  /** Repository name, or the display name of a web source (e.g. "UniFi Network"). */
   name: string;
+  /** The page versions are read from; non-null only for provider `web`. */
+  webSource: WebSource | null;
   /** `owner/name` on GitHub, `host/owner/name` elsewhere. */
   fullName: string;
   url: string;
@@ -23,7 +47,7 @@ export interface WatchedRepository {
   /** Custom group on the Repositories page (`RepositoryGroup`); null = none. */
   groupId: number | null;
   includePrereleases: boolean;
-  /** `releases` (newest by date) or `tags` (newest by version). */
+  /** `releases` (newest by date) or `tags` (newest by version); not used by web sources. */
   releaseSource: ReleaseSourceKind;
   /** Regular expression tags must match; with tags its group picks the version. Null = none. */
   versionPattern: string | null;
@@ -127,11 +151,13 @@ export interface SecurityAdvisory {
   affectedVersions: string[];
 }
 
-export interface AddRepositoryRequest {
+export type AddRepositoryRequest = AddGitRepositoryRequest | AddWebSourceRequest;
+
+export interface AddGitRepositoryRequest {
   /** `owner/repo` (GitHub) or the HTTPS URL of a GitHub, Gitea/Forgejo or GitLab repository. */
   repository: string;
   /** Provider of a host that is not well known; omitted = detected. */
-  provider?: RepositoryProvider | null;
+  provider?: Exclude<RepositoryProvider, 'github' | 'web'> | null;
   includePrereleases: boolean;
   /** Releases (default) or tags. */
   releaseSource?: ReleaseSourceKind | null;
@@ -140,11 +166,51 @@ export interface AddRepositoryRequest {
   accessToken?: string | null;
 }
 
+/** Watches the versions published on a web page, feed or JSON API. */
+export interface AddWebSourceRequest {
+  /** Display name, 1–100 characters (unique per host). */
+  name: string;
+  webSource: WebSource;
+  versionPattern?: string | null;
+  includePrereleases?: boolean;
+}
+
+/** `POST /api/web-sources/preview`: reads a web source without saving it. */
+export interface WebSourcePreviewRequest {
+  webSource: WebSource;
+  versionPattern?: string | null;
+  includePrereleases?: boolean;
+}
+
+export interface WebSourcePreviewRelease {
+  version: string;
+  title: string | null;
+  publishedAt: string | null;
+  url: string | null;
+  isPrerelease: boolean;
+}
+
+export interface WebSourcePreview {
+  contentType: string;
+  /** Format the response looks like (may differ from the chosen one). */
+  detectedFormat: WebSourceFormat;
+  bytes: number;
+  /** How the newest version is chosen: by date, or by version number when there are no dates. */
+  order: 'date' | 'version';
+  /** Found versions in document order (at most 50). */
+  releases: WebSourcePreviewRelease[];
+  newest: string | null;
+}
+
 export interface UpdateRepositoryRequest {
   includePrereleases: boolean;
   isEnabled: boolean;
   /** Omit to keep, null for releases. A change makes the next check set a new baseline without notifying. */
   releaseSource?: ReleaseSourceKind | null;
+  /** Display name of a web source; omit to keep. */
+  name?: string;
+  /** Page of a web source; omit to keep. */
+  webSource?: WebSource;
   /** Omit to keep, null to remove. */
   versionPattern?: string | null;
   /** Omit to keep, null to clear. */

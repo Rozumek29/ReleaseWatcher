@@ -76,7 +76,7 @@ export function groupRepositories(
     if (!group) {
       group = {
         key,
-        label: customGroup ? customGroup.name : `${repository.host ? `${repository.host}/` : ''}${repository.owner.trim()}`,
+        label: customGroup ? customGroup.name : ownerLabel(repository),
         avatarUrl: customGroup ? null : repository.avatarUrl,
         iconUrls: customGroup?.iconUrls ?? [],
         customGroup,
@@ -101,4 +101,12 @@ export function groupKeys(
   customGroups: readonly RepositoryGroup[] = [],
 ): string[] {
   return groupRepositories(all, all, grouping, customGroups).flatMap((entry) => (entry.kind === 'group' ? [entry.key] : []));
+}
+
+/** Owner as shown on a group card: with the host outside GitHub; web sources are grouped by the host of their page. */
+function ownerLabel(repository: WatchedRepository): string {
+  if (repository.provider === 'web') {
+    return repository.host ?? repository.owner.trim();
+  }
+  return `${repository.host ? `${repository.host}/` : ''}${repository.owner.trim()}`;
 }
