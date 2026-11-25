@@ -79,6 +79,22 @@ describe('ReleaseChecker', () => {
       assert.equal(store.get(repo.id)?.lastSeenTag, '25.10.10');
     });
 
+    it('announces the stable version after its pre-release when the pattern cuts the suffix off', async () => {
+      installed = new Error('no version');
+      const repo = store.add('acme', 'widget', true);
+      repo.releaseSource = 'tags';
+      repo.versionPattern = String.raw`^v(\d+\.\d+\.\d+)`;
+      store.save(repo);
+      source.releases = ['v1.0.0'].map(tag);
+      await checker.check(repo);
+      source.releases = ['v2.0.0-rc1', 'v1.0.0'].map(tag);
+      await checker.check(store.get(repo.id)!);
+      source.releases = ['v2.0.0', 'v2.0.0-rc1', 'v1.0.0'].map(tag);
+      await checker.check(store.get(repo.id)!);
+      assert.deepEqual(notifier.sent.map((n) => n.release.tag), ['2.0.0-rc1', '2.0.0']);
+      assert.equal(store.get(repo.id)?.lastSeenTag, '2.0.0');
+    });
+
     it('treats Checkmk patch levels as newer versions', async () => {
       installed = 'v2.5.0p20';
       const repo = store.add('Checkmk', 'checkmk', false);

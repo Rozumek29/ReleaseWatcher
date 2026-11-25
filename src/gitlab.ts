@@ -1,10 +1,9 @@
-import { repositoryUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
+import { releasePageUrl, repositoryUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
 import {
   ensureJson,
   instanceRequest,
   isJson,
   releaseOrder,
-  tagPath,
   TAGS_PER_PAGE,
   type InstanceOptions,
   type ReleaseFetchResult,
@@ -59,7 +58,11 @@ export class GitLabReleaseSource implements ReleaseSource {
     const path = tags
       ? `/repository/tags?per_page=${TAGS_PER_PAGE}&order_by=version`
       : `/releases?per_page=${this.options.releasesPerPage}`;
-    const response = await this.request(repo, path, token, etag);
+    let response = await this.request(repo, path, token, etag);
+    if (tags && response.status === 400) {
+      // `order_by=version` needs GitLab 15.4+; older instances get the default order (newest commit first).
+      response = await this.request(repo, `/repository/tags?per_page=${TAGS_PER_PAGE}`, token, etag);
+    }
     const order = releaseOrder(repo);
     if (response.status === 304) {
       return { releases: [], etag, notModified: true, order };
@@ -72,7 +75,7 @@ export class GitLabReleaseSource implements ReleaseSource {
         return {
           tag: d.name,
           name: null,
-          htmlUrl: `${repositoryUrl(repo)}/-/tags/${tagPath(d.name)}`,
+          htmlUrl: releasePageUrl(repo, d.name),
           body: d.message?.trim() || null,
           isPrerelease: isPrereleaseTag(d.name),
           publishedAt: date ? new Date(date).toISOString() : '',

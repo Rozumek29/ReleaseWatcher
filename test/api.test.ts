@@ -522,19 +522,21 @@ describe('HTTP API', () => {
     assert.equal(badPut.statusCode, 400);
     assert.ok(badPut.json().errors.versionPattern);
 
-    // null = releases without a pattern; the baseline is reset so the next check sets it silently.
+    // null = releases without a pattern; the baseline is reset and set again right away, without notifying.
+    source.releases = [release('v2', 2), release('v1', 1)];
+    const sent = notifier.sent.length;
     const reset = await inject({
       method: 'PUT',
       url: `/api/repositories/${repo.id}`,
       payload: { includePrereleases: false, isEnabled: true, releaseSource: null, versionPattern: null },
     });
+    const body = reset.json();
     assert.deepEqual(
-      [reset.json().releaseSource, reset.json().versionPattern, reset.json().lastSeenTag, reset.json().lastCheckedAt],
-      ['releases', null, null, null],
+      [body.releaseSource, body.versionPattern, body.lastSeenTag, body.lastSeenUrl],
+      ['releases', null, 'v2', 'https://github.com/acme/widget/releases/tag/v2'],
     );
-    source.releases = [release('v2', 2), release('v1', 1)];
-    const check = await inject({ method: 'POST', url: `/api/repositories/${repo.id}/check` });
-    assert.equal(check.json().notifiedCount, 0);
+    assert.ok(body.lastCheckedAt);
+    assert.equal(notifier.sent.length, sent);
   });
 
   it('lists notifiers and sends a test notification', async () => {

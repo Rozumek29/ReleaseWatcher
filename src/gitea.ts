@@ -1,10 +1,9 @@
-import { repositoryUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
+import { releasePageUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
 import {
   ensureJson,
   instanceRequest,
   isJson,
   releaseOrder,
-  tagPath,
   TAGS_PER_PAGE,
   type InstanceOptions,
   type ReleaseFetchResult,
@@ -68,7 +67,7 @@ export class GiteaReleaseSource implements ReleaseSource {
         (d): ReleaseInfo => ({
           tag: d.name,
           name: null,
-          htmlUrl: `${repositoryUrl(repo)}/src/tag/${tagPath(d.name)}`,
+          htmlUrl: releasePageUrl(repo, d.name),
           body: d.message?.trim() || null,
           isPrerelease: isPrereleaseTag(d.name),
           publishedAt: d.commit?.created ? new Date(d.commit.created).toISOString() : '',

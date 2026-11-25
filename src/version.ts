@@ -29,6 +29,13 @@ export function parseVersion(input: string | null | undefined): ParsedVersion | 
   return { numbers, prerelease: (match[3] ?? '').toLowerCase() };
 }
 
+/**
+ * True when a tag looks like a version: optional letters as a prefix (`v`, `TS-`, `release-`), then numbers with at least
+ * one dot and an optional suffix (`v2.5.0p21+security`, `TrueNAS-9.10.2-U5`). Not `build-20231010`, `2024-01-15`,
+ * `docs-2026` – they would parse as huge versions.
+ */
+export const looksLikeVersionTag = (tag: string): boolean => /^[a-z_-]*\d+(?:\.\d+)+[\w.+-]*$/i.test(tag);
+
 /** True when a tag names a pre-release ("v2.0.0-rc.1", "1.4-beta"), for providers without a pre-release flag. */
 export const isPrereleaseTag = (tag: string): boolean => (parseVersion(tag)?.prerelease ?? '') !== '';
 

@@ -1,9 +1,8 @@
 import { normalizeSeverity, type SecurityAdvisory } from './advisories.ts';
-import { repositoryUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
+import { releasePageUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
 import {
   ReleaseSourceError,
   releaseOrder,
-  tagPath,
   TAGS_PER_PAGE,
   truncate,
   type AdvisoryFetchResult,
@@ -104,7 +103,7 @@ export class GitHubReleaseSource implements ReleaseSource {
         (d): ReleaseInfo => ({
           tag: d.name,
           name: null,
-          htmlUrl: `${repositoryUrl(repo)}/releases/tag/${tagPath(d.name)}`,
+          htmlUrl: releasePageUrl(repo, d.name),
           body: null,
           isPrerelease: isPrereleaseTag(d.name),
           publishedAt: '',

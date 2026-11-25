@@ -10,6 +10,7 @@ import {
   type ReleaseFetchResult,
   type ReleaseSource,
 } from '../src/release-source.ts';
+import { isPrereleaseTag } from '../src/version.ts';
 import { FakeSource, release } from './helpers.ts';
 
 interface Call {
@@ -28,8 +29,8 @@ function fakeFetch(routes: Record<string, () => Response>): { fetch: typeof fetc
   return { fetch: fetcher, calls };
 }
 
-const json = (value: unknown, headers: Record<string, string> = {}) =>
-  new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json;charset=utf-8', ...headers } });
+const json = (value: unknown, headers: Record<string, string> = {}, status = 200) =>
+  new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json;charset=utf-8', ...headers } });
 
 const codeberg: RepositoryRef = { provider: 'gitea', host: 'codeberg.org', owner: 'forgejo', name: 'forgejo' };
 const gitlab: RepositoryRef = { provider: 'gitlab', host: 'gitlab.com', owner: 'group/sub', name: 'project' };
@@ -254,5 +255,49 @@ describe('tags', () => {
     const result = await source.getRecentReleases({ ...codeberg, versionPattern: '^v' }, null);
     assert.deepEqual(result.releases.map((r) => r.tag), ['v1.0.0']);
     assert.equal(result.order, 'date');
+  });
+});
+
+describe('tags review fixes', () => {
+  const ref = { provider: 'github', host: null, owner: 'acme', name: 'widget' } as const;
+  const fetched = (tags: string[]): ReleaseFetchResult => ({
+    releases: tags.map((tag) => ({ ...release(tag, 1, isPrereleaseTag(tag)), publishedAt: '' })),
+    etag: null,
+    notModified: false,
+    order: 'version',
+  });
+
+  it('keeps the pre-release suffix of a tag the pattern cut off, so the stable version is newer', async () => {
+    const result = await applyVersionPattern(fetched(['v2.0.0-rc1', 'v2.0.0']), {
+      ...ref,
+      releaseSource: 'tags',
+      versionPattern: String.raw`^v(\d+\.\d+\.\d+)`,
+    });
+    assert.deepEqual(
+      result.releases.map((r) => [r.tag, r.isPrerelease]),
+      [['2.0.0-rc1', true], ['2.0.0', false]],
+    );
+  });
+
+  it('keeps only tags that look like versions when there is no pattern', async () => {
+    const result = await applyVersionPattern(
+      fetched(['build-20231010', '2024-01-15', 'docs-2026', 'nightly', 'v1.2.3', 'TS-25.10.8', 'v2.5.0p21+security', 'TrueNAS-9.10.2-U5']),
+      { ...ref, releaseSource: 'tags', versionPattern: null },
+    );
+    assert.deepEqual(result.releases.map((r) => r.tag), ['v1.2.3', 'TS-25.10.8', 'v2.5.0p21+security', 'TrueNAS-9.10.2-U5']);
+  });
+
+  it('retries GitLab tags without order_by on an older instance', async () => {
+    const { fetch, calls } = fakeFetch({
+      'https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/repository/tags?per_page=100&order_by=version': () =>
+        json({ message: 'order_by does not have a valid value' }, {}, 400),
+      'https://gitlab.com/api/v4/projects/group%2Fsub%2Fproject/repository/tags?per_page=100': () => json([{ name: 'v1.0.0' }]),
+    });
+    const result = await new GitLabReleaseSource({ releasesPerPage: 10, fetch }).getRecentReleases(
+      { ...gitlab, releaseSource: 'tags' },
+      null,
+    );
+    assert.deepEqual(result.releases.map((r) => r.tag), ['v1.0.0']);
+    assert.equal(calls.length, 2);
   });
 });

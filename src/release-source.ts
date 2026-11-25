@@ -8,7 +8,7 @@ import {
   type WatchedRepository,
 } from './domain.ts';
 import { matchPattern } from './pattern.ts';
-import { isPrereleaseTag } from './version.ts';
+import { isPrereleaseTag, looksLikeVersionTag, parseVersion } from './version.ts';
 
 /** A repository and what of it is read: releases (default) or tags, filtered by an optional version pattern. */
 export type ReleaseQuery = RepositoryRef & Partial<Pick<WatchedRepository, 'releaseSource' | 'versionPattern'>>;
@@ -28,8 +28,8 @@ export const TAGS_PER_PAGE = 100;
 export const releaseOrder = (query: Pick<ReleaseQuery, 'releaseSource'>): ReleaseFetchResult['order'] =>
   query.releaseSource === 'tags' ? 'version' : 'date';
 
-/** A tag name as a URL path (slashes kept, everything else encoded). */
-export const tagPath = (tag: string): string => encodeURIComponent(tag).replaceAll('%2F', '/');
+/** A tag name as a URL path (moved to `domain.ts`; kept here for imports of it). */
+export { tagPath } from './domain.ts';
 
 export interface AdvisoryFetchResult {
   advisories: SecurityAdvisory[];
@@ -101,12 +101,17 @@ export class ProviderReleaseSource implements ReleaseSource {
 
 /**
  * Skips releases/tags whose tag does not match the query's version pattern. With tags, the version the pattern picks
- * becomes the tag shown and compared (the URL keeps the real tag); a pre-release version marks it as a pre-release.
- * Throws `PatternError` when the pattern is invalid or too slow.
+ * becomes the tag shown and compared (the URL keeps the real tag); without a pattern only tags that look like a version
+ * are kept ({@link looksLikeVersionTag} – not `build-20231010`). Throws `PatternError` when the pattern is invalid or
+ * too slow.
  */
 export async function applyVersionPattern(result: ReleaseFetchResult, query: ReleaseQuery): Promise<ReleaseFetchResult> {
-  if (!query.versionPattern || result.notModified) {
+  const tags = query.releaseSource === 'tags';
+  if (result.notModified || (!query.versionPattern && !tags)) {
     return result;
+  }
+  if (!query.versionPattern) {
+    return { ...result, releases: result.releases.filter((r) => looksLikeVersionTag(r.tag)) };
   }
   const matches = await matchPattern(query.versionPattern, result.releases.map((r) => r.tag));
   const releases = result.releases.flatMap((release, i): ReleaseInfo[] => {
@@ -114,12 +119,22 @@ export async function applyVersionPattern(result: ReleaseFetchResult, query: Rel
     if (version === undefined) {
       return [];
     }
-    if (query.releaseSource !== 'tags') {
-      return [release];
-    }
-    return [{ ...release, tag: version, isPrerelease: release.isPrerelease || isPrereleaseTag(version) }];
+    return tags ? [{ ...release, ...pickedVersion(release, version) }] : [release];
   });
   return { ...result, releases };
+}
+
+/**
+ * The version a pattern picked from a tag. When the tag is a pre-release but the picked text is not (`^v(\d+\.\d+\.\d+)`
+ * on `v2.0.0-rc1`), the tag's pre-release suffix is kept (`2.0.0-rc1`) – otherwise the stable `v2.0.0` would compare
+ * equal to it and never be announced.
+ */
+function pickedVersion(release: ReleaseInfo, version: string): Pick<ReleaseInfo, 'tag' | 'isPrerelease'> {
+  if (isPrereleaseTag(version)) {
+    return { tag: version, isPrerelease: true };
+  }
+  const suffix = parseVersion(release.tag)?.prerelease ?? '';
+  return suffix ? { tag: `${version}-${suffix}`, isPrerelease: true } : { tag: version, isPrerelease: release.isPrerelease };
 }
 
 /** Shared request options of the instance clients. */

@@ -10,6 +10,8 @@ import {
   repositoryUrl,
   selectNewReleases,
   selectNewVersions,
+  releasePageUrl,
+  lastSeenUrl,
   setReleaseSource,
   validateIcon,
 } from '../src/domain.ts';
@@ -217,5 +219,26 @@ describe('setReleaseSource', () => {
       [repo.releaseSource, repo.versionPattern, repo.lastSeenTag, repo.lastSeenPublishedAt, repo.releasesEtag, repo.lastCheckedAt],
       ['tags', '^v(.+)$', null, null, null, null],
     );
+  });
+});
+
+describe('releasePageUrl / lastSeenUrl', () => {
+  const ref = (provider: 'github' | 'gitea' | 'gitlab', host: string | null) => ({ provider, host, owner: 'o', name: 'r' });
+
+  it('links the page of a release or tag per provider, encoding the tag', () => {
+    assert.equal(releasePageUrl(ref('github', null), 'v1.0#x'), 'https://github.com/o/r/releases/tag/v1.0%23x');
+    assert.equal(releasePageUrl({ ...ref('github', null), releaseSource: 'tags' }, 'a/b'), 'https://github.com/o/r/releases/tag/a/b');
+    assert.equal(releasePageUrl(ref('gitea', 'codeberg.org'), 'v1'), 'https://codeberg.org/o/r/releases/tag/v1');
+    assert.equal(releasePageUrl({ ...ref('gitea', 'codeberg.org'), releaseSource: 'tags' }, 'v1'), 'https://codeberg.org/o/r/src/tag/v1');
+    assert.equal(releasePageUrl(ref('gitlab', 'gitlab.com'), 'v1'), 'https://gitlab.com/o/r/-/releases/v1');
+    assert.equal(releasePageUrl({ ...ref('gitlab', 'gitlab.com'), releaseSource: 'tags' }, 'v1'), 'https://gitlab.com/o/r/-/tags/v1');
+  });
+
+  it('has no link without a release or for a version picked by a pattern from tags', () => {
+    const repo = { ...ref('gitlab', 'gitlab.com'), releaseSource: 'tags' as const, versionPattern: null, lastSeenTag: 'v1' };
+    assert.equal(lastSeenUrl(repo), 'https://gitlab.com/o/r/-/tags/v1');
+    assert.equal(lastSeenUrl({ ...repo, lastSeenTag: null }), null);
+    assert.equal(lastSeenUrl({ ...repo, versionPattern: '^v(.+)$' }), null);
+    assert.equal(lastSeenUrl({ ...repo, releaseSource: 'releases', versionPattern: '^v' }), 'https://gitlab.com/o/r/-/releases/v1');
   });
 });

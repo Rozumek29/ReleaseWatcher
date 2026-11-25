@@ -208,6 +208,38 @@ export const PROVIDER_LABELS: Readonly<Record<RepositoryProvider, string>> = {
 export const repositoryUrl = (repo: { host?: string | null; owner: string; name: string }): string =>
   `https://${repo.host ?? 'github.com'}/${repo.owner}/${repo.name}`;
 
+/** A tag name as a URL path (slashes kept, everything else encoded). */
+export const tagPath = (tag: string): string => encodeURIComponent(tag).replaceAll('%2F', '/');
+
+/**
+ * Web page of a release or tag: GitHub `…/releases/tag/<tag>` (also for tags), Gitea/Forgejo `…/releases/tag/<tag>` or
+ * `…/src/tag/<tag>`, GitLab `…/-/releases/<tag>` or `…/-/tags/<tag>`.
+ */
+export function releasePageUrl(
+  repo: Pick<RepositoryRef, 'provider' | 'host' | 'owner' | 'name'> & { releaseSource?: ReleaseSourceKind },
+  tag: string,
+): string {
+  const tags = repo.releaseSource === 'tags';
+  const base = repositoryUrl(repo);
+  switch (repo.provider) {
+    case 'github':
+      return `${base}/releases/tag/${tagPath(tag)}`;
+    case 'gitea':
+      return `${base}/${tags ? 'src/tag' : 'releases/tag'}/${tagPath(tag)}`;
+    case 'gitlab':
+      return `${base}/-/${tags ? 'tags' : 'releases'}/${tagPath(tag)}`;
+  }
+}
+
+/**
+ * Page of the newest release already processed; null when there is none or the tag is a version picked by a pattern
+ * (not the name of a tag).
+ */
+export const lastSeenUrl = (
+  repo: Pick<WatchedRepository, 'provider' | 'host' | 'owner' | 'name' | 'releaseSource' | 'versionPattern' | 'lastSeenTag'>,
+): string | null =>
+  repo.lastSeenTag && !(repo.releaseSource === 'tags' && repo.versionPattern) ? releasePageUrl(repo, repo.lastSeenTag) : null;
+
 /**
  * Avatar of the repository owner without an API call: GitHub's avatar service, the `/user/avatar/<name>/<size>` route
  * of Gitea/Forgejo; null for GitLab (no such URL – the UI shows a letter).

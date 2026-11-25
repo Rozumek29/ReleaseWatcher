@@ -25,6 +25,7 @@ import {
   GROUP_NAME_MAX_LENGTH,
   ICON_MAX_LENGTH,
   iconUrls,
+  lastSeenUrl,
   normalizeGroupName,
   parseRepositoryReference,
   PROVIDER_LABELS,
@@ -349,6 +350,8 @@ export const toDto = (
   versionPattern: r.versionPattern,
   isEnabled: r.isEnabled,
   lastSeenTag: r.lastSeenTag,
+  /** Page of the latest release or tag; null without one or for a version picked by a pattern from tags. */
+  lastSeenUrl: lastSeenUrl(r),
   lastSeenPublishedAt: r.lastSeenPublishedAt,
   lastCheckedAt: r.lastCheckedAt,
   lastError: r.lastError,
@@ -971,7 +974,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (patternError) {
       return validationProblem('versionPattern', patternError);
     }
-    setReleaseSource(repo, body.releaseSource === undefined ? repo.releaseSource : (body.releaseSource ?? 'releases'), versionPattern);
+    const sourceChanged = setReleaseSource(
+      repo,
+      body.releaseSource === undefined ? repo.releaseSource : (body.releaseSource ?? 'releases'),
+      versionPattern,
+    );
     if (icon !== undefined) {
       repo.icon = icon;
     }
@@ -1075,6 +1082,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (machineApp) {
       machineApps.link(machineApp, repo.id);
       store.setInstalledVersionApp(repo.id, machineApp);
+    }
+    if (sourceChanged && repo.isEnabled) {
+      // Set the new baseline right away (silently), so the latest release does not stay empty until the next check.
+      await checker.check(store.get(repo.id) ?? repo);
     }
     return Response.json(repositoryDto(store.get(repo.id) ?? repo));
   };
