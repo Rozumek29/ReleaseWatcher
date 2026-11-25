@@ -214,6 +214,7 @@ describe('RepositoriesPage', () => {
       url: 'https://ui.com/download/releases/network-server',
       avatarUrl: null,
       lastSeenTag: '9.5.21',
+      lastSeenUrl: 'https://ui.com/download/releases/network-server',
       webSource: {
         url: 'https://ui.com/download/releases/network-server',
         format: 'text',
