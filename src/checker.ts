@@ -11,7 +11,7 @@ import {
 import { type CronSchedule, parseCron } from './cron.ts';
 import type { Logger } from './log.ts';
 import type { RepositoryStore } from './db.ts';
-import { fullName, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, selectNewVersions, type WatchedRepository } from './domain.ts';
+import { fullName, isNewerRelease, MAX_NOTIFICATIONS_PER_CHECK, selectNewReleases, selectNewVersions, type WatchedRepository } from './domain.ts';
 import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import type { NotificationDispatcher } from './notifiers/dispatcher.ts';
@@ -332,7 +332,7 @@ export class ReleaseChecker {
 
         const newerBaseline = byVersion
           ? (compareVersions(newest?.tag, repo.lastSeenTag) ?? 1) > 0
-          : repo.lastSeenPublishedAt === null || Date.parse(newest?.publishedAt ?? '') > Date.parse(repo.lastSeenPublishedAt);
+          : newest !== null && isNewerRelease(newest, repo);
         if (newest && newerBaseline) {
           repo.lastSeenTag = newest.tag;
           repo.lastSeenPublishedAt = newest.publishedAt;

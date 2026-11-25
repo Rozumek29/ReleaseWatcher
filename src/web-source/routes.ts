@@ -107,10 +107,13 @@ export function webSourceRoutes(deps: WebSourceRoutesDeps = {}) {
             throw new ReleaseSourceError(`${config.url} answered 304 to an unconditional request.`, 304);
           }
           const releases = await readWebReleases(fetched.body, config, versionPattern);
-          const order = webReleaseOrder(releases);
+          const order = webReleaseOrder(config);
           // The newest version as a check would pick it (no baseline yet = only the newest is chosen).
           const filter = { includePrereleases: input.includePrereleases ?? false, lastCheckedAt: null, lastSeenPublishedAt: null, lastSeenTag: null };
-          const { newest } = order === 'version' ? selectNewVersions(filter, releases, new Date()) : selectNewReleases(filter, releases);
+          const { newest } =
+            order === 'version'
+              ? selectNewVersions(filter, releases, new Date())
+              : selectNewReleases(filter, releases.filter((r) => r.publishedAt !== ''));
           return Response.json({
             contentType: fetched.contentType,
             detectedFormat: detectFormat(fetched.contentType, fetched.body),

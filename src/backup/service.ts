@@ -536,7 +536,9 @@ class ImportPlanner {
       webSource = raw.webSource ? normalizeWebSource(raw.webSource) : null;
       const errors = webSource ? validateWebSource(webSource, versionPattern) : { url: ['A web source needs its URL and locators.'] };
       for (const [field, messages] of Object.entries(errors ?? {})) {
+        // An invalid pattern was reported above; a missing one (format text) is not.
         if (field !== 'pattern') messages.forEach((m) => this.error(`${path}.webSource.${field}`, m));
+        else if (!patternError) messages.forEach((m) => this.error(`${path}.versionPattern`, m));
         ok = false;
       }
       if (webSource && ok && webSourceHost(webSource.url) !== parsed.host) {

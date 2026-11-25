@@ -292,6 +292,10 @@ export function webSourceNameError(name: string | null): string | null {
   if (name.length > WEB_SOURCE_NAME_MAX_LENGTH) {
     return `The name must be at most ${WEB_SOURCE_NAME_MAX_LENGTH} characters long.`;
   }
+  if (name.includes('/')) {
+    // The name is part of the key `host/web/name`.
+    return 'The name must not contain a slash (/).';
+  }
   return null;
 }
 
@@ -465,9 +469,7 @@ export function selectNewReleases(
   repo: Pick<WatchedRepository, 'includePrereleases' | 'lastCheckedAt' | 'lastSeenPublishedAt' | 'lastSeenTag'>,
   releases: readonly ReleaseInfo[],
 ): ReleaseSelection {
-  const relevant = releases
-    .filter((r) => repo.includePrereleases || !r.isPrerelease)
-    .toSorted((a, b) => Date.parse(a.publishedAt) - Date.parse(b.publishedAt));
+  const relevant = releases.filter((r) => repo.includePrereleases || !r.isPrerelease).toSorted(compareReleases);
 
   const newest = relevant.at(-1) ?? null;
 
@@ -475,13 +477,31 @@ export function selectNewReleases(
     return { newReleases: [], newest };
   }
 
-  const seenAt = repo.lastSeenPublishedAt === null ? null : Date.parse(repo.lastSeenPublishedAt);
   const newReleases = relevant
-    .filter((r) => seenAt === null || Date.parse(r.publishedAt) > seenAt)
+    .filter((r) => isNewerRelease(r, repo))
     .filter((r) => r.tag !== repo.lastSeenTag)
     .slice(-MAX_NOTIFICATIONS_PER_CHECK);
 
   return { newReleases, newest };
+}
+
+/**
+ * Order of releases by publication date; releases of the same moment (sources with dates only, e.g. `2026-10-23`)
+ * by version, so the higher one counts as the newer.
+ */
+export function compareReleases(a: Pick<ReleaseInfo, 'tag' | 'publishedAt'>, b: Pick<ReleaseInfo, 'tag' | 'publishedAt'>): number {
+  return Date.parse(a.publishedAt) - Date.parse(b.publishedAt) || (compareVersions(a.tag, b.tag) ?? 0);
+}
+
+/** True when a release comes after the baseline (`lastSeenPublishedAt`, then `lastSeenTag` on the same date); true without one. */
+export function isNewerRelease(
+  release: Pick<ReleaseInfo, 'tag' | 'publishedAt'>,
+  baseline: Pick<WatchedRepository, 'lastSeenPublishedAt' | 'lastSeenTag'>,
+): boolean {
+  if (baseline.lastSeenPublishedAt === null) {
+    return true;
+  }
+  return compareReleases(release, { tag: baseline.lastSeenTag ?? '', publishedAt: baseline.lastSeenPublishedAt }) > 0;
 }
 
 /**

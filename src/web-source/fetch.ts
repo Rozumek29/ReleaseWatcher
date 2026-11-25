@@ -64,7 +64,11 @@ export async function fetchWebDocument(
   }
   if (!response.ok) {
     const hint = response.status === 403 || response.status === 429 ? ' The site may block automated requests.' : '';
-    throw new ReleaseSourceError(`${url} answered ${response.status}.${hint} ${truncate((await readLimited(response)).text.trim(), 200)}`.trim(), response.status);
+    // Error pages are mostly HTML (Cloudflare, nginx): only a plain-text body says something worth showing.
+    const isText = /^text\/plain/i.test(response.headers.get('content-type') ?? '');
+    const detail = isText ? ` ${truncate((await readLimited(response)).text.trim(), 200)}` : '';
+    if (!isText) await response.body?.cancel().catch(() => undefined);
+    throw new ReleaseSourceError(`${url} answered ${response.status}.${hint}${detail}`.trim(), response.status);
   }
   const { text, bytes } = await readLimited(response);
   const etag = response.headers.get('etag');
@@ -98,7 +102,17 @@ async function readLimited(response: Response): Promise<{ text: string; bytes: n
     }
     chunks.push(chunk);
   }
-  return { text: new TextDecoder().decode(Buffer.concat(chunks)), bytes };
+  return { text: decoder(response.headers.get('content-type')).decode(Buffer.concat(chunks)), bytes };
+}
+
+/** Decoder for the `charset` of a `Content-Type` (e.g. windows-1250); UTF-8 when none is given or it is unknown. */
+function decoder(contentType: string | null): TextDecoder {
+  const charset = contentType?.match(/;\s*charset="?([\w.:-]+)"?/i)?.[1];
+  try {
+    return new TextDecoder((charset ?? 'utf-8') as ConstructorParameters<typeof TextDecoder>[0]);
+  } catch {
+    return new TextDecoder('utf-8');
+  }
 }
 
 const tooLarge = () => new ReleaseSourceError(`The page is larger than ${MAX_WEB_SOURCE_BYTES / 1024 / 1024} MB.`, 413);

@@ -31,8 +31,10 @@ export class WebReleaseSource implements ReleaseSource {
     if (fetched.notModified) {
       return { releases: [], etag, notModified: true, order: 'date' };
     }
+    const order = webReleaseOrder(config);
     const releases = await readWebReleases(fetched.body, config, query.versionPattern ?? null);
-    return { releases, etag: fetched.validator, notModified: false, order: webReleaseOrder(releases) };
+    // Newest by date: entries without a (readable) date are left out until they get one.
+    return { releases: order === 'date' ? releases.filter((r) => r.publishedAt !== '') : releases, etag: fetched.validator, notModified: false, order };
   }
 }
 
@@ -55,8 +57,10 @@ export async function readWebReleases(body: string, config: WebSourceConfig, pat
 }
 
 /**
- * How the newest version of a web source is found: by date when every entry has one (feeds, APIs – a backported fix
- * of an older branch is still news), otherwise by the highest version (pages that only list versions).
+ * How the newest version of a web source is found: by date when the source locates dates (feeds, APIs – a backported
+ * fix of an older branch is still news), otherwise by the highest version (pages that only list versions). It follows
+ * the settings, not a response, so it stays the same from one check to the next (a change of the settings sets a new
+ * baseline).
  */
-export const webReleaseOrder = (releases: readonly ReleaseInfo[]): ReleaseFetchResult['order'] =>
-  releases.length > 0 && releases.every((r) => r.publishedAt !== '') ? 'date' : 'version';
+export const webReleaseOrder = (config: Pick<WebSourceConfig, 'format' | 'date'>): ReleaseFetchResult['order'] =>
+  config.format !== 'text' && config.date !== null ? 'date' : 'version';

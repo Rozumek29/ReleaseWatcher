@@ -136,6 +136,32 @@ describe('web sources (provider web)', () => {
     assert.equal((await request('GET', `/api/repositories/${repo.id}`)).body.lastSeenTag, '3.0.3');
   });
 
+  it('keeps the order of a dated source when an entry has no date yet', async () => {
+    const item = (version: string, date: string | null) =>
+      `<item><title>v${version} Release Notes</title><link>https://discourse.cubecoders.com/t/${version}</link>${date ? `<pubDate>${date}</pubDate>` : ''}</item>`;
+    const feed = (...items: string[]) => `<rss><channel>${items.join('')}</channel></rss>`;
+    const backport = item('1.9.5', 'Sat, 10 Jan 2026 10:00:00 +0000');
+    const major = item('2.0.0', 'Mon, 05 Jan 2026 10:00:00 +0000');
+    pages.set(AMP_URL, { body: feed(backport, major), contentType: 'application/rss+xml' });
+    const { body: repo } = await addAmp();
+    assert.equal(repo.lastSeenTag, '1.9.5');
+
+    // A new entry without a date is left out (no flip to "by version", which would announce 2.0.0 again).
+    pages.set(AMP_URL, { body: feed(item('2.1.0', null), backport, major), contentType: 'application/rss+xml' });
+    await request('POST', `/api/repositories/${repo.id}/check`);
+    assert.equal(notifier.sent.length, 0);
+
+    // Once dated, it is announced; a later release still is.
+    pages.set(AMP_URL, { body: feed(item('2.1.0', 'Mon, 12 Jan 2026 10:00:00 +0000'), backport, major), contentType: 'application/rss+xml' });
+    await request('POST', `/api/repositories/${repo.id}/check`);
+    pages.set(AMP_URL, {
+      body: feed(item('2.1.1', 'Tue, 13 Jan 2026 10:00:00 +0000'), item('2.1.0', 'Mon, 12 Jan 2026 10:00:00 +0000'), backport, major),
+      contentType: 'application/rss+xml',
+    });
+    await request('POST', `/api/repositories/${repo.id}/check`);
+    assert.deepEqual(notifier.sent.map((n) => n.release.tag), ['2.1.0', '2.1.1']);
+  });
+
   it('sends a custom User-Agent', async () => {
     await addAmp({ webSource: { url: AMP_URL, ...RSS, userAgent: 'Mozilla/5.0 Test' } });
     assert.equal(requests[0]?.headers.get('user-agent'), 'Mozilla/5.0 Test');
