@@ -6,6 +6,7 @@ import {
   fetchInstalledVersion,
   InstalledVersionError,
   localVersionUrl,
+  parseVersion,
   validateHeaders,
 } from '../src/version.ts';
 
@@ -15,6 +16,16 @@ describe('localVersionUrl', () => {
     assert.equal(localVersionUrl('::', 9000), 'http://127.0.0.1:9000/api/version');
     assert.equal(localVersionUrl('192.168.1.5', 8080), 'http://192.168.1.5:8080/api/version');
     assert.equal(localVersionUrl('fd00::5', 8080), 'http://[fd00::5]:8080/api/version');
+  });
+});
+
+describe('parseVersion', () => {
+  it('reads a patch level after the numbers as one more number', () => {
+    assert.deepEqual(parseVersion('v2.5.0p21'), { numbers: [2, 5, 0, 21], prerelease: '' });
+    assert.deepEqual(parseVersion('TrueNAS-9.10.2-U5'), { numbers: [9, 10, 2, 5], prerelease: '' });
+    assert.deepEqual(parseVersion('v2.5.0p21-rc1+security'), { numbers: [2, 5, 0, 21], prerelease: 'rc1' });
+    assert.deepEqual(parseVersion('1.4-beta'), { numbers: [1, 4], prerelease: 'beta' });
+    assert.deepEqual(parseVersion('1.4-preview2'), { numbers: [1, 4], prerelease: 'preview2' });
   });
 });
 
@@ -28,6 +39,17 @@ describe('compareVersions', () => {
     ['2.0.0-rc.2', '2.0.0-rc.10', '<'],
     ['release-2024.10.1', '2024.9.30', '>'],
     ['jellyfin v10.10.3', '10.10.2', '>'],
+    ['v2.5.0p21', 'v2.5.0', '>'],
+    ['v2.5.0p21', 'v2.5.0p20', '>'],
+    ['v2.5.0p21+security', 'v2.5.0p21', '='],
+    ['v2.5.0p21-rc1+security', 'v2.5.0p21', '<'],
+    ['v2.5.0p21-rc1+security', 'v2.5.0p20', '>'],
+    ['v2.5.1', 'v2.5.0p21', '>'],
+    ['TrueNAS-9.10.2-U5', 'TrueNAS-9.10.2-U2', '>'],
+    ['TrueNAS-9.10.2-U2', 'TrueNAS-9.10.2', '>'],
+    ['1.2.3_patch4', '1.2.3', '>'],
+    ['1.2.3-update', '1.2.3', '='],
+    ['1.2.3-u12a', '1.2.3', '='],
   ];
   for (const [a, b, expected] of cases) {
     it(`${a} ${expected} ${b}`, () => {
