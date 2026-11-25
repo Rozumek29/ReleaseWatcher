@@ -44,8 +44,9 @@ This file does not repeat those; it describes the **shape** of the system, the *
   repository (`host` = URL host, `owner` = `web`, `name` = the user's name, page and locators in `web_source`). Show them
   with `displayName()` / `sourcePageUrl()`, not `fullName()`. `fetch.ts` reads pages politely (own User-Agent,
   ETag/Last-Modified, size and time limits), `extract.ts` pulls versions out (text + regex, JSON paths, CSS selectors via
-  `HTMLRewriter` for HTML and XML), `source.ts` is the `ReleaseSource`; newest by date when every entry has one,
-  otherwise by version (`ReleaseFetchResult.order`).
+  `HTMLRewriter` for HTML and XML), `source.ts` is the `ReleaseSource`; newest by date when the source has a date
+  locator (undated entries are skipped), otherwise by version (`ReleaseFetchResult.order`) – the order follows the
+  settings, never a single response, so it can't flip between checks.
 - **Composition root:** `src/main.ts` builds real implementations; `buildApp(deps)` in `src/app.ts` wires them.
   Tests call `buildApp` with fakes. Anything that does I/O (network, SSH, clock, filesystem) is a dependency.
 - **Feature areas** are folders when they grow: `notifiers/`, `proxmox/`, `hosts/` (SSH keys, hosts, the shell pool), `docker/` (Docker/Podman containers, endpoints, the OCI registry client), `web-source/` (web pages, feeds and JSON APIs as release sources). A feature folder owns its
