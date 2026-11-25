@@ -115,6 +115,15 @@ export class GitHubReleaseSource implements ReleaseSource {
     }
 
     const dtos = (await response.json()) as GitHubReleaseDto[];
+    const etagOfPage = response.headers.get('etag');
+    // A project that publishes many pre-releases (Sonarr) can fill the whole page with them, so its latest stable
+    // release would be missing for anyone who ignores pre-releases. GitHub's "latest" release is the newest stable one.
+    if (dtos.length >= this.options.releasesPerPage && !dtos.some((d) => !d.draft && !d.prerelease && d.published_at)) {
+      const latest = await this.latestRelease(repo, token);
+      if (latest && !dtos.some((d) => d.tag_name === latest.tag_name)) {
+        dtos.push(latest);
+      }
+    }
     const releases = dtos
       .filter((d) => !d.draft && d.published_at)
       .map(
@@ -130,7 +139,17 @@ export class GitHubReleaseSource implements ReleaseSource {
         }),
       );
 
-    return { releases, etag: response.headers.get('etag'), notModified: false, order };
+    return { releases, etag: etagOfPage, notModified: false, order };
+  }
+
+  /** The newest published stable release (`/releases/latest`), or null when the repository has none. */
+  private async latestRelease(repo: RepositoryRef, token?: string | null): Promise<GitHubReleaseDto | null> {
+    const response = await this.request(`${this.repoPath(repo)}/releases/latest`, {}, token);
+    if (response.status === 404) {
+      return null;
+    }
+    await ensureOk(response);
+    return (await response.json()) as GitHubReleaseDto;
   }
 
   async getSecurityAdvisories(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {

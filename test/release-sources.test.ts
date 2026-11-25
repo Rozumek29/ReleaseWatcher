@@ -147,6 +147,64 @@ describe('GitLabReleaseSource', () => {
   });
 });
 
+describe('GitHubReleaseSource', () => {
+  const sonarr: RepositoryRef = { provider: 'github', host: null, owner: 'Sonarr', name: 'Sonarr' };
+  const dto = (tag: string, prerelease: boolean, publishedAt: string) => ({
+    tag_name: tag,
+    name: tag,
+    html_url: `https://github.com/Sonarr/Sonarr/releases/tag/${tag}`,
+    body: null,
+    draft: false,
+    prerelease,
+    published_at: publishedAt,
+    author: null,
+  });
+  const base = 'https://api.github.com/repos/Sonarr/Sonarr';
+
+  it('adds the latest stable release when a full page holds only pre-releases', async () => {
+    const { fetch, calls } = fakeFetch({
+      [`${base}/releases?per_page=2`]: () =>
+        json([dto('v5.0.0.3041', true, '2026-11-22T16:09:21Z'), dto('v5.0.0.2997', true, '2026-11-17T19:18:22Z')], {
+          etag: '"p1"',
+        }),
+      [`${base}/releases/latest`]: () => json(dto('v4.0.20.3014', false, '2026-09-16T16:39:36Z')),
+    });
+    const source = new GitHubReleaseSource({ apiBaseUrl: 'https://api.github.com', token: null, releasesPerPage: 2, fetch });
+    const result = await source.getRecentReleases(sonarr, null);
+    assert.deepEqual(
+      result.releases.map((r) => [r.tag, r.isPrerelease]),
+      [
+        ['v5.0.0.3041', true],
+        ['v5.0.0.2997', true],
+        ['v4.0.20.3014', false],
+      ],
+    );
+    assert.equal(result.etag, '"p1"');
+    assert.equal(calls.length, 2);
+  });
+
+  it('asks for the latest release only when the page has no stable one and is full', async () => {
+    const { fetch, calls } = fakeFetch({
+      [`${base}/releases?per_page=2`]: () =>
+        json([dto('v5.0.0.3041', true, '2026-11-22T16:09:21Z'), dto('v4.0.20.3014', false, '2026-09-16T16:39:36Z')]),
+      [`${base}/releases?per_page=3`]: () => json([dto('v5.0.0.3041', true, '2026-11-22T16:09:21Z')]),
+    });
+    const full = new GitHubReleaseSource({ apiBaseUrl: 'https://api.github.com', token: null, releasesPerPage: 2, fetch });
+    assert.equal((await full.getRecentReleases(sonarr, null)).releases.length, 2);
+    const short = new GitHubReleaseSource({ apiBaseUrl: 'https://api.github.com', token: null, releasesPerPage: 3, fetch });
+    assert.equal((await short.getRecentReleases(sonarr, null)).releases.length, 1);
+    assert.deepEqual(calls.map((c) => c.url.slice(base.length)), ['/releases?per_page=2', '/releases?per_page=3']);
+  });
+
+  it('keeps only the pre-releases when the repository has no stable release', async () => {
+    const { fetch } = fakeFetch({
+      [`${base}/releases?per_page=1`]: () => json([dto('v5.0.0.3041', true, '2026-11-22T16:09:21Z')]),
+    });
+    const source = new GitHubReleaseSource({ apiBaseUrl: 'https://api.github.com', token: null, releasesPerPage: 1, fetch });
+    assert.deepEqual((await source.getRecentReleases(sonarr, null)).releases.map((r) => r.tag), ['v5.0.0.3041']);
+  });
+});
+
 describe('ProviderReleaseSource', () => {
   it('asks the source of the repository provider; only GitHub has advisories', async () => {
     const github = new FakeSource();
