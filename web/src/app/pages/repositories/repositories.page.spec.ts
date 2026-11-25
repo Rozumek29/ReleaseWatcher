@@ -20,8 +20,6 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     icon: null,
     groupId: null,
     iconUrls: [],
-    releaseSource: 'releases',
-    versionPattern: null,
     webSource: null,
     includePrereleases: false,
     releaseSource: 'releases',
