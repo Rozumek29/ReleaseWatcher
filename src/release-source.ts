@@ -125,9 +125,10 @@ export async function applyVersionPattern(result: ReleaseFetchResult, query: Rel
 }
 
 /**
- * The version a pattern picked from a tag. When the tag is a pre-release but the picked text is not (`^v(\d+\.\d+\.\d+)`
- * on `v2.0.0-rc1`), the tag's pre-release suffix is kept (`2.0.0-rc1`) – otherwise the stable `v2.0.0` would compare
- * equal to it and never be announced.
+ * The version a pattern picked from a tag. `matchPattern()` already keeps a pre-release suffix right after the group
+ * (`^v(\d+\.\d+\.\d+)` on `v2.0.0-rc1` → `2.0.0-rc1`); when the group ends elsewhere (`^v(\d+)\.` → `2`) and the tag
+ * is still a pre-release, the tag's suffix is added here (`2-rc1`) – otherwise the stable version would compare equal to
+ * it and never be announced.
  */
 function pickedVersion(release: ReleaseInfo, version: string): Pick<ReleaseInfo, 'tag' | 'isPrerelease'> {
   if (isPrereleaseTag(version)) {

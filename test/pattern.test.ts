@@ -27,6 +27,23 @@ describe('matchPattern', () => {
     assert.deepEqual(await matchPattern('ver:(\\s*[\\d.]+\\s*)', ['ver: 1.2 ']), [['1.2']]);
   });
 
+  it('keeps a pre-release suffix that directly follows the version group', async () => {
+    assert.deepEqual(
+      await matchPattern(String.raw`Latest:\s*([\d.]+)`, ['Latest: 27-RC.1', 'Latest: 25.10.8 released', 'Latest: 26.0.0-BETA.3 out']),
+      [['27-RC.1'], ['25.10.8'], ['26.0.0-BETA.3']],
+    );
+    assert.deepEqual(await matchPattern(String.raw`^v(\d+\.\d+\.\d+)`, ['v2.0.0-rc1', 'v2.0.0', 'v2.5.0p21+security']), [
+      ['2.0.0-rc1'],
+      ['2.0.0'],
+      ['2.5.0'],
+    ]);
+    assert.deepEqual(await matchPattern(String.raw`(?<version>\d+\.\d+)`, ['1.4beta2 and 2.0']), [['1.4beta2']]);
+    // Not directly after the group, or no group: nothing is added.
+    assert.deepEqual(await matchPattern(String.raw`(\d+)`, ['2.0beta']), [['2']]);
+    assert.deepEqual(await matchPattern(String.raw`\d+\.\d+`, ['1.4-rc1']), [['1.4']]);
+    assert.deepEqual(await matchPattern(String.raw`v(\d+\.\d+)`, ['v1.0-rc1 and v2.0'], { all: true }), [['1.0-rc1', '2.0']]);
+  });
+
   it('returns every match with all', async () => {
     assert.deepEqual(await matchPattern('v(\\d+\\.\\d+)', ['v1.0 and V2.1', 'none'], { all: true }), [
       ['1.0', '2.1'],

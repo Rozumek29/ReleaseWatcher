@@ -38,16 +38,27 @@ export interface MatchOptions {
 }
 
 // Runs inside the worker. Self-contained (no imports): it is loaded from a Blob URL, which also works in the
-// compiled executable. The version of a match is the group `version`, else group 1, else the whole match.
+// compiled executable. The version of a match is the group `version`, else group 1, else the whole match. A pre-release
+// suffix right after the group is kept (`Latest:\s*([\d.]+)` on "Latest: 27-RC.1" → "27-RC.1"), so a pattern that
+// only captures the numbers can't turn a pre-release into a stable version; it mirrors the pre-release part of
+// `VERSION_PATTERN` in version.ts.
 const WORKER_CODE = `
+const SUFFIX = /^[-_.+]?(?:alpha|beta|rc|pre|preview|dev|nightly)[\\w.]*/i;
 self.onmessage = (event) => {
   const { pattern, texts, all } = event.data;
   try {
-    const re = new RegExp(pattern, all ? 'gi' : 'i');
-    const pick = (m) => ((m.groups && m.groups.version) ?? m[1] ?? m[0]).trim();
+    const re = new RegExp(pattern, all ? 'dgi' : 'di');
+    const pick = (m, text) => {
+      const named = m.groups && m.groups.version !== undefined;
+      const group = named ? m.groups.version : m[1];
+      if (group === undefined) return m[0].trim();
+      const span = named ? m.indices.groups.version : m.indices[1];
+      const suffix = span ? SUFFIX.exec(text.slice(span[1])) : null;
+      return (suffix ? group + suffix[0] : group).trim();
+    };
     const result = texts.map((text) => {
-      const matches = all ? [...text.matchAll(re)] : [re.exec(text)].filter(Boolean);
-      const versions = matches.map(pick).filter((v) => v !== '');
+      const matches = (all ? [...text.matchAll(re)] : [re.exec(text)].filter(Boolean)).map((m) => pick(m, text));
+      const versions = matches.filter((v) => v !== '');
       return versions.length > 0 ? versions : null;
     });
     postMessage({ result });

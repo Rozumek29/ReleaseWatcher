@@ -277,6 +277,16 @@ describe('tags review fixes', () => {
       result.releases.map((r) => [r.tag, r.isPrerelease]),
       [['2.0.0-rc1', true], ['2.0.0', false]],
     );
+    // The group ends before the suffix (not directly followed by it): the tag's suffix is still kept.
+    const major = await applyVersionPattern(fetched(['v2.0.0-rc1', 'v2.0.0']), {
+      ...ref,
+      releaseSource: 'tags',
+      versionPattern: String.raw`^v(\d+)\.`,
+    });
+    assert.deepEqual(
+      major.releases.map((r) => [r.tag, r.isPrerelease]),
+      [['2-rc1', true], ['2', false]],
+    );
   });
 
   it('keeps only tags that look like versions when there is no pattern', async () => {
