@@ -87,6 +87,9 @@ const COMMON_VERSION_KEYS = [
 
 const TEXT_VERSION_PATTERN = /v?\d+(?:\.\d+)+(?:[-+][\w.]+)?/;
 
+/** The first dotted version in a text ("Release v1.2.3-rc.1 is out" → "v1.2.3-rc.1"), or `null`. */
+export const findVersionText = (text: string): string | null => text.match(TEXT_VERSION_PATTERN)?.[0] ?? null;
+
 export class InstalledVersionError extends Error {
   constructor(message: string) {
     super(message);

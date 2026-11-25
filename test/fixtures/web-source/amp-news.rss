@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<rss version="2.0" xmlns:discourse="http://www.discourse.org/" xmlns:atom="http://www.w3.org/2005/Atom" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>News - CubeCoders Support</title>
+    <link>https://discourse.cubecoders.com/c/news/6</link>
+    <description>Topics in the &#39;News&#39; category See the latest news about CubeCoders products, including release notices, new feature announcements and major updates.</description>
+    <language>en-GB</language>
+      <lastBuildDate>Tue, 24 Nov 2026 06:47:09 +0000</lastBuildDate>
+      <atom:link href="https://discourse.cubecoders.com/c/news/6.rss" rel="self" type="application/rss+xml" />
+                <item>
+          <title>Added Red Orchestra 2: Heroes of Stalingrad</title>
+          <dc:creator><![CDATA[IceOfWraith]]></dc:creator>
+          <category>New Game Support</category>
+          <description><![CDATA[<h2> …]]></description>
+          <link>https://discourse.cubecoders.com/t/added-red-orchestra-2-heroes-of-stalingrad/43729</link>
+          <pubDate>Mon, 23 Nov 2026 05:42:15 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">discourse.cubecoders.com-topic-43729</guid>
+          <source url="https://discourse.cubecoders.com/t/added-red-orchestra-2-heroes-of-stalingrad/43729.rss">Added Red Orchestra 2: Heroes of Stalingrad</source>
+        </item>
+        <item>
+          <title>Added Sniper Elite 4</title>
+          <dc:creator><![CDATA[IceOfWraith]]></dc:creator>
+          <category>New Game Support</category>
+          <description><![CDATA[<h2><a name="p-1145909-sniper-elite-4-1" class="anchor" href="https://discourse.cubecoders.com#p-1145909-sniper-elite-4-1" aria-label="Heading link"></a>Sniper  …]]></description>
+          <link>https://discourse.cubecoders.com/t/added-sniper-elite-4/43722</link>
+          <pubDate>Sun, 22 Nov 2026 00:20:42 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">discourse.cubecoders.com-topic-43722</guid>
+          <source url="https://discourse.cubecoders.com/t/added-sniper-elite-4/43722.rss">Added Sniper Elite 4</source>
+        </item>
+        <item>
+          <title>AMP 3 Beta &#39;Neptune&#39; - v3.0.2 Release Notes</title>
+          <dc:creator><![CDATA[Mike]]></dc:creator>
+          <category>News</category>
+          <description><![CDATA[<h1><a name="p-1145887-amp-302-beta-1" class="anchor" href="https://discourse.cubecoders.com#p-1145887-amp-302-beta-1" aria-label="Heading link"></a><strong>AMP …]]></description>
+          <link>https://discourse.cubecoders.com/t/amp-3-beta-neptune-v3-0-2-release-notes/43715</link>
+          <pubDate>Thu, 19 Nov 2026 16:40:56 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">discourse.cubecoders.com-topic-43715</guid>
+          <source url="https://discourse.cubecoders.com/t/amp-3-beta-neptune-v3-0-2-release-notes/43715.rss">AMP 3 Beta &#39;Neptune&#39; - v3.0.2 Release Notes</source>
+        </item>
+        <item>
+          <title>AMP 3 Beta &#39;Neptune&#39; - v3.0.1 Release Notes</title>
+          <dc:creator><![CDATA[Mike]]></dc:creator>
+          <category>News</category>
+          <description><![CDATA[<h1><a name="p-1145768-amp-301-beta-1" class="anchor" href="https://discourse.cubecoders.com#p-1145768-amp-301-beta-1" aria-label="Heading link"></a>AMP 3.0.1 b …]]></description>
+          <link>https://discourse.cubecoders.com/t/amp-3-beta-neptune-v3-0-1-release-notes/43679</link>
+          <pubDate>Fri, 13 Nov 2026 16:29:29 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">discourse.cubecoders.com-topic-43679</guid>
+          <source url="https://discourse.cubecoders.com/t/amp-3-beta-neptune-v3-0-1-release-notes/43679.rss">AMP 3 Beta &#39;Neptune&#39; - v3.0.1 Release Notes</source>
+        </item>
+        <item>
+          <title>Added Mumble Server</title>
+          <dc:creator><![CDATA[IceOfWraith]]></dc:creator>
+          <category>New Game Support</category>
+          <description><![CDATA[<h2><a name="p-1145699-mumble-1" class="anchor" href="https://discourse.cubecoders.com#p-1145699-mumble-1" aria-label="Heading link"></a>Mumble</h2>
+<p>Link:  …]]></description>
+          <link>https://discourse.cubecoders.com/t/added-mumble-server/43651</link>
+          <pubDate>Mon, 09 Nov 2026 20:16:39 +0000</pubDate>
+          <discourse:topicPinned>No</discourse:topicPinned>
+          <discourse:topicClosed>No</discourse:topicClosed>
+          <discourse:topicArchived>No</discourse:topicArchived>
+          <guid isPermaLink="false">discourse.cubecoders.com-topic-43651</guid>
+          <source url="https://discourse.cubecoders.com/t/added-mumble-server/43651.rss">Added Mumble Server</source>
+        </item>
+  </channel>
+</rss>

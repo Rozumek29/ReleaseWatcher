@@ -1,0 +1,48 @@
+{
+  "downloads": [
+    {
+      "id": "c1d6a5e0-8f4e-4f43-9d0b-0b7c0e1d2a01",
+      "name": "UniFi Network Application for Debian/Ubuntu Linux",
+      "slug": "unifi-network-application-debian-ubuntu",
+      "version": "10.6.109",
+      "date_published": "2026-10-23",
+      "file_url": "https://dl.ui.com/unifi/10.6.109/unifi_sysvinit_all.deb",
+      "release_notes_url": "/releases/r/network/10.6.109",
+      "platforms": ["debian"],
+      "products": ["unifi-network-application"]
+    },
+    {
+      "id": "c1d6a5e0-8f4e-4f43-9d0b-0b7c0e1d2a02",
+      "name": "UniFi Network Application for Windows",
+      "slug": "unifi-network-application-windows",
+      "version": "10.6.109",
+      "date_published": "2026-10-23",
+      "file_url": "https://dl.ui.com/unifi/10.6.109/UniFi-installer.exe",
+      "release_notes_url": "/releases/r/network/10.6.109",
+      "platforms": ["windows"],
+      "products": ["unifi-network-application"]
+    },
+    {
+      "id": "c1d6a5e0-8f4e-4f43-9d0b-0b7c0e1d2a03",
+      "name": "UniFi Network Application for Debian/Ubuntu Linux",
+      "slug": "unifi-network-application-debian-ubuntu-10-5-67",
+      "version": "10.5.67",
+      "date_published": "2026-08-07",
+      "file_url": "https://dl.ui.com/unifi/10.5.67/unifi_sysvinit_all.deb",
+      "release_notes_url": "/releases/r/network/10.5.67",
+      "platforms": ["debian"],
+      "products": ["unifi-network-application"]
+    },
+    {
+      "id": "c1d6a5e0-8f4e-4f43-9d0b-0b7c0e1d2a04",
+      "name": "UniFi Protect for UniFi OS",
+      "slug": "unifi-protect",
+      "version": 6.1,
+      "date_published": 1761177600,
+      "file_url": null,
+      "release_notes_url": null,
+      "platforms": [],
+      "products": ["unifi-protect"]
+    }
+  ]
+}

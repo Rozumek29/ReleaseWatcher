@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom" xmlns:media="http://search.yahoo.com/mrss/">
+  <title>Example releases</title>
+  <link href="https://example.org/"/>
+  <updated>2026-11-20T10:00:00Z</updated>
+  <id>urn:example:releases</id>
+  <entry>
+    <title type="html"><![CDATA[Example 2.1.0 <em>&</em> friends]]></title>
+    <link rel="alternate" href="/releases/2.1.0"/>
+    <id>urn:example:2.1.0</id>
+    <published>2026-11-19T08:30:00Z</published>
+    <updated>2026-11-20T10:00:00Z</updated>
+    <media:title>2.1.0</media:title>
+    <summary>Bug fixes &amp; a new &lt;dashboard&gt;.</summary>
+  </entry>
+  <entry>
+    <title>Example 2.0.0</title>
+    <link rel="alternate" href="https://example.org/releases/2.0.0"></link>
+    <id>urn:example:2.0.0</id>
+    <updated>2026-10-01T12:00:00+02:00</updated>
+    <media:title>2.0.0</media:title>
+  </entry>
+  <entry>
+    <title>Roadmap for 2027</title>
+    <link href="javascript:alert(1)"/>
+    <id>urn:example:roadmap</id>
+    <updated>not a date</updated>
+  </entry>
+</feed>
