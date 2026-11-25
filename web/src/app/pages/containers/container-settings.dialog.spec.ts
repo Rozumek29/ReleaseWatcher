@@ -15,7 +15,10 @@ const type = (el: HTMLElement, selector: string, value: string) => {
 describe('ContainerSettingsDialog', () => {
   let http: HttpTestingController;
 
-  const open = async (value: Container) => {
+  const open = async (
+    value: Container,
+    repositories: object[] = [{ id: 3, fullName: 'dani-garcia/vaultwarden', lastSeenTag: '1.32.0' }],
+  ) => {
     await TestBed.configureTestingModule({
       imports: [ContainerSettingsDialog],
       providers: [provideHttpClient(), provideHttpClientTesting()],
@@ -25,9 +28,7 @@ describe('ContainerSettingsDialog', () => {
     fixture.componentRef.setInput('globalCron', '0 */6 * * *');
     fixture.componentRef.setInput('container', value);
     await settle(fixture);
-    http.expectOne('/api/repositories').flush([
-      { id: 3, fullName: 'dani-garcia/vaultwarden', lastSeenTag: '1.32.0' },
-    ]);
+    http.expectOne('/api/repositories').flush(repositories);
     await settle(fixture);
     return { fixture, el: fixture.nativeElement as HTMLElement };
   };
@@ -229,6 +230,23 @@ describe('ContainerSettingsDialog', () => {
 
     expect(el.querySelector('.app-row')?.textContent).toContain('Vaultwarden');
     expect(el.querySelector('.app-form')).toBeNull();
+  });
+
+  it('lists the watched repositories of an application alphabetically', async () => {
+    const { fixture, el } = await open(container({ apps: [] }), [
+      { id: 1, provider: 'github', fullName: 'Sonarr/Sonarr', name: 'Sonarr', lastSeenTag: null },
+      { id: 2, provider: 'web', fullName: 'web/example', name: 'example.com app', lastSeenTag: null },
+      { id: 3, provider: 'github', fullName: 'dani-garcia/vaultwarden', name: 'vaultwarden', lastSeenTag: null },
+      { id: 4, provider: 'github', fullName: 'Radarr/Radarr', name: 'Radarr', lastSeenTag: null },
+    ]);
+
+    [...el.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent?.includes('Add application'))!.click();
+    await settle(fixture);
+    type(el, '#app-source', 'repository');
+    await settle(fixture);
+
+    const options = [...el.querySelectorAll<HTMLOptionElement>('#app-repo option')].slice(1).map((o) => o.textContent?.trim());
+    expect(options).toEqual(['dani-garcia/vaultwarden', 'example.com app', 'Radarr/Radarr', 'Sonarr/Sonarr']);
   });
 
   it('takes the installed version by hand only without a version command', async () => {

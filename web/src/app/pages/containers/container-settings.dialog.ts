@@ -115,6 +115,12 @@ export class ContainerSettingsDialog {
   protected readonly apps = signal<ContainerApp[]>([]);
   protected readonly repositories = signal<WatchedRepository[]>([]);
   protected readonly repoLabel = repositoryLabel;
+  /** The watched repositories by their label (A–Z), for the repository picker of an application. */
+  protected readonly sortedRepositories = computed(() =>
+    [...this.repositories()].sort((a, b) =>
+      repositoryLabel(a).localeCompare(repositoryLabel(b), undefined, { sensitivity: 'base', numeric: true }),
+    ),
+  );
   protected readonly appForm = signal<AppForm | null>(null);
   /** The application form as it was opened, to tell whether it has unsaved changes. */
   private readonly appFormInitial = signal<AppForm | null>(null);

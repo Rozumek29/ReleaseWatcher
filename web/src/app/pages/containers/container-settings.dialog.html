@@ -401,7 +401,7 @@
           <label for="app-repo">Repository</label>
           <select id="app-repo" class="input" [ngModel]="f.repositoryId" (ngModelChange)="setField('repositoryId', $event)">
             <option [ngValue]="null" disabled>Choose a repository…</option>
-            @for (r of repositories(); track r.id) {
+            @for (r of sortedRepositories(); track r.id) {
               <option [ngValue]="r.id">{{ repoLabel(r) }}{{ r.lastSeenTag ? ' (' + r.lastSeenTag + ')' : '' }}</option>
             }
           </select>
