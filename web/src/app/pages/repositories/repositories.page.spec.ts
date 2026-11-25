@@ -21,6 +21,8 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     groupId: null,
     iconUrls: [],
     includePrereleases: false,
+    releaseSource: 'releases',
+    versionPattern: null,
     isEnabled: true,
     lastSeenTag: 'v1.0.0',
     lastSeenPublishedAt: '2026-01-01T00:00:00Z',
@@ -81,6 +83,20 @@ describe('RepositoriesPage', () => {
     const rows = el.querySelectorAll('.row');
     expect(rows.length).toBe(1);
     expect(rows[0]?.textContent).toContain('nodejs/');
+  });
+
+  it('marks repositories watching tags and suggests tags when there are no releases', async () => {
+    const { el } = await render([
+      repo(1, 'truenas/middleware', { releaseSource: 'tags', versionPattern: '^TS-(.+)$', lastSeenTag: '25.10.8' }),
+      repo(2, 'acme/no-releases', { lastSeenTag: null, lastCheckedAt: '2026-11-25T10:00:00Z' }),
+    ]);
+    const cards = el.querySelectorAll('.card');
+    const truenas = [...cards].find((c) => c.textContent?.includes('middleware'))!;
+    expect(truenas.querySelector('.badge[title="Tags matching ^TS-(.+)$"]')).not.toBeNull();
+    // The version picked by the pattern is no tag name: shown, not linked.
+    expect(truenas.querySelector('a.mono')).toBeNull();
+    expect(truenas.textContent).toContain('25.10.8');
+    expect(el.textContent).toContain('No releases – try watching its tags');
   });
 
   it('points to settings when no notifier is configured', async () => {

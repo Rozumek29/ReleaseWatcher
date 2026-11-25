@@ -19,6 +19,8 @@ const repo: WatchedRepository = {
   groupId: null,
   iconUrls: [],
   includePrereleases: false,
+  releaseSource: 'releases',
+  versionPattern: null,
   isEnabled: true,
   lastSeenTag: '1.32.0',
   lastSeenPublishedAt: null,
@@ -72,6 +74,42 @@ describe('RepositorySettingsDialog', () => {
     el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
     const request = http.expectOne('/api/repositories/7');
     expect(request.request.body.icon).toBe('sh:vaultwarden-light');
+  });
+
+  it('watches tags with a version pattern, checking the pattern before saving', async () => {
+    await TestBed.configureTestingModule({
+      imports: [RepositorySettingsDialog],
+      providers: [provideHttpClient(), provideHttpClientTesting()],
+    }).compileComponents();
+    const http = TestBed.inject(HttpTestingController);
+    const fixture = TestBed.createComponent(RepositorySettingsDialog);
+    fixture.componentRef.setInput('repository', repo);
+    await settle(fixture);
+
+    const el = fixture.nativeElement as HTMLElement;
+    const watch = el.querySelector<HTMLSelectElement>('#repo-release-source')!;
+    expect(watch.value).toBe('releases');
+    watch.value = 'tags';
+    watch.dispatchEvent(new Event('change'));
+    const pattern = el.querySelector<HTMLInputElement>('#repo-version-pattern')!;
+    pattern.value = '^TS-(';
+    pattern.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelector('.dialog-foot app-unsaved-changes')).not.toBeNull();
+    expect(el.textContent).toContain('The next check sets a new baseline without notifying.');
+    expect(el.textContent).toContain('This is not a valid regular expression.');
+
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    await settle(fixture);
+    http.expectNone('/api/repositories/7');
+
+    pattern.value = ' ^TS-(.+)$ ';
+    pattern.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('button[type=submit]')!.click();
+    const request = http.expectOne('/api/repositories/7');
+    expect(request.request.body.releaseSource).toBe('tags');
+    expect(request.request.body.versionPattern).toBe('^TS-(.+)$');
   });
 
   it('fills the icon from the visual picker', async () => {

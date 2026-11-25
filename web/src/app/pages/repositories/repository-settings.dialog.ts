@@ -22,6 +22,7 @@ import {
   MachineAppGroup,
   MachineAppOption,
   MachineAppRef,
+  ReleaseSourceKind,
   WatchedRepository,
 } from '../../core/models';
 
@@ -86,6 +87,9 @@ export class RepositorySettingsDialog {
   protected readonly machineKey = machineKey;
   protected readonly appKey = appKey;
   protected includePrereleases = false;
+  protected releaseSource: ReleaseSourceKind = 'releases';
+  /** Regular expression tags must match; empty = none. */
+  protected versionPattern = '';
   protected isEnabled = true;
   protected headers: HeaderRow[] = [];
   /** New repository token; empty keeps the saved one. */
@@ -139,6 +143,8 @@ export class RepositorySettingsDialog {
       this.url,
       this.field,
       this.includePrereleases,
+      this.releaseSource,
+      this.versionPattern.trim(),
       this.isEnabled,
       this.headers.map((h) => [h.name, h.value, h.saved]),
       this.token,
@@ -196,6 +202,20 @@ export class RepositorySettingsDialog {
     }
   }
 
+  /** Why the version pattern can't be used (same checks as the server, which also limits its run time); null = fine. */
+  protected patternError(): string | null {
+    const pattern = this.versionPattern.trim();
+    if (!pattern) {
+      return null;
+    }
+    try {
+      new RegExp(pattern, 'i');
+      return null;
+    } catch {
+      return 'This is not a valid regular expression.';
+    }
+  }
+
   /** Whether the form differs from the saved repository (read by the template on every check). */
   protected changed(): boolean {
     return !sameValues(this.values(), this.savedValues);
@@ -214,6 +234,8 @@ export class RepositorySettingsDialog {
         this.machine = '';
         this.field = repo.installedVersionField ?? '';
         this.includePrereleases = repo.includePrereleases;
+        this.releaseSource = repo.releaseSource;
+        this.versionPattern = repo.versionPattern ?? '';
         this.isEnabled = repo.isEnabled;
         this.token = '';
         this.removeToken = false;
@@ -331,6 +353,10 @@ export class RepositorySettingsDialog {
       this.saveError.set('Choose the app to read the installed version from.');
       return;
     }
+    if (this.patternError()) {
+      this.saveError.set('Fix the version pattern first.');
+      return;
+    }
     this.saving.set(true);
     this.saveError.set(null);
     const hasOsv = !!this.osvEcosystem && !!this.osvPackage.trim();
@@ -339,6 +365,8 @@ export class RepositorySettingsDialog {
         this.api.updateRepository(repo.id, {
           includePrereleases: this.includePrereleases,
           isEnabled: this.isEnabled,
+          releaseSource: this.releaseSource,
+          versionPattern: this.versionPattern.trim() || null,
           installedVersionUrl: fromUrl ? this.url.trim() || null : null,
           installedVersionField: fromUrl ? this.field.trim() || null : null,
           installedVersionHeaders: fromUrl ? this.headerInputs() : [],

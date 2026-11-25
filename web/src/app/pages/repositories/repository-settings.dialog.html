@@ -19,6 +19,47 @@
         </div>
 
         <div class="field">
+          <label for="repo-release-source">Watch</label>
+          <select id="repo-release-source" class="input" name="releaseSource" [(ngModel)]="releaseSource">
+            <option value="releases">Releases</option>
+            <option value="tags">Tags</option>
+          </select>
+          <span class="hint">
+            @if (releaseSource === 'tags') {
+              For projects that tag versions without publishing releases. The highest version is the newest; tags that
+              are no version are skipped.
+            } @else {
+              Published releases, newest by date. Choose tags for a project that only tags its versions.
+            }
+            @if (releaseSource !== repo.releaseSource || versionPattern.trim() !== (repo.versionPattern ?? '')) {
+              The next check sets a new baseline without notifying.
+            }
+          </span>
+        </div>
+
+        <div class="field">
+          <label for="repo-version-pattern">Version pattern <span class="optional">optional</span></label>
+          <input
+            id="repo-version-pattern"
+            class="input mono"
+            name="versionPattern"
+            [class.invalid]="patternError()"
+            [(ngModel)]="versionPattern"
+            placeholder="^TS-(.+)$"
+            maxlength="500"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          @if (patternError(); as error) {
+            <span class="error">{{ error }}</span>
+          }
+          <span class="hint">
+            Regular expression; tags that don't match are skipped. A group like <code>(\d+\.\d+\.\d+)</code> or
+            <code>(?&lt;version&gt;…)</code> picks the version, e.g. <code>^TS-(.+)$</code>.
+          </span>
+        </div>
+
+        <div class="field">
           <label for="repo-icon">Icon <span class="optional">optional</span></label>
           <div class="icon-row">
             <input
