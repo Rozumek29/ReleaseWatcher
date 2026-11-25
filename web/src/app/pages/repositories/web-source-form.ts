@@ -9,12 +9,21 @@ import { Icon } from '../../shared/icon';
 
 /** Fields of the form that the server reports validation errors for. */
 type WebSourceField =
-  'name' | 'url' | 'items' | 'version' | 'date' | 'link' | 'userAgent' | 'versionPattern';
+  | 'name'
+  | 'url'
+  | 'format'
+  | 'items'
+  | 'version'
+  | 'date'
+  | 'link'
+  | 'userAgent'
+  | 'versionPattern';
 
 /** Keys of the server's validation errors (`errors` of a problem response) and the fields they belong to. */
 const ERROR_FIELDS: Record<string, WebSourceField> = {
   name: 'name',
   'webSource.url': 'url',
+  'webSource.format': 'format',
   'webSource.items': 'items',
   'webSource.version': 'version',
   'webSource.date': 'date',

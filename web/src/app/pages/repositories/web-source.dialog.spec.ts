@@ -201,6 +201,7 @@ describe('WebSourceDialog', () => {
         errors: {
           'webSource.url': ['Enter an http(s) URL.'],
           'webSource.version': ['Enter the path of the version.'],
+          'webSource.format': ['The response is not JSON.'],
           webSource: ['Something else is wrong.'],
         },
       },
@@ -213,6 +214,7 @@ describe('WebSourceDialog', () => {
     expect(fieldError('new-web-url')).toContain('Enter an http(s) URL.');
     expect(el.querySelector('#new-web-url')!.classList).toContain('invalid');
     expect(fieldError('new-web-version')).toContain('Enter the path of the version.');
+    expect(fieldError('new-web-format')).toContain('The response is not JSON.');
     expect(fieldError('new-web-name')).toBeUndefined();
     expect(el.querySelector('.save-error')?.textContent).toContain('Something else is wrong.');
   });

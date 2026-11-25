@@ -44,11 +44,22 @@
 
 <div class="field">
   <label [attr.for]="id('format')">Format</label>
-  <select [id]="id('format')" class="input" name="webFormat" [ngModel]="d.format()" (ngModelChange)="d.format.set($event)">
+  <select
+    [id]="id('format')"
+    class="input"
+    name="webFormat"
+    [ngModel]="d.format()"
+    (ngModelChange)="d.format.set($event)"
+    [class.invalid]="!!errors.format"
+    [attr.aria-invalid]="!!errors.format"
+  >
     @for (f of formats; track f.value) {
       <option [value]="f.value">{{ f.label }}</option>
     }
   </select>
+  @if (errors.format; as e) {
+    <span class="error">{{ e }}</span>
+  }
   <span class="hint">
     Fill in the fields for an
     <button type="button" class="link-btn" (click)="d.applyPreset('rss')">RSS feed</button> or an
