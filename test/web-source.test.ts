@@ -204,9 +204,14 @@ describe('extractReleases – HTML and XML', () => {
     ]);
   });
 
-  it('keeps a feed item without a pattern when its title holds a number; drops bad dates and javascript: links', async () => {
+  it('keeps a feed item without a pattern when its title holds a dotted version; drops bad dates and javascript: links', async () => {
     const releases = await extractReleases(await fixture('atom.xml'), config({ ...ATOM_PRESET }), null);
-    assert.deepEqual(releases[2], { version: 'Roadmap for 2027', title: 'Roadmap for 2027', publishedAt: null, url: null });
+    assert.deepEqual(releases[2], { version: 'Roadmap for 2027.1', title: 'Roadmap for 2027.1', publishedAt: null, url: null });
+  });
+
+  it('skips texts without a dotted version when there is no pattern', async () => {
+    const html = '<a class="t">28 Nightlies</a><a class="t">27-RC.1</a><a class="t">25.10.8</a><a class="t">22.02.4 (Angelfish)</a>';
+    assert.deepEqual(versions(await extractReleases(html, config({ version: '.t' }), null)), ['25.10.8', '22.02.4 (Angelfish)']);
   });
 
   it('selects namespaced XML elements with a colon or a dash', async () => {

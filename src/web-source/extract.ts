@@ -4,7 +4,7 @@
  */
 
 import { matchPattern } from '../pattern.ts';
-import { findVersionText, parseVersion } from '../version.ts';
+import { findVersionText } from '../version.ts';
 import {
   MAX_CANDIDATES,
   parseJsonPath,
@@ -21,7 +21,7 @@ import {
 const MAX_TEXT_LENGTH = 10_000;
 /** Longest title kept. */
 const MAX_TITLE_LENGTH = 300;
-/** Without a pattern, a located text longer than this is reduced to the version-looking part. */
+/** Without a pattern, a located text longer than this is always reduced to its version-looking part. */
 const MAX_PLAIN_VERSION_LENGTH = 50;
 
 /** A located release before the version is picked out of its text. */
@@ -79,10 +79,15 @@ function dedupe(releases: ExtractedRelease[]): ExtractedRelease[] {
   return releases.filter((release) => !seen.has(release.version) && seen.add(release.version));
 }
 
-/** The version of a located text without a pattern: the text itself when short, else its version-looking part. */
+/**
+ * The version of a located text without a pattern: texts without a dotted version (`28 Nightlies`, `Roadmap for 2027`)
+ * are skipped – a pattern can still pick those; a short text is kept whole (`2.0 beta` stays a pre-release), a long one
+ * is reduced to its first dotted version.
+ */
 function plainVersion(text: string): string | null {
-  if (!parseVersion(text)) return null;
-  return text.length <= MAX_PLAIN_VERSION_LENGTH ? text : findVersionText(text);
+  const found = findVersionText(text);
+  if (!found) return null;
+  return text.length <= MAX_PLAIN_VERSION_LENGTH ? text : found;
 }
 
 const truncate = (text: string, max: number): string => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
