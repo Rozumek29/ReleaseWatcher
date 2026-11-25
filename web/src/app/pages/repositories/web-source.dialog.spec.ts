@@ -143,7 +143,7 @@ describe('WebSourceDialog', () => {
     expect(el.querySelector<HTMLSelectElement>('#new-web-format')!.value).toBe('xml');
     expect(el.querySelector<HTMLInputElement>('#new-web-items')!.value).toBe('entry');
     expect(el.querySelector<HTMLInputElement>('#new-web-version')!.value).toBe('title');
-    expect(el.querySelector<HTMLInputElement>('#new-web-date')!.value).toBe('updated, published');
+    expect(el.querySelector<HTMLInputElement>('#new-web-date')!.value).toBe('published, updated');
     expect(el.querySelector<HTMLInputElement>('#new-web-link')!.value).toBe('link');
   });
 

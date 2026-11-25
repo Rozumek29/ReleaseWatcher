@@ -18,6 +18,7 @@
   @if (errors.name; as e) {
     <span class="error">{{ e }}</span>
   }
+  <span class="hint">Shown instead of a repository name; it can't contain <code>/</code>.</span>
 </div>
 
 <div class="field">
@@ -158,8 +159,8 @@
         <span class="error">{{ e }}</span>
       }
       <span class="hint">
-        Inside each item; a <code>datetime</code> attribute is preferred. Several, separated by commas, are tried in
-        order (<code>updated, published</code>). Without dates the highest version is the newest.
+        Inside each item; a <code>datetime</code> attribute is preferred. In a list like
+        <code>published, updated</code> the first selector that finds something wins. Without dates the highest version is the newest.
       </span>
     </div>
 
@@ -221,7 +222,8 @@
       <code>v(\d+\.\d+\.\d+) Release Notes</code> for the titles of an RSS feed.
     }
     The version is the group named <code>version</code>, else the first group, else the whole match; letter case is
-    ignored.
+    ignored. A pre-release suffix right after the group is kept: <code>Latest:\s*([\d.]+)</code> reads
+    <code>27-RC.1</code> from <em>Latest: 27-RC.1</em>.
   </span>
 </div>
 

@@ -45,7 +45,7 @@ export const WEB_SOURCE_FORMATS: readonly { value: WebSourceFormat; label: strin
 /** Field values of a common feed format (format XML). */
 export const WEB_SOURCE_PRESETS = {
   rss: { items: 'item', version: 'title', date: 'pubDate', link: 'link' },
-  atom: { items: 'entry', version: 'title', date: 'updated, published', link: 'link' },
+  atom: { items: 'entry', version: 'title', date: 'published, updated', link: 'link' },
 } as const;
 
 /** Kind and example values (placeholders) of the item fields per structured format. */
