@@ -81,8 +81,8 @@
       <span class="hint">
         @switch (d.format()) {
           @case ('json') {
-            Path of the releases, e.g. <code>downloads[*]</code> for every element of an array. Leave empty when the
-            response holds one version.
+            Path of the releases, e.g. <code>downloads[*]</code> for every element of an array or
+            <code>channels[0].builds[*]</code>. Leave empty when the response holds one version.
           }
           @case ('xml') {
             Element of each release: <code>item</code> in RSS, <code>entry</code> in Atom.
@@ -95,7 +95,7 @@
     </div>
 
     <div class="field">
-      <label [attr.for]="id('version')">Version {{ c.kind }}</label>
+      <label [attr.for]="id('version')">Version {{ c.kind }} <span class="optional">optional</span></label>
       <input
         [id]="id('version')"
         class="input mono"
@@ -107,7 +107,6 @@
         [placeholder]="c.version"
         autocomplete="off"
         spellcheck="false"
-        required
       />
       @if (errors.version; as e) {
         <span class="error">{{ e }}</span>
@@ -115,15 +114,18 @@
       <span class="hint">
         @switch (d.format()) {
           @case ('json') {
-            Path of the version inside each item, e.g. <code>version</code>.
+            Path inside each item, e.g. <code>version</code> or <code>versions[0]</code>.
           }
           @case ('xml') {
-            Element with the version inside each item, e.g. <code>title</code>.
+            Element inside each item, e.g. <code>title</code>, <code>&gt; title</code> for a direct child or
+            <code>media:title</code> with a namespace.
           }
           @default {
-            Inside each item when set, e.g. <code>dt a.gdoc-props__title</code> on the TrueNAS release notes.
+            Inside each item, e.g. <code>dt a.gdoc-props__title</code> on the TrueNAS release notes or
+            <code>&gt; h2</code> for a direct child.
           }
         }
+        Leave empty to use the item's own text.
       </span>
     </div>
 
@@ -145,8 +147,8 @@
         <span class="error">{{ e }}</span>
       }
       <span class="hint">
-        Several, separated by commas, are tried in order (<code>updated, published</code>). Without dates the
-        highest version is the newest.
+        Inside each item; a <code>datetime</code> attribute is preferred. Several, separated by commas, are tried in
+        order (<code>updated, published</code>). Without dates the highest version is the newest.
       </span>
     </div>
 
@@ -167,7 +169,10 @@
       @if (errors.link; as e) {
         <span class="error">{{ e }}</span>
       }
-      <span class="hint">Link to the release notes of each version, e.g. <code>{{ c.link }}</code>.</span>
+      <span class="hint">
+        Link to the release notes inside each item, e.g. <code>{{ c.link }}</code>@if (d.format() !== 'json') {; an
+        <code>href</code> attribute is preferred}.
+      </span>
     </div>
   </div>
 }
