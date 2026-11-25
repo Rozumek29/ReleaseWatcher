@@ -12,6 +12,9 @@ export class PatternError extends Error {
   override name = 'PatternError';
 }
 
+/** A version pattern as stored: trimmed; null for none. */
+export const normalizePattern = (value: string | null | undefined): string | null => value?.trim() || null;
+
 /** Checks a version pattern; returns a sentence describing the problem, or `null` when it can be used. */
 export function validatePattern(pattern: string): string | null {
   if (pattern.trim() === '') return 'Enter a version pattern.';

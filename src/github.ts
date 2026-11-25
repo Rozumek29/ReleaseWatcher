@@ -1,13 +1,18 @@
 import { normalizeSeverity, type SecurityAdvisory } from './advisories.ts';
-import type { ReleaseInfo, RepositoryRef } from './domain.ts';
+import { repositoryUrl, type ReleaseInfo, type RepositoryRef } from './domain.ts';
 import {
   ReleaseSourceError,
+  releaseOrder,
+  tagPath,
+  TAGS_PER_PAGE,
   truncate,
   type AdvisoryFetchResult,
   type RateLimit,
   type ReleaseFetchResult,
+  type ReleaseQuery,
   type ReleaseSource,
 } from './release-source.ts';
+import { isPrereleaseTag } from './version.ts';
 
 interface GitHubReleaseDto {
   tag_name: string;
@@ -18,6 +23,10 @@ interface GitHubReleaseDto {
   prerelease: boolean;
   published_at: string | null;
   author: { login: string; avatar_url: string | null } | null;
+}
+
+interface GitHubTagDto {
+  name: string;
 }
 
 interface GitHubAdvisoryDto {
@@ -75,14 +84,36 @@ export class GitHubReleaseSource implements ReleaseSource {
     return true;
   }
 
-  async getRecentReleases(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
-    const path = `${this.repoPath(repo)}/releases?per_page=${this.options.releasesPerPage}`;
+  async getRecentReleases(repo: ReleaseQuery, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
+    const tags = repo.releaseSource === 'tags';
+    const path = tags
+      ? `${this.repoPath(repo)}/tags?per_page=${TAGS_PER_PAGE}`
+      : `${this.repoPath(repo)}/releases?per_page=${this.options.releasesPerPage}`;
     const response = await this.request(path, etag ? { 'If-None-Match': etag } : {}, token);
+    const order = releaseOrder(repo);
 
     if (response.status === 304) {
-      return { releases: [], etag, notModified: true };
+      return { releases: [], etag, notModified: true, order };
     }
     await ensureOk(response);
+
+    if (tags) {
+      // The tags API has no dates (each would cost a request for its commit); tags are ordered by version instead.
+      const dtos = (await response.json()) as GitHubTagDto[];
+      const releases = dtos.map(
+        (d): ReleaseInfo => ({
+          tag: d.name,
+          name: null,
+          htmlUrl: `${repositoryUrl(repo)}/releases/tag/${tagPath(d.name)}`,
+          body: null,
+          isPrerelease: isPrereleaseTag(d.name),
+          publishedAt: '',
+          authorLogin: null,
+          authorAvatarUrl: null,
+        }),
+      );
+      return { releases, etag: response.headers.get('etag'), notModified: false, order };
+    }
 
     const dtos = (await response.json()) as GitHubReleaseDto[];
     const releases = dtos
@@ -100,7 +131,7 @@ export class GitHubReleaseSource implements ReleaseSource {
         }),
       );
 
-    return { releases, etag: response.headers.get('etag'), notModified: false };
+    return { releases, etag: response.headers.get('etag'), notModified: false, order };
   }
 
   async getSecurityAdvisories(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {

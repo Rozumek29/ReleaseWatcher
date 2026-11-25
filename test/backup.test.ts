@@ -169,6 +169,8 @@ describe('backup', () => {
       owner: 'acme',
       name: 'widget',
       includePrereleases: true,
+      releaseSource: 'releases',
+      versionPattern: null,
       isEnabled: true,
       icon: 'sh:frigate',
       groupName: 'Home lab',
@@ -291,7 +293,10 @@ describe('backup', () => {
   it('restores repositories of Gitea/Forgejo and GitLab instances', async () => {
     const source = await instance();
     source.store.add('forgejo', 'forgejo', false, { provider: 'gitea', host: 'codeberg.org' });
-    source.store.add('group/sub', 'project', true, { provider: 'gitlab', host: 'gitlab.com' });
+    const gitlab = source.store.add('group/sub', 'project', true, { provider: 'gitlab', host: 'gitlab.com' });
+    gitlab.releaseSource = 'tags';
+    gitlab.versionPattern = '^release-(.+)$';
+    source.store.save(gitlab);
     source.store.add('forgejo', 'forgejo', false);
     const file = await exportFrom(source);
     assert.deepEqual(
@@ -309,6 +314,8 @@ describe('backup', () => {
       target.store.list().map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
       file.repositories.map((r) => [r.provider, r.host, r.owner, r.name]).toSorted(),
     );
+    const restored = target.store.list().find((r) => r.provider === 'gitlab')!;
+    assert.deepEqual([restored.releaseSource, restored.versionPattern], ['tags', '^release-(.+)$']);
 
     // A file of an older version (no provider) means GitHub; a repository of a host needs a valid host.
     const invalid = await importInto(
@@ -438,6 +445,7 @@ describe('backup', () => {
       repositories: [
         { owner: 'acme', name: 'widget' },
         { owner: 'acme', name: 'gadget', icon: 'not an icon' },
+        { owner: 'acme', name: 'tool', releaseSource: 'tags', versionPattern: '(' },
       ],
       hosts: [{ type: 'proxmox', name: 'pve', address: 'pve.lan', targets: [{ kind: 'server', vmid: 0, name: 'x' }] }],
       dockerEndpoints: [{ name: 'Bad', url: 'ftp://nas' }],
@@ -449,6 +457,7 @@ describe('backup', () => {
       'dockerEndpoints[0].url',
       'hosts[0].targets[0].kind',
       'repositories[1].icon',
+      'repositories[2].versionPattern',
       'settings.releaseCheckCron',
     ]);
     assert.equal(target.store.list().length, 0);

@@ -2,7 +2,7 @@
  * Backup file of the configuration (Settings → Backup): what is exported, how items are matched on import and how
  * secrets are left out. Pure types and helpers – no I/O.
  */
-import { fullName, type RepositoryProvider } from '../domain.ts';
+import { fullName, type ReleaseSourceKind, type RepositoryProvider } from '../domain.ts';
 import type { SettingKey } from '../settings.ts';
 
 /** Marks a JSON file as a ReleaseWatcher backup. */
@@ -27,6 +27,9 @@ export interface BackupRepository {
   owner: string;
   name: string;
   includePrereleases: boolean;
+  /** `releases` or `tags`; missing in older files = releases. */
+  releaseSource: ReleaseSourceKind;
+  versionPattern: string | null;
   isEnabled: boolean;
   icon: string | null;
   /** Custom group on the Repositories page, and the group's icon. */

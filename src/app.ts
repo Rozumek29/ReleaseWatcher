@@ -29,13 +29,16 @@ import {
   parseRepositoryReference,
   PROVIDER_LABELS,
   PROVIDERS,
+  RELEASE_SOURCES,
   repositoryAvatarUrl,
   repositoryUrl,
+  setReleaseSource,
   validateIcon,
   type RepositoryProvider,
   type RepositoryRef,
   type WatchedRepository,
 } from './domain.ts';
+import { normalizePattern, validatePattern } from './pattern.ts';
 import type { ReleaseSource } from './release-source.ts';
 import { errorMessage } from './errors.ts';
 import { noStore, problem, validationProblem } from './http.ts';
@@ -340,6 +343,10 @@ export const toDto = (
   /** Custom group on the Repositories page (`/api/repository-groups`); null = none. */
   groupId: r.groupId,
   includePrereleases: r.includePrereleases,
+  /** `releases` (newest by date) or `tags` (newest by version). */
+  releaseSource: r.releaseSource,
+  /** Regular expression tags must match; with tags its group picks the version. Null = none. */
+  versionPattern: r.versionPattern,
   isEnabled: r.isEnabled,
   lastSeenTag: r.lastSeenTag,
   lastSeenPublishedAt: r.lastSeenPublishedAt,
@@ -383,12 +390,19 @@ const addRepositorySchema = body({
   /** Provider of a host that is not well known (detected when omitted); ignored for github.com, gitlab.com, codeberg.org … */
   provider: z.enum(PROVIDERS).nullish(),
   includePrereleases: z.boolean().optional(),
+  /** Releases (default) or tags. */
+  releaseSource: z.enum(RELEASE_SOURCES).nullish(),
+  versionPattern: z.string().max(2000).nullish(),
   accessToken: z.string().max(1000).nullish(),
 });
 
 const updateRepositorySchema = body({
   includePrereleases: z.boolean(),
   isEnabled: z.boolean(),
+  /** Omit = keep, null = releases. Changing it (or the pattern) makes the next check set a new baseline silently. */
+  releaseSource: z.enum(RELEASE_SOURCES).nullish(),
+  /** Omit = keep, null/"" = none. */
+  versionPattern: z.string().max(2000).nullish(),
   installedVersionUrl: z.string().max(2000).nullish(),
   installedVersionField: z.string().max(200).nullish(),
   installedVersionHeaders: headersSchema,
@@ -866,6 +880,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   const addRepository = async (req: Request) => {
     const body = await readBody(req, addRepositorySchema);
     const accessToken = body.accessToken?.trim() || null;
+    const versionPattern = normalizePattern(body.versionPattern);
+    const patternError = versionPattern === null ? null : validatePattern(versionPattern);
+    if (patternError) {
+      return validationProblem('versionPattern', patternError);
+    }
     const parsed = parseRepositoryReference(body.repository);
     if (!parsed) {
       return validationProblem(
@@ -913,7 +932,8 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
 
     const repo = store.add(owner, name, body.includePrereleases ?? false, found);
-    if (accessToken) {
+    const tagsOrPattern = setReleaseSource(repo, body.releaseSource ?? 'releases', versionPattern);
+    if (accessToken || tagsOrPattern) {
       repo.accessToken = accessToken;
       store.save(repo);
     }
@@ -946,6 +966,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if (iconError) {
       return validationProblem('icon', iconError);
     }
+    const versionPattern = body.versionPattern === undefined ? repo.versionPattern : normalizePattern(body.versionPattern);
+    const patternError = versionPattern === null || versionPattern === repo.versionPattern ? null : validatePattern(versionPattern);
+    if (patternError) {
+      return validationProblem('versionPattern', patternError);
+    }
+    setReleaseSource(repo, body.releaseSource === undefined ? repo.releaseSource : (body.releaseSource ?? 'releases'), versionPattern);
     if (icon !== undefined) {
       repo.icon = icon;
     }

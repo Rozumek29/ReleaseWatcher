@@ -4,6 +4,7 @@ import { ReleaseChecker } from '../src/checker.ts';
 import { RepositoryStore } from '../src/db.ts';
 import { NotificationDispatcher } from '../src/notifiers/dispatcher.ts';
 import type { SecurityAdvisory } from '../src/advisories.ts';
+import { isPrereleaseTag } from '../src/version.ts';
 import { advisory, FakeSource, RecordingNotifier, release, silentLog } from './helpers.ts';
 
 describe('ReleaseChecker', () => {
@@ -14,6 +15,7 @@ describe('ReleaseChecker', () => {
   let installed: string | Error = '1.0.0';
 
   beforeEach(() => {
+    installed = '1.0.0';
     store = new RepositoryStore(':memory:');
     source = new FakeSource();
     notifier = new RecordingNotifier();
@@ -44,6 +46,59 @@ describe('ReleaseChecker', () => {
     assert.equal(result.notifiedCount, 1);
     assert.equal(notifier.sent[0]?.release.tag, 'v2');
     assert.equal(store.get(repo.id)?.lastSeenTag, 'v2');
+  });
+
+  describe('tags', () => {
+    // Like the providers: undated, a pre-release when the tag says so.
+    const tag = (name: string) => ({ ...release(name, 1, isPrereleaseTag(name)), publishedAt: '' });
+    const truenas = ['TrueNAS-9.10.2-U5', 'TrueNAS-9.10.2-U2', 'TrueNAS-9.10-RELEASE', 'TS-27.0.0-RC.1', 'TS-26.0.0-BETA.3', 'TS-25.10.8', 'TS-25.10.7'];
+
+    it('picks the newest version through the pattern and notifies about higher ones', async () => {
+      installed = new Error('no version');
+      const repo = store.add('truenas', 'middleware', false);
+      repo.releaseSource = 'tags';
+      repo.versionPattern = '^TS-(.+)$';
+      store.save(repo);
+      source.releases = truenas.map(tag);
+      await checker.check(repo);
+      assert.equal(notifier.sent.length, 0);
+      assert.equal(store.get(repo.id)?.lastSeenTag, '25.10.8');
+
+      source.releases = ['TS-25.10.10', 'TS-25.10.9', ...truenas].map(tag);
+      const result = await checker.check(repo);
+      assert.equal(result.notifiedCount, 2);
+      assert.deepEqual(notifier.sent.map((n) => n.release.tag), ['25.10.9', '25.10.10']);
+      const saved = store.get(repo.id)!;
+      assert.equal(saved.lastSeenTag, '25.10.10');
+      assert.ok(saved.lastSeenPublishedAt);
+
+      // An older tag listed first does not move the baseline back.
+      source.releases = ['TS-25.10.7', 'TS-25.10.10'].map(tag);
+      await checker.check(saved);
+      assert.equal(notifier.sent.length, 2);
+      assert.equal(store.get(repo.id)?.lastSeenTag, '25.10.10');
+    });
+
+    it('treats Checkmk patch levels as newer versions', async () => {
+      installed = 'v2.5.0p20';
+      const repo = store.add('Checkmk', 'checkmk', false);
+      repo.releaseSource = 'tags';
+      store.save(repo);
+      source.releases = ['v2.5.0', 'v2.5.0p20'].map(tag);
+      await checker.check(repo);
+      source.releases = ['v2.5.0', 'v2.5.0p21', 'v2.5.0p21+security', 'v2.5.0p21-rc1+security', 'v2.5.0p20'].map(tag);
+      await checker.check(repo);
+      assert.deepEqual(notifier.sent.map((n) => n.release.tag), ['v2.5.0p21']);
+    });
+
+    it('records an unusable pattern as the check error', async () => {
+      const repo = store.add('acme', 'widget', false);
+      repo.versionPattern = '(';
+      store.save(repo);
+      source.releases = [release('v1', 1)];
+      const result = await checker.check(repo);
+      assert.match(result.error ?? '', /not a valid regular expression/);
+    });
   });
 
   it('passes the custom icon of the repository to the notifiers', async () => {

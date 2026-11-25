@@ -1,3 +1,5 @@
+import { compareVersions, parseVersion } from './version.ts';
+
 /** Where releases of a repository are read from: GitHub, a Gitea/Forgejo instance (Codeberg …) or a GitLab instance. */
 export const PROVIDERS = ['github', 'gitea', 'gitlab'] as const;
 export type RepositoryProvider = (typeof PROVIDERS)[number];
@@ -12,10 +14,21 @@ export interface RepositoryRef {
   name: string;
 }
 
+/** What of a repository is watched: its releases, or its tags (projects that tag versions without releases). */
+export const RELEASE_SOURCES = ['releases', 'tags'] as const;
+export type ReleaseSourceKind = (typeof RELEASE_SOURCES)[number];
+
 /** A repository the user wants to be notified about. */
 export interface WatchedRepository extends RepositoryRef {
   id: number;
   includePrereleases: boolean;
+  /** Releases (newest by date) or tags (newest by version). */
+  releaseSource: ReleaseSourceKind;
+  /**
+   * Regular expression (case-insensitive) tags must match; others are skipped. With tags, its group `version` (or group
+   * 1) becomes the version shown and compared, e.g. `^TS-(.+)$`. Null = every tag.
+   */
+  versionPattern: string | null;
   isEnabled: boolean;
   /** Tag of the newest release already processed. */
   lastSeenTag: string | null;
@@ -89,7 +102,7 @@ export interface ReleaseInfo {
   htmlUrl: string;
   body: string | null;
   isPrerelease: boolean;
-  /** ISO date. */
+  /** ISO date; empty for a tag without a date (GitHub) – {@link selectNewVersions} fills in the check time. */
   publishedAt: string;
   authorLogin: string | null;
   authorAvatarUrl: string | null;
@@ -299,6 +312,27 @@ export function parseRepositoryReference(input: string | null | undefined): Pars
   return { host, owner: segments.slice(0, -1).join('/'), name: last, provider };
 }
 
+/**
+ * Sets what of a repository is watched. A change makes the next check establish a new baseline silently (versions of
+ * tags and releases, or before and after a new pattern, can't be compared). Returns true when something changed.
+ */
+export function setReleaseSource(
+  repo: WatchedRepository,
+  releaseSource: ReleaseSourceKind,
+  versionPattern: string | null,
+): boolean {
+  if (repo.releaseSource === releaseSource && repo.versionPattern === versionPattern) {
+    return false;
+  }
+  repo.releaseSource = releaseSource;
+  repo.versionPattern = versionPattern;
+  repo.lastSeenTag = null;
+  repo.lastSeenPublishedAt = null;
+  repo.releasesEtag = null;
+  repo.lastCheckedAt = null;
+  return true;
+}
+
 /** Upper bound of notifications sent for one repository in a single check (protects against spam). */
 export const MAX_NOTIFICATIONS_PER_CHECK = 5;
 
@@ -333,5 +367,44 @@ export function selectNewReleases(
     .filter((r) => r.tag !== repo.lastSeenTag)
     .slice(-MAX_NOTIFICATIONS_PER_CHECK);
 
+  return { newReleases, newest };
+}
+
+/**
+ * Decides which fetched versions are "new" when a source has no usable dates (tags): by version instead of by date.
+ * Tags that are not versions are skipped, tags of the same version (`v2.5.0p21`, `v2.5.0p21+security`) count once. On
+ * the first check only the baseline is established; later every version above `lastSeenTag` is new (only the newest when
+ * the baseline is no version). Undated tags get `now` as their date.
+ */
+export function selectNewVersions(
+  repo: Pick<WatchedRepository, 'includePrereleases' | 'lastCheckedAt' | 'lastSeenTag'>,
+  releases: readonly ReleaseInfo[],
+  now: Date,
+): ReleaseSelection {
+  const candidates: ReleaseInfo[] = [];
+  for (const release of releases) {
+    if ((!repo.includePrereleases && release.isPrerelease) || parseVersion(release.tag) === null) {
+      continue;
+    }
+    const dated = release.publishedAt ? release : { ...release, publishedAt: now.toISOString() };
+    const same = candidates.findIndex((c) => compareVersions(c.tag, release.tag) === 0);
+    if (same < 0) {
+      candidates.push(dated);
+    } else if (candidates[same]?.isPrerelease && !release.isPrerelease) {
+      candidates[same] = dated;
+    }
+  }
+  candidates.sort((a, b) => compareVersions(a.tag, b.tag) ?? 0);
+
+  const newest = candidates.at(-1) ?? null;
+  if (repo.lastCheckedAt === null) {
+    return { newReleases: [], newest };
+  }
+  if (parseVersion(repo.lastSeenTag) === null) {
+    return { newReleases: newest ? [newest] : [], newest };
+  }
+  const newReleases = candidates
+    .filter((c) => (compareVersions(c.tag, repo.lastSeenTag) ?? 0) > 0)
+    .slice(-MAX_NOTIFICATIONS_PER_CHECK);
   return { newReleases, newest };
 }

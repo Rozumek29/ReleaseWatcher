@@ -9,8 +9,11 @@ import {
   repositoryAvatarUrl,
   repositoryUrl,
   selectNewReleases,
+  selectNewVersions,
+  setReleaseSource,
   validateIcon,
 } from '../src/domain.ts';
+import { RepositoryStore } from '../src/db.ts';
 import { dayIso, release } from './helpers.ts';
 
 describe('parseRepositoryName', () => {
@@ -148,5 +151,71 @@ describe('custom icons', () => {
     assert.match(validateIcon('https://user:pw@example.com/a.png') ?? '', /credentials/);
     assert.match(validateIcon('frigate') ?? '', /image URL/);
     assert.match(validateIcon(`https://example.com/${'a'.repeat(2000)}`) ?? '', /at most/);
+  });
+});
+
+describe('selectNewVersions', () => {
+  const now = new Date('2026-11-25T12:00:00Z');
+  const base = { includePrereleases: false, lastCheckedAt: dayIso(0), lastSeenTag: null };
+  const tag = (name: string, isPrerelease = false) => ({ ...release(name, 1, isPrerelease), publishedAt: '' });
+  const tags = (r: { newReleases: { tag: string }[] }) => r.newReleases.map((x) => x.tag);
+  // Real Checkmk/checkmk tags, in GitHub's order (by name).
+  const checkmk = [
+    tag('v2.5.0'),
+    tag('v2.5.0p21'),
+    tag('v2.5.0p21+security'),
+    tag('v2.5.0p21-rc1+security', true),
+    tag('v2.5.0p20'),
+    tag('nightly'),
+  ];
+
+  it('establishes a baseline by version on the first check, dating undated tags now', () => {
+    const result = selectNewVersions({ ...base, lastCheckedAt: null }, checkmk, now);
+    assert.deepEqual(tags(result), []);
+    assert.equal(result.newest?.tag, 'v2.5.0p21');
+    assert.equal(result.newest?.publishedAt, now.toISOString());
+  });
+
+  it('returns versions above the baseline, ascending, each version once', () => {
+    const result = selectNewVersions({ ...base, lastSeenTag: 'v2.5.0' }, checkmk, now);
+    assert.deepEqual(tags(result), ['v2.5.0p20', 'v2.5.0p21']);
+  });
+
+  it('includes pre-releases only when enabled and prefers the stable tag of a version', () => {
+    const repo = { ...base, includePrereleases: true, lastSeenTag: 'v2.5.0p20' };
+    assert.deepEqual(tags(selectNewVersions(repo, checkmk, now)), ['v2.5.0p21-rc1+security', 'v2.5.0p21']);
+    // The pattern picked the same version from `v3.0.0-rc1` (a pre-release) and `v3.0.0`.
+    const same = selectNewVersions(repo, [tag('3.0.0', true), { ...tag('3.0.0'), htmlUrl: 'stable' }], now);
+    assert.deepEqual([tags(same), same.newest?.htmlUrl], [['3.0.0'], 'stable']);
+    assert.deepEqual(tags(selectNewVersions({ ...repo, lastSeenTag: '1.0' }, [tag('2.0-beta', true), tag('2.0', false)], now)), [
+      '2.0-beta',
+      '2.0',
+    ]);
+  });
+
+  it('reports only the newest version when the baseline is no version', () => {
+    assert.deepEqual(tags(selectNewVersions(base, checkmk, now)), ['v2.5.0p21']);
+    assert.deepEqual(tags(selectNewVersions({ ...base, lastSeenTag: 'latest' }, checkmk, now)), ['v2.5.0p21']);
+  });
+
+  it('keeps a known date and limits the notifications', () => {
+    const many = Array.from({ length: 9 }, (_, i) => release(`1.${i}.0`, i));
+    const result = selectNewVersions({ ...base, lastSeenTag: '0.1' }, many, now);
+    assert.deepEqual(tags(result), ['1.4.0', '1.5.0', '1.6.0', '1.7.0', '1.8.0']);
+    assert.equal(result.newest?.publishedAt, dayIso(8));
+  });
+});
+
+describe('setReleaseSource', () => {
+  it('resets the baseline only when the source or the pattern changes', () => {
+    const repo = new RepositoryStore(':memory:').add('acme', 'widget', false);
+    Object.assign(repo, { lastSeenTag: 'v1', lastSeenPublishedAt: dayIso(1), releasesEtag: '"e"', lastCheckedAt: dayIso(1) });
+    assert.equal(setReleaseSource(repo, 'releases', null), false);
+    assert.equal(repo.lastSeenTag, 'v1');
+    assert.equal(setReleaseSource(repo, 'tags', '^v(.+)$'), true);
+    assert.deepEqual(
+      [repo.releaseSource, repo.versionPattern, repo.lastSeenTag, repo.lastSeenPublishedAt, repo.releasesEtag, repo.lastCheckedAt],
+      ['tags', '^v(.+)$', null, null, null, null],
+    );
   });
 });

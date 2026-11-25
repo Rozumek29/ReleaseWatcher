@@ -3,8 +3,12 @@ import {
   ensureJson,
   instanceRequest,
   isJson,
+  releaseOrder,
+  tagPath,
+  TAGS_PER_PAGE,
   type InstanceOptions,
   type ReleaseFetchResult,
+  type ReleaseQuery,
   type ReleaseSource,
 } from './release-source.ts';
 import { isPrereleaseTag } from './version.ts';
@@ -18,6 +22,13 @@ interface GitLabReleaseDto {
   upcoming_release?: boolean;
   author: { username: string; avatar_url: string | null } | null;
   _links?: { self?: string | null } | null;
+}
+
+interface GitLabTagDto {
+  name: string;
+  message?: string | null;
+  created_at?: string | null;
+  commit?: { committed_date?: string | null; created_at?: string | null } | null;
 }
 
 /**
@@ -43,12 +54,34 @@ export class GitLabReleaseSource implements ReleaseSource {
     return true;
   }
 
-  async getRecentReleases(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
-    const response = await this.request(repo, `/releases?per_page=${this.options.releasesPerPage}`, token, etag);
+  async getRecentReleases(repo: ReleaseQuery, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
+    const tags = repo.releaseSource === 'tags';
+    const path = tags
+      ? `/repository/tags?per_page=${TAGS_PER_PAGE}&order_by=version`
+      : `/releases?per_page=${this.options.releasesPerPage}`;
+    const response = await this.request(repo, path, token, etag);
+    const order = releaseOrder(repo);
     if (response.status === 304) {
-      return { releases: [], etag, notModified: true };
+      return { releases: [], etag, notModified: true, order };
     }
     await ensureJson(response, label(repo));
+    if (tags) {
+      const dtos = (await response.json()) as GitLabTagDto[];
+      const releases = dtos.map((d): ReleaseInfo => {
+        const date = d.created_at || d.commit?.committed_date || d.commit?.created_at;
+        return {
+          tag: d.name,
+          name: null,
+          htmlUrl: `${repositoryUrl(repo)}/-/tags/${tagPath(d.name)}`,
+          body: d.message?.trim() || null,
+          isPrerelease: isPrereleaseTag(d.name),
+          publishedAt: date ? new Date(date).toISOString() : '',
+          authorLogin: null,
+          authorAvatarUrl: null,
+        };
+      });
+      return { releases, etag: response.headers.get('etag'), notModified: false, order };
+    }
     const dtos = (await response.json()) as GitLabReleaseDto[];
     const releases = dtos
       .filter((d) => d.released_at || d.created_at)
@@ -64,7 +97,7 @@ export class GitLabReleaseSource implements ReleaseSource {
           authorAvatarUrl: d.author?.avatar_url ?? null,
         }),
       );
-    return { releases, etag: response.headers.get('etag'), notModified: false };
+    return { releases, etag: response.headers.get('etag'), notModified: false, order };
   }
 
   private request(repo: RepositoryRef, path: string, token?: string | null, etag: string | null = null): Promise<Response> {

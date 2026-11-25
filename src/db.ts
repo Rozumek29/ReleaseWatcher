@@ -66,6 +66,8 @@ interface Row {
   advisory_baselines: string | null;
   icon: string | null;
   group_id: number | null;
+  release_source: string;
+  version_pattern: string | null;
 }
 
 interface AdvisoryRow {
@@ -141,6 +143,8 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
   advisoryBaselines: parseStringArray(r.advisory_baselines),
   icon: r.icon,
   groupId: r.group_id,
+  releaseSource: r.release_source === 'tags' ? 'tags' : 'releases',
+  versionPattern: r.version_pattern,
 });
 
 function parseHeaders(json: string | null): { name: string; value: string }[] {
@@ -795,6 +799,9 @@ export const MIGRATIONS: readonly string[] = [
      DELETE FROM repository_groups
       WHERE id = OLD.group_id AND NOT EXISTS (SELECT 1 FROM watched_repositories WHERE group_id = OLD.group_id);
    END;`,
+  // Watching tags instead of releases, and a version pattern tags must match.
+  `ALTER TABLE watched_repositories ADD COLUMN release_source TEXT NOT NULL DEFAULT 'releases';
+   ALTER TABLE watched_repositories ADD COLUMN version_pattern TEXT;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -955,7 +962,8 @@ export class RepositoryStore {
            installed_version_checked_at = IIF(${FROM_MACHINE}, installed_version_checked_at, ?),
            installed_version_error = IIF(${FROM_MACHINE}, installed_version_error, ?), access_token = ?,
            advisories_etag = ?, advisories_checked_at = ?, advisories_error = ?,
-           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?, group_id = ?
+           osv_ecosystem = ?, osv_package = ?, advisory_baselines = ?, icon = ?, group_id = ?,
+           release_source = ?, version_pattern = ?
          WHERE id = ?`,
       )
       .run(
@@ -981,6 +989,8 @@ export class RepositoryStore {
         repo.advisoryBaselines.length > 0 ? JSON.stringify(repo.advisoryBaselines) : null,
         repo.icon,
         repo.groupId,
+        repo.releaseSource,
+        repo.versionPattern,
         repo.id,
       );
   }

@@ -12,11 +12,13 @@ import {
   PROVIDER_LABELS,
   type RepositoryGroup,
   type RepositoryRef,
+  setReleaseSource,
   validateIcon,
   type WatchedRepository,
 } from '../domain.ts';
 import { DEFAULT_SSH_PORT, DEFAULT_SSH_USER, HOST_TYPES, type Host, type HostType, validateHost } from '../hosts/domain.ts';
 import type { HostStore } from '../hosts/store.ts';
+import { normalizePattern, validatePattern } from '../pattern.ts';
 import { normalizeHomeAssistantUrl } from '../proxmox/home-assistant.ts';
 import {
   capabilities,
@@ -200,6 +202,8 @@ function exportRepository(r: WatchedRepository, groups: Map<number, RepositoryGr
     owner: r.owner,
     name: r.name,
     includePrereleases: r.includePrereleases,
+    releaseSource: r.releaseSource,
+    versionPattern: r.versionPattern,
     isEnabled: r.isEnabled,
     icon: r.icon,
     groupName: group?.name ?? null,
@@ -513,6 +517,12 @@ class ImportPlanner {
       this.error(`${path}.osvPackage`, 'Set both the ecosystem and the package name, or neither.');
       ok = false;
     }
+    const versionPattern = normalizePattern(raw.versionPattern);
+    const patternError = versionPattern === null ? null : validatePattern(versionPattern);
+    if (patternError) {
+      this.error(`${path}.versionPattern`, patternError);
+      ok = false;
+    }
     if (!ok) return null;
     return {
       provider: parsed.provider,
@@ -520,6 +530,8 @@ class ImportPlanner {
       owner: parsed.owner,
       name: parsed.name,
       includePrereleases: raw.includePrereleases ?? false,
+      releaseSource: raw.releaseSource ?? 'releases',
+      versionPattern,
       isEnabled: raw.isEnabled ?? true,
       icon,
       groupName,
@@ -974,6 +986,7 @@ function applyRepository(repo: WatchedRepository, item: BackupRepository, store:
     repo.releasesEtag = null;
   }
   repo.includePrereleases = item.includePrereleases;
+  setReleaseSource(repo, item.releaseSource, item.versionPattern);
   repo.isEnabled = item.isEnabled;
   repo.icon = item.icon;
   // The group is found by name (or created); its icon is the one in the file.

@@ -3,7 +3,8 @@
  * defaults, unknown properties are dropped, so files of older and newer versions still parse; the values themselves
  * are checked by `BackupService` with the same rules as the regular endpoints.
  */
-import { PROVIDERS } from '../domain.ts';
+import { PROVIDERS, RELEASE_SOURCES } from '../domain.ts';
+import { MAX_PATTERN_LENGTH } from '../pattern.ts';
 import { z } from '../validation.ts';
 import { GROUP_NAME_MAX_LENGTH } from '../domain.ts';
 
@@ -59,6 +60,8 @@ const repositorySchema = z.object({
   owner: z.string().max(1000),
   name: z.string().max(100),
   includePrereleases: z.boolean().nullish(),
+  releaseSource: z.enum(RELEASE_SOURCES).nullish(),
+  versionPattern: text(MAX_PATTERN_LENGTH),
   isEnabled: z.boolean().nullish(),
   icon: text(2000),
   groupName: text(GROUP_NAME_MAX_LENGTH),

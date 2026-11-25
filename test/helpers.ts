@@ -3,7 +3,14 @@ import type { DockerEngine } from '../src/docker/engine.ts';
 import type { RegistryClient } from '../src/docker/registry.ts';
 import type { SecurityAdvisory } from '../src/advisories.ts';
 import { fullName, type ReleaseInfo, type RepositoryProvider, type RepositoryRef } from '../src/domain.ts';
-import type { AdvisoryFetchResult, ReleaseFetchResult, ReleaseSource } from '../src/release-source.ts';
+import {
+  applyVersionPattern,
+  releaseOrder,
+  type AdvisoryFetchResult,
+  type ReleaseFetchResult,
+  type ReleaseQuery,
+  type ReleaseSource,
+} from '../src/release-source.ts';
 import { shQuote } from '../src/proxmox/domain.ts';
 import type { CommandResult, NodeShell, RunOptions } from '../src/proxmox/ssh.ts';
 import type { RepositoryStore } from '../src/db.ts';
@@ -85,16 +92,21 @@ export class FakeSource implements ReleaseSource {
     return required !== undefined ? token === required : this.existing.has(key);
   }
 
-  async getRecentReleases(repo: RepositoryRef, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
+  /** Applies the version pattern like `ProviderReleaseSource`. */
+  async getRecentReleases(repo: ReleaseQuery, etag: string | null, token?: string | null): Promise<ReleaseFetchResult> {
     this.calls++;
     this.lastToken = token;
     this.asked.push(repo);
     if (this.error) {
       throw this.error;
     }
-    return this.notModified
-      ? { releases: [], etag, notModified: true }
-      : { releases: this.releases, etag: '"etag"', notModified: false };
+    const order = releaseOrder(repo);
+    return applyVersionPattern(
+      this.notModified
+        ? { releases: [], etag, notModified: true, order }
+        : { releases: this.releases, etag: '"etag"', notModified: false, order },
+      repo,
+    );
   }
 
   async getSecurityAdvisories(_repo: RepositoryRef, etag: string | null, token?: string | null): Promise<AdvisoryFetchResult> {
