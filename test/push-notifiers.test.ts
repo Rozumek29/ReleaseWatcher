@@ -120,6 +120,31 @@ describe('push channels', () => {
     assert.equal(JSON.parse(requests[0]!.body).extras['client::display'].contentType, 'text/markdown');
   });
 
+  it('sends to Gotify again without emoji when its MySQL table cannot store them', async () => {
+    const bodies: string[] = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(String(init?.body));
+      return bodies.length === 1
+        ? new Response(`{"errorDescription":"Error 1366 (22007): Incorrect string value: '\\\\xF0\\\\x9F\\\\x8E\\\\x89'"}`, { status: 500 })
+        : new Response('{}');
+    }) as typeof fetch;
+    const party = { ...sample, release: { ...sample.release, name: 'Party 🎉', body: '🚀 Features\n- ❤️ faster 👨‍👩‍👧' } };
+    await new GotifyNotifier({ serverUrl: 'https://gotify.example.com', token: 'Axyz', fetch: fetcher }).notify(party);
+    assert.equal(bodies.length, 2);
+    assert.match(JSON.parse(bodies[0]!).message, /🚀/);
+    const retried = JSON.parse(bodies[1]!);
+    assert.doesNotMatch(`${retried.title}${retried.message}`, /[\u{10000}-\u{10FFFF}]/u);
+    assert.match(retried.message, / Features\n- ❤️ faster /);
+    assert.match(retried.title, /Party $/);
+  });
+
+  it('does not resend to Gotify on other errors', async () => {
+    const { fetch, requests } = fakeFetch(500);
+    const gotify = new GotifyNotifier({ serverUrl: 'https://gotify.example.com', token: 'Axyz', fetch });
+    await assert.rejects(gotify.notify(sample), /Gotify returned 500/);
+    assert.equal(requests.length, 1);
+  });
+
   it('sends to Telegram as HTML and retries when rate limited', async () => {
     const { fetch, requests } = fakeFetch(429);
     await new TelegramNotifier({ botToken: '123:abc', chatId: '-100', fetch }).notify(sample);

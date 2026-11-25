@@ -22,13 +22,39 @@ export class GotifyNotifier extends SimpleNotifier<GotifyOptions> {
   }
 
   protected async send(message: SimpleMessage, options: GotifyOptions): Promise<void> {
-    await postWithRetry(joinUrl(options.serverUrl!, '/message'), buildGotifyPayload(message), {
-      service: 'Gotify',
-      headers: { 'X-Gotify-Key': options.token! },
-      ...(options.fetch ? { fetch: options.fetch } : {}),
-    });
+    const post = (payload: ReturnType<typeof buildGotifyPayload>) =>
+      postWithRetry(joinUrl(options.serverUrl!, '/message'), payload, {
+        service: 'Gotify',
+        headers: { 'X-Gotify-Key': options.token! },
+        ...(options.fetch ? { fetch: options.fetch } : {}),
+      });
+    const payload = buildGotifyPayload(message);
+    try {
+      await post(payload);
+    } catch (error) {
+      // Gotify on MySQL/MariaDB with a `utf8` (3-byte) table rejects emoji and other 4-byte characters
+      // ("Error 1366: Incorrect string value"); send the message again without them.
+      if (!isIncorrectStringError(error)) {
+        throw error;
+      }
+      await post({
+        ...payload,
+        title: withoutFourByteCharacters(payload.title),
+        message: withoutFourByteCharacters(payload.message),
+      });
+    }
   }
 }
+
+const isIncorrectStringError = (error: unknown): boolean =>
+  error instanceof Error && /Incorrect string value/i.test(error.message);
+
+/**
+ * `text` without characters outside the Basic Multilingual Plane (emoji and the like, 4 bytes in UTF-8) and the
+ * variation selectors / zero-width joiners that follow them.
+ */
+export const withoutFourByteCharacters = (text: string): string =>
+  text.replace(/[\u{10000}-\u{10FFFF}][️‍]*/gu, '');
 
 export function buildGotifyPayload(message: SimpleMessage) {
   return {
