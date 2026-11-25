@@ -5,7 +5,9 @@
  * Selector syntax (formats `html` and `xml`): CSS selectors as accepted by Bun's `HTMLRewriter` (type, class, id,
  * attribute selectors, descendant/child combinators, `:not()`, `:nth-child()` …; a comma-separated list matches any of
  * them). `version`, `date` and `link` are relative to the `items` element (`item > title` is written as items `item`,
- * version `> title`). In XML, a namespaced element is selected with a dash or a colon (`media:title` → `media-title`).
+ * version `> title`). In a `date` or `link` list the earlier selector wins within an item, wherever its element is
+ * (`published, updated` takes `<published>` and falls back to `<updated>`). In XML, a namespaced element is selected
+ * with a dash or a colon (`media:title` → `media-title`).
  *
  * Path syntax (format `json`): a dot path with `[n]` (one element of an array) and `[*]` (every element), e.g.
  * `downloads[*].version`, `[0].tag_name`, `data.releases`. An `items` path that ends at an array means its elements.
@@ -66,12 +68,12 @@ export const RSS_PRESET = {
   link: 'link',
 } as const satisfies Partial<WebSourceConfig>;
 
-/** Preset for Atom feeds (the date is the first of `<updated>` / `<published>`). */
+/** Preset for Atom feeds (the date is `<published>`, else `<updated>` – an edit changes `<updated>`). */
 export const ATOM_PRESET = {
   format: 'xml',
   items: 'entry',
   version: 'title',
-  date: 'updated, published',
+  date: 'published, updated',
   link: 'link',
 } as const satisfies Partial<WebSourceConfig>;
 
@@ -225,6 +227,16 @@ export function selectorsOf(config: WebSourceConfig): {
   const field = (selector: string | null): string | null =>
     selector ? (items ? scopedSelector(items, prepare(selector)) : prepare(selector)) : null;
   return { items, version: field(config.version), date: field(config.date), link: field(config.link) };
+}
+
+/**
+ * The selectors of a `date` or `link` list one by one, in the order of the list and scoped like `selectorsOf()`: the
+ * earlier selector wins within an item, wherever its element is (`published, updated` prefers `<published>`).
+ */
+export function prioritySelectors(config: WebSourceConfig, field: 'date' | 'link'): string[] {
+  const list = config[field];
+  if (list === null) return [];
+  return splitSelectorList(list).flatMap((part) => selectorsOf({ ...config, [field]: part })[field] ?? []);
 }
 
 /** `null` when HTMLRewriter accepts the selector, else its complaint. */

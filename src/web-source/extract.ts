@@ -8,6 +8,7 @@ import { findVersionText } from '../version.ts';
 import {
   MAX_CANDIDATES,
   parseJsonPath,
+  prioritySelectors,
   selectJsonPath,
   selectorsOf,
   WebSourceError,
@@ -216,7 +217,7 @@ const ATTRIBUTES: Record<FieldName, string | null> = { version: null, date: 'dat
 /**
  * Locates the candidates in HTML/XML with HTMLRewriter. Items: one candidate per `items` element (nested items are
  * ignored) with the first matching version/date/link element inside it. Without items: one candidate per `version`
- * element; the first date/link elements of the document belong to the first candidate.
+ * element; the date/link elements of the document (by `prioritySelectors()`) belong to the first candidate.
  */
 async function locateMarkup(body: string, config: WebSourceConfig): Promise<Candidate[]> {
   const selectors = selectorsOf(config);
@@ -259,6 +260,8 @@ async function locateMarkup(body: string, config: WebSourceConfig): Promise<Cand
   if (selectors.items) {
     let item: Record<FieldName, Capture | null> | null = null;
     let itemTag = '';
+    /** Position in its selector list of the item's captured date/link (lower wins). */
+    let ranks = { date: Infinity, link: Infinity };
     const finish = (): void => {
       if (!item) return;
       const current = item;
@@ -277,6 +280,7 @@ async function locateMarkup(body: string, config: WebSourceConfig): Promise<Cand
         const started: Record<FieldName, Capture | null> = { version: null, date: null, link: null };
         item = started;
         itemTag = element.tagName;
+        ranks = { date: Infinity, link: Infinity };
         if (config.version === null) {
           started.version = new Capture(null);
           open.add(started.version);
@@ -286,13 +290,24 @@ async function locateMarkup(body: string, config: WebSourceConfig): Promise<Cand
         });
       },
     });
-    for (const field of ['version', 'date', 'link'] as const) {
-      const selector = selectors[field];
-      if (!selector) continue;
-      rewriter.on(selector, {
+    if (selectors.version) {
+      rewriter.on(selectors.version, {
         element(element) {
-          if (item && !item[field]) item[field] = capture(element, field);
+          if (item && !item.version) item.version = capture(element, 'version');
         },
+      });
+    }
+    // Date and link: the earlier selector of the list wins; an element of a better one replaces a captured one.
+    for (const field of ['date', 'link'] as const) {
+      prioritySelectors(config, field).forEach((selector, rank) => {
+        rewriter.on(selector, {
+          element(element) {
+            if (!item || rank >= ranks[field]) return;
+            closeAll([item[field]]);
+            item[field] = capture(element, field);
+            ranks[field] = rank;
+          },
+        });
       });
     }
     rewriter.onDocument({ end: finish });
@@ -310,13 +325,17 @@ async function locateMarkup(body: string, config: WebSourceConfig): Promise<Cand
         if (!started.closed) current = started;
       },
     });
+    const ranks = { date: Infinity, link: Infinity };
     for (const field of ['date', 'link'] as const) {
-      const selector = selectors[field];
-      if (!selector) continue;
-      rewriter.on(selector, {
-        element(element) {
-          first[field] ??= capture(element, field);
-        },
+      prioritySelectors(config, field).forEach((selector, rank) => {
+        rewriter.on(selector, {
+          element(element) {
+            if (rank >= ranks[field]) return;
+            closeAll([first[field]]);
+            first[field] = capture(element, field);
+            ranks[field] = rank;
+          },
+        });
       });
     }
     rewriter.onDocument({

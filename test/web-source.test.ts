@@ -182,7 +182,7 @@ describe('extractReleases – JSON', () => {
 });
 
 describe('extractReleases – HTML and XML', () => {
-  it('reads an Atom feed with the preset (CDATA, link href, first of updated/published)', async () => {
+  it('reads an Atom feed with the preset (CDATA, link href, published before updated)', async () => {
     const releases = await extractReleases(
       await fixture('atom.xml'),
       config({ ...ATOM_PRESET, url: 'https://example.org/feed.atom' }),
@@ -238,6 +238,29 @@ describe('extractReleases – HTML and XML', () => {
   it('uses the item text without a version selector and ends implied items', async () => {
     const html = '<ul><li>1.0<li>2.0 <b>beta</b></ul>';
     assert.deepEqual(versions(await extractReleases(html, config({ items: 'li' }), null)), ['1.0', '2.0 beta']);
+  });
+
+  it('prefers the earlier selector of a date or link list, wherever its element is', async () => {
+    const atom = `<feed><entry><title>3.1.0</title><updated>2026-11-20T10:00:00Z</updated>
+        <link rel="related" href="/notes/3.1.0"/><published>2026-11-01T08:00:00Z</published>
+        <link rel="alternate" href="/releases/3.1.0"/></entry>
+      <entry><title>3.0.0</title><updated>2026-10-02T10:00:00Z</updated><link href="/releases/3.0.0"/></entry></feed>`;
+    const releases = await extractReleases(
+      atom,
+      config({ ...ATOM_PRESET, url: 'https://example.org/feed', link: 'link[rel=alternate], link' }),
+      null,
+    );
+    assert.deepEqual(
+      releases.map(({ version, publishedAt, url }) => ({ version, publishedAt, url })),
+      [
+        { version: '3.1.0', publishedAt: '2026-11-01T08:00:00.000Z', url: 'https://example.org/releases/3.1.0' },
+        { version: '3.0.0', publishedAt: '2026-10-02T10:00:00.000Z', url: 'https://example.org/releases/3.0.0' },
+      ],
+    );
+    // Without items, the same order applies to the document.
+    const html = '<p class="v">1.2.0</p><span class="d">2026-01-01</span><time datetime="2026-02-03">Feb 3</time>';
+    const [single] = await extractReleases(html, config({ version: '.v', date: 'time, .d' }), null);
+    assert.equal(single?.publishedAt, '2026-02-03T00:00:00.000Z');
   });
 
   it('ignores nested items and takes the first matching field', async () => {
