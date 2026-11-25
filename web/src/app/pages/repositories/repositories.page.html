@@ -257,15 +257,13 @@
       <div class="meta">
         <span class="meta-item" title="Latest release">
           <app-icon name="tag" [size]="14" />
-          @if (repo.lastSeenTag && repo.releaseSource === 'tags' && repo.versionPattern) {
-            <!-- The version picked by the pattern is not the tag name, so there is no page to link. -->
-            <span class="mono">{{ repo.lastSeenTag }}</span>
+          @if (repo.lastSeenTag && repo.lastSeenUrl) {
+            <a [href]="repo.lastSeenUrl" target="_blank" rel="noopener" class="mono">{{ repo.lastSeenTag }}</a>
           } @else if (repo.lastSeenTag) {
-            <a [href]="repo.url + '/releases/tag/' + repo.lastSeenTag" target="_blank" rel="noopener" class="mono">{{ repo.lastSeenTag }}</a>
+            <!-- A version picked by a pattern from tags is no tag name, so there is no page to link. -->
+            <span class="mono">{{ repo.lastSeenTag }}</span>
           } @else if (repo.releaseSource === 'tags') {
             <span>No version tags yet</span>
-          } @else if (repo.lastCheckedAt) {
-            <span title="If the project only tags its versions, choose Watch: Tags in the repository settings.">No releases – try watching its tags</span>
           } @else {
             <span>No releases yet</span>
           }

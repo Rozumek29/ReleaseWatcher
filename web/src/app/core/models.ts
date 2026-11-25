@@ -29,6 +29,8 @@ export interface WatchedRepository {
   versionPattern: string | null;
   isEnabled: boolean;
   lastSeenTag: string | null;
+  /** Page of the latest release or tag; null without one or for a version picked by a pattern from tags. */
+  lastSeenUrl: string | null;
   lastSeenPublishedAt: string | null;
   lastCheckedAt: string | null;
   lastError: string | null;

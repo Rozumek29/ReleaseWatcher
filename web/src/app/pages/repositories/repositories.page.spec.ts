@@ -25,6 +25,7 @@ const repo = (id: number, fullName: string, extra: Partial<WatchedRepository> = 
     versionPattern: null,
     isEnabled: true,
     lastSeenTag: 'v1.0.0',
+    lastSeenUrl: `https://github.com/${fullName}/releases/tag/v1.0.0`,
     lastSeenPublishedAt: '2026-01-01T00:00:00Z',
     lastCheckedAt: '2026-01-02T00:00:00Z',
     lastError: null,
@@ -85,10 +86,10 @@ describe('RepositoriesPage', () => {
     expect(rows[0]?.textContent).toContain('nodejs/');
   });
 
-  it('marks repositories watching tags and suggests tags when there are no releases', async () => {
+  it('marks repositories watching tags and links the latest release page from the server', async () => {
     const { el } = await render([
-      repo(1, 'truenas/middleware', { releaseSource: 'tags', versionPattern: '^TS-(.+)$', lastSeenTag: '25.10.8' }),
-      repo(2, 'acme/no-releases', { lastSeenTag: null, lastCheckedAt: '2026-11-25T10:00:00Z' }),
+      repo(1, 'truenas/middleware', { releaseSource: 'tags', versionPattern: '^TS-(.+)$', lastSeenTag: '25.10.8', lastSeenUrl: null }),
+      repo(2, 'group/project', { releaseSource: 'tags', lastSeenTag: 'v2.0', lastSeenUrl: 'https://gitlab.com/group/project/-/tags/v2.0' }),
     ]);
     const cards = el.querySelectorAll('.card');
     const truenas = [...cards].find((c) => c.textContent?.includes('middleware'))!;
@@ -96,7 +97,8 @@ describe('RepositoriesPage', () => {
     // The version picked by the pattern is no tag name: shown, not linked.
     expect(truenas.querySelector('a.mono')).toBeNull();
     expect(truenas.textContent).toContain('25.10.8');
-    expect(el.textContent).toContain('No releases – try watching its tags');
+    const gitlab = [...cards].find((c) => c.textContent?.includes('project'))!;
+    expect(gitlab.querySelector('a.mono')!.getAttribute('href')).toBe('https://gitlab.com/group/project/-/tags/v2.0');
   });
 
   it('points to settings when no notifier is configured', async () => {

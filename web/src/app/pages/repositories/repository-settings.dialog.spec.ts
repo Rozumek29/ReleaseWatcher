@@ -23,6 +23,7 @@ const repo: WatchedRepository = {
   versionPattern: null,
   isEnabled: true,
   lastSeenTag: '1.32.0',
+  lastSeenUrl: null,
   lastSeenPublishedAt: null,
   lastCheckedAt: null,
   lastError: null,
