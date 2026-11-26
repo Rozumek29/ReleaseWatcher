@@ -1,0 +1,15 @@
+@use './list-rows';
+
+:host {
+  display: block;
+  container-type: inline-size;
+}
+
+.section {
+  height: 100%;
+}
+
+.section-icon {
+  background: var(--surface-2);
+  color: var(--text);
+}

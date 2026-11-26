@@ -1,0 +1,58 @@
+<section class="card section" aria-labelledby="git-hosts-title">
+  <div class="section-head">
+    <span class="section-icon"><app-icon name="key" /></span>
+    <div class="section-title">
+      <h2 id="git-hosts-title">Gitea/Forgejo and GitLab hosts</h2>
+      <p>One token per instance, used by its repositories that have no token of their own – e.g. for private repositories.</p>
+    </div>
+    <div class="head-actions">
+      <button type="button" class="btn btn-sm" (click)="editing.set({ token: null })" [disabled]="tokens() === null">
+        <app-icon name="plus" [size]="14" /> Add token
+      </button>
+    </div>
+  </div>
+
+  <div class="section-body">
+    @if (tokens(); as list) {
+      @for (t of list; track t.id) {
+        <div class="row enter" [style.--i]="$index">
+          <div class="row-main">
+            <div class="row-title">
+              <span class="name mono">{{ t.host }}</span>
+              <span class="badge">{{ providerLabels[t.provider] }}</span>
+            </div>
+            <div class="row-meta">
+              <span class="mono">{{ t.tokenMasked }}</span>
+              <span>Used by {{ t.repositoryCount }} {{ t.repositoryCount === 1 ? 'repository' : 'repositories' }}</span>
+            </div>
+          </div>
+          <div class="row-actions">
+            @if (confirming() === t.id) {
+              <span class="confirm-text">Remove the token for {{ t.host }}?</span>
+              <button type="button" class="btn btn-sm" (click)="remove(t)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+            } @else {
+              <button type="button" class="btn btn-sm btn-ghost" (click)="editing.set({ token: t })" [disabled]="busy().has(t.id)">Edit</button>
+              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="confirming.set(t.id)" [disabled]="busy().has(t.id)">
+                {{ busy().has(t.id) ? 'Removing…' : 'Remove' }}
+              </button>
+            }
+          </div>
+        </div>
+      } @empty {
+        <div class="empty-row">
+          <app-icon name="key" [size]="20" />
+          <p>
+            No host tokens yet. Add one for a self-hosted instance, e.g. <span class="mono">git.example.com</span>, so its
+            private repositories – also those suggested from Docker image labels – can be watched without a token each.
+          </p>
+        </div>
+      }
+    } @else {
+      <div class="skeleton row-skeleton"></div>
+    }
+    <p class="hint">A token is sent only to its own host. A token set on a repository takes precedence.</p>
+  </div>
+</section>
+
+<app-git-host-token-dialog [data]="editing()" (saved)="saved($event, editing()?.token === null)" (closed)="editing.set(null)" />

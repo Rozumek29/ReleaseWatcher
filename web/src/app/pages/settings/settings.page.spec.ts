@@ -169,6 +169,7 @@ describe('SettingsPage', () => {
     http.expectOne('/api/settings').flush(settings);
     await settle(fixture);
     http.expectOne('/api/github/rate-limit').flush(null);
+    http.expectOne('/api/git-host-tokens').flush([]);
     await settle(fixture);
 
     const el = fixture.nativeElement as HTMLElement;

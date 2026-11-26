@@ -946,6 +946,32 @@ export interface AccountUpdate {
   passwordLogin?: boolean | null;
 }
 
+/** Providers whose instances can have a host token. */
+export type GitHostProvider = 'gitea' | 'gitlab';
+
+/**
+ * The access token of a Gitea/Forgejo or GitLab instance: used by its repositories without a token of their own, sent
+ * only to that host. The token itself never leaves the server.
+ */
+export interface GitHostToken {
+  id: number;
+  provider: GitHostProvider;
+  /** Lower-case host with an optional port, e.g. `git.example.com:3000`. */
+  host: string;
+  tokenMasked: string | null;
+  /** Watched repositories on the host without a token of their own – they use this one. */
+  repositoryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** POST / PUT /api/git-host-tokens – on PUT omitted = keep. */
+export interface GitHostTokenInput {
+  provider?: GitHostProvider;
+  host?: string;
+  token?: string | null;
+}
+
 /** A named SSH key; the private part never leaves the server. */
 export interface SshKey {
   id: number;

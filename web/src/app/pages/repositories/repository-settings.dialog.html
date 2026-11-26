@@ -181,11 +181,12 @@
                 @if (repo.hasAccessToken && !removeToken) {
                   This repository uses its own token.
                   <button type="button" class="link-btn" (click)="removeToken = true; token = ''">Remove it</button>
-                  to read it without one.
+                  to read it with the token saved for {{ repo.host }} in Settings, or without one.
                 } @else if (removeToken) {
-                  The token will be removed on save – the repository is read without one.
+                  The token will be removed on save – the repository is read with the token saved for its host in
+                  Settings, or without one.
                 } @else {
-                  Only needed for a private repository: a token of {{ repo.host }}
+                  Only needed for a private repository when no token for {{ repo.host }} is saved in Settings → General: a token of {{ repo.host }}
                   ({{ repo.provider === 'gitlab' ? 'User settings → Access tokens, scope read_api' : 'Settings → Applications → Access tokens, repository: Read' }}).
                   The global GitHub token is never sent to other hosts.
                 }

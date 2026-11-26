@@ -37,6 +37,8 @@ import {
   SelfhstIcon,
   SettingsPatch,
   SshKey,
+  GitHostToken,
+  GitHostTokenInput,
   TestNotificationResult,
   UpdateContainerRequest,
   RepositoryGroup,
@@ -189,6 +191,24 @@ export class ApiService {
 
   getRateLimit(): Observable<RateLimit | null> {
     return this.http.get<RateLimit | null>(`${this.baseUrl}/github/rate-limit`);
+  }
+
+  /* ---------- Tokens of Gitea/Forgejo and GitLab hosts ---------- */
+
+  getGitHostTokens(): Observable<GitHostToken[]> {
+    return this.http.get<GitHostToken[]>(`${this.baseUrl}/git-host-tokens`);
+  }
+
+  addGitHostToken(input: Required<Pick<GitHostTokenInput, 'provider' | 'host'>> & { token: string }): Observable<GitHostToken> {
+    return this.http.post<GitHostToken>(`${this.baseUrl}/git-host-tokens`, input);
+  }
+
+  updateGitHostToken(id: number, input: GitHostTokenInput): Observable<GitHostToken> {
+    return this.http.put<GitHostToken>(`${this.baseUrl}/git-host-tokens/${id}`, input);
+  }
+
+  deleteGitHostToken(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/git-host-tokens/${id}`);
   }
 
   /* ---------- SSH keys and hosts ---------- */

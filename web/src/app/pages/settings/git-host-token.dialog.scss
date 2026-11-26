@@ -1,0 +1,9 @@
+.dialog {
+  width: min(500px, calc(100dvw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}

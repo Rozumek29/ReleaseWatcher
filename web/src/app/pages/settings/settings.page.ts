@@ -30,6 +30,7 @@ import { AppearancePanel } from './appearance';
 import { BackupPanel } from './backup';
 import { CHANNELS, ChannelCard } from './channel-card';
 import { ConnectionsPanel } from './connections';
+import { GitHostTokens } from './git-host-tokens';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
 const SECTIONS: readonly Section[] = ['discord', 'email', 'notifications', 'github', 'polling', 'advisories', 'proxmox'];
@@ -72,6 +73,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
     BackupPanel,
     ChannelCard,
     ConnectionsPanel,
+    GitHostTokens,
     Icon,
     RelativeTimePipe,
     Switch,
