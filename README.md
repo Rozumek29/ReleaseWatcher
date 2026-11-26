@@ -7,7 +7,7 @@
 **Self-hosted release tracker for your homelab.**<br>
 Get notified about new releases on GitHub, Gitea/Forgejo and GitLab and keep your Proxmox LXC containers up to date – from one small app.
 
-[![Version](https://img.shields.io/badge/version-1.8.0-5865f2)](https://github.com/Rozumek29/ReleaseWatcher/releases)
+[![Version](https://img.shields.io/badge/version-1.9.0-5865f2)](https://github.com/Rozumek29/ReleaseWatcher/releases)
 [![Bun](https://img.shields.io/badge/Bun-1.4-000000?logo=bun&logoColor=white)](https://bun.sh)
 [![Angular](https://img.shields.io/badge/Angular-22-dd0031?logo=angular&logoColor=white)](https://angular.dev)
 [![Docker](https://img.shields.io/badge/ghcr.io-releasewatcher-2496ed?logo=docker&logoColor=white)](https://github.com/Rozumek29/ReleaseWatcher/wiki/Installation#docker)
