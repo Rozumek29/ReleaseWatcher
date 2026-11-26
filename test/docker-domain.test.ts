@@ -106,6 +106,21 @@ describe('versions', () => {
     assert.equal(labelRepository({ 'org.opencontainers.image.url': 'https://forgejo.org/' }), null);
   });
 
+  it('skips repository labels inherited from a base image', () => {
+    // An image built on a linuxserver.io base image that sets no source label of its own.
+    const inherited = {
+      'org.opencontainers.image.source': 'https://github.com/linuxserver/docker-baseimage-ubuntu',
+      'org.opencontainers.image.url': 'https://github.com/linuxserver/docker-baseimage-ubuntu/packages',
+    };
+    assert.equal(labelRepository(inherited), null);
+    assert.equal(labelRepository({ 'org.label-schema.vcs-url': 'https://github.com/owner/base-image' }), null);
+    // The own label still names the repository, even a base image.
+    assert.equal(labelRepository({ ...inherited, 'releasewatcher.repo': 'owner/app' }), 'owner/app');
+    assert.equal(labelRepository({ 'releasewatcher.repo': 'linuxserver/docker-baseimage-ubuntu' }), 'linuxserver/docker-baseimage-ubuntu');
+    // Only the whole word counts.
+    assert.equal(labelRepository({ 'org.opencontainers.image.source': 'https://github.com/owner/database-imager' }), 'owner/database-imager');
+  });
+
   it('keeps only the labels it uses', () => {
     assert.deepEqual(keptLabels({ 'org.opencontainers.image.version': '1.0', SECRET: 'x', 'com.docker.compose.project': 'media' }), {
       'org.opencontainers.image.version': '1.0',

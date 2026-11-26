@@ -234,17 +234,22 @@ export function labelVersion(labels: Readonly<Record<string, string>>): string |
 /**
  * Watched repository named by the labels as its lower-case `fullName()`: `owner/name` on GitHub, `host/owner/name` on a
  * Gitea/Forgejo or GitLab instance (e.g. `org.opencontainers.image.source=https://codeberg.org/forgejo/forgejo`). The
- * `url` label often names a project or registry page, so it counts only when it points to GitHub. Null when none fits.
+ * `url` label often names a project or registry page, so it counts only when it points to GitHub. An image inherits
+ * the labels of its base image unless it sets its own, so a repository named like a base image (e.g.
+ * `linuxserver/docker-baseimage-ubuntu`) counts only in the own label. Null when none fits.
  */
 export function labelRepository(labels: Readonly<Record<string, string>>): string | null {
   for (const key of [LABELS.repository, LABELS.source, LABELS.legacySource, LABELS.url]) {
     const parsed = parseRepositoryReference(labels[key]);
-    if (parsed && (parsed.host === null || key !== LABELS.url)) {
+    if (parsed && (parsed.host === null || key !== LABELS.url) && (key === LABELS.repository || !BASE_IMAGE_NAME.test(parsed.name))) {
       return fullName(parsed).toLowerCase();
     }
   }
   return null;
 }
+
+/** Repository names of base images: `docker-baseimage-ubuntu`, `baseimage-alpine`, `base-image`. */
+const BASE_IMAGE_NAME = /(?:^|[-_.])base[-_]?image(?:[-_.]|$)/i;
 
 /** Compose project (Docker Compose or podman-compose); null for containers started on their own. */
 export const composeProject = (labels: Readonly<Record<string, string>>): string | null =>
