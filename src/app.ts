@@ -73,6 +73,9 @@ import { type KeyTool, SshKeygen } from './hosts/keys.ts';
 import { gitHostTokenRoutes } from './git-host-tokens/routes.ts';
 import { withGitHostTokens } from './git-host-tokens/source.ts';
 import { GitHostTokenStore } from './git-host-tokens/store.ts';
+import { homeAssistantRoutes } from './home-assistant/routes.ts';
+import { HomeAssistantService } from './home-assistant/service.ts';
+import { HomeAssistantStore } from './home-assistant/store.ts';
 import { hostRoutes } from './hosts/routes.ts';
 import type { DockerEngine } from './docker/engine.ts';
 import { OciRegistryClient, type RegistryClient } from './docker/registry.ts';
@@ -209,6 +212,9 @@ export interface App {
   /** Docker endpoint and registry checks on `dockerCheckCron`. Created but not started – call `dockerJob.start()`. */
   dockerJob: CronJob;
   docker: DockerService;
+  /** Reads the Home Assistant connections on `homeAssistantCheckCron`. Created but not started – call `homeAssistantJob.start()`. */
+  homeAssistantJob: CronJob;
+  homeAssistant: HomeAssistantService;
   /** Created but not started – call `scheduler.start()`. */
   scheduler: ContainerScheduler;
   /** "Update all" of the containers page. */
@@ -491,6 +497,7 @@ const settingsSchema = body({
   advisoryCheckCron: nullableString(200),
   containerCheckCron: nullableString(200),
   dockerCheckCron: nullableString(200),
+  homeAssistantCheckCron: nullableString(200),
   containerCheckConcurrency: z.int().nullish(),
   backupBeforeUpdate: z.boolean().nullish(),
   runHistoryChecks: z.int().nullish(),
@@ -629,6 +636,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     releaseJob.reschedule();
     advisoryJob.reschedule();
     dockerJob.reschedule();
+    homeAssistantJob.reschedule();
     // Lowered run history limits apply to every container right away.
     containerStore.pruneRuns();
   });
@@ -687,6 +695,19 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
     sequence: sequencer.slot(4),
   });
+  const homeAssistantStore = new HomeAssistantStore(deps.store.database, deps.store.secretBox);
+  const homeAssistant = new HomeAssistantService({
+    store: homeAssistantStore,
+    log,
+    ...(deps.homeAssistantFetch === undefined ? {} : { fetch: deps.homeAssistantFetch }),
+  });
+  const homeAssistantJob = new CronJob({
+    name: 'home-assistant',
+    task: (signal) => homeAssistant.checkAll(signal),
+    cron: () => settings.current.homeAssistantCheckCron,
+    log,
+    sequence: sequencer.slot(5),
+  });
   const containers = new ContainerService({
     docker,
     containers: containerStore,
@@ -719,6 +740,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     settings,
     hosts: hostStore,
     gitHostTokens,
+    homeAssistant: homeAssistantStore,
     containers: containerStore,
     docker: dockerStore,
     isBusy: (id) => containers.isBusy(id) || updater.isQueued(id),
@@ -775,6 +797,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
       docker: {
         checkCron: current.dockerCheckCron,
         checkCronSource: settings.sourceOf('dockerCheckCron'),
+      },
+      homeAssistant: {
+        checkCron: current.homeAssistantCheckCron,
+        checkCronSource: settings.sourceOf('homeAssistantCheckCron'),
       },
       email: {
         configured: deps.notifiers.some((n) => n.name === 'email' && n.isEnabled),
@@ -1427,6 +1453,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
           job: dockerJob,
           onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
         }),
+        ...homeAssistantRoutes({ store: homeAssistantStore, service: homeAssistant, job: homeAssistantJob }),
         ...repositoryGroupRoutes({ store }),
         ...webSourceRoutes(deps.fetchWebSource ? { fetch: deps.fetchWebSource } : {}),
         ...backupRoutes({
@@ -1606,15 +1633,16 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
 
   const close = async () => {
-    await Promise.all([releaseJob.stop(), advisoryJob.stop(), dockerJob.stop()]);
+    await Promise.all([releaseJob.stop(), advisoryJob.stop(), dockerJob.stop(), homeAssistantJob.stop()]);
     await scheduler.stop();
     await updater.stop();
     await server?.stop();
     server = null;
     await containers.idle();
     await docker.idle();
+    await homeAssistant.idle();
     shells.dispose();
   };
 
-  return { checker, releaseJob, advisoryJob, dockerJob, docker, scheduler, updater, containers, auth, log, listen, close };
+  return { checker, releaseJob, advisoryJob, dockerJob, docker, homeAssistantJob, homeAssistant, scheduler, updater, containers, auth, log, listen, close };
 }

@@ -23,6 +23,7 @@ import {
 } from '../domain.ts';
 import { DEFAULT_SSH_PORT, DEFAULT_SSH_USER, HOST_TYPES, type Host, type HostType, validateHost } from '../hosts/domain.ts';
 import type { GitHostTokenStore } from '../git-host-tokens/store.ts';
+import type { HomeAssistantStore } from '../home-assistant/store.ts';
 import type { HostStore } from '../hosts/store.ts';
 import { autoLocator, normalizeLocator, validateLocator } from '../installed-version.ts';
 import { normalizePattern, validatePattern } from '../pattern.ts';
@@ -94,6 +95,7 @@ export interface BackupServiceDeps {
   settings: SettingsService;
   hosts: HostStore;
   gitHostTokens: GitHostTokenStore;
+  homeAssistant: HomeAssistantStore;
   containers: ContainerStore;
   docker: DockerStore;
   /** A check, update or other task is running (or queued) on the target. */
@@ -155,6 +157,10 @@ export class BackupService {
     // Not exported at all: a host token without its value is of no use.
     for (const t of this.deps.gitHostTokens.list()) {
       secretsOmitted.push(`${PROVIDER_LABELS[t.provider]} token of ${t.host}`);
+    }
+    // Not exported at all either: a connection is of no use without its token.
+    for (const c of this.deps.homeAssistant.listConnections()) {
+      secretsOmitted.push(`Home Assistant connection "${c.name}"`);
     }
     for (const key of hosts.listKeys()) {
       secretsOmitted.push(`SSH private key "${key.name}"`);

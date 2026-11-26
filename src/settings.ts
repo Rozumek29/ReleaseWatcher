@@ -22,6 +22,7 @@ export interface Settings {
   containerCheckCron: string;
   /** Cron schedule of Docker endpoint checks and registry checks of Docker images. */
   dockerCheckCron: string;
+  homeAssistantCheckCron: string;
   /** How many containers are checked at the same time. */
   containerCheckConcurrency: number;
   /** Default of "back up before updating" (containers can override it, and it can be changed per update). */
@@ -156,6 +157,7 @@ export class SettingsService {
       advisoryCheckCron: config.advisoryCheckCron,
       containerCheckCron: config.proxmox.checkCron,
       dockerCheckCron: config.dockerCheckCron,
+      homeAssistantCheckCron: config.homeAssistantCheckCron,
       containerCheckConcurrency: config.proxmox.checkConcurrency,
       backupBeforeUpdate: config.proxmox.backupBeforeUpdate,
       runHistoryChecks: DEFAULT_RUN_HISTORY.checks,
@@ -264,6 +266,7 @@ export class SettingsService {
       advisoryCheckCron: o.advisoryCheckCron ?? this.defaults.advisoryCheckCron,
       containerCheckCron: o.containerCheckCron ?? this.defaults.containerCheckCron,
       dockerCheckCron: o.dockerCheckCron ?? this.defaults.dockerCheckCron,
+      homeAssistantCheckCron: o.homeAssistantCheckCron ?? this.defaults.homeAssistantCheckCron,
       containerCheckConcurrency:
         o.containerCheckConcurrency !== undefined
           ? Number(o.containerCheckConcurrency)
@@ -513,7 +516,8 @@ export function validateSetting(key: SettingKey, value: string): void {
     case 'releaseCheckCron':
     case 'advisoryCheckCron':
     case 'containerCheckCron':
-    case 'dockerCheckCron': {
+    case 'dockerCheckCron':
+    case 'homeAssistantCheckCron': {
       const error = validateCron(value);
       if (error) {
         throw new SettingsValidationError(key, error);

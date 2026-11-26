@@ -133,6 +133,7 @@ export const EXPORTABLE_SETTING_KEYS = [
   'advisoryCheckCron',
   'containerCheckCron',
   'dockerCheckCron',
+  'homeAssistantCheckCron',
   'containerCheckConcurrency',
   'backupBeforeUpdate',
   'runHistoryChecks',

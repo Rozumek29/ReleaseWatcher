@@ -113,6 +113,7 @@ app.releaseJob.start(config.initialDelayMs);
 // Catches up vulnerability checks missed while the app was not running (only repositories that are due).
 app.advisoryJob.start(config.initialDelayMs + 5_000);
 app.dockerJob.start(config.initialDelayMs + 10_000);
+app.homeAssistantJob.start(config.initialDelayMs + 15_000);
 app.scheduler.start();
 // Updates keep running on the node while ReleaseWatcher restarts – re-attach to them and restore raised resources.
 app.containers.recover().catch((err: unknown) => log.error({ err }, 'Re-attaching to running updates failed'));
@@ -129,6 +130,7 @@ log.info(
     proxmoxConfigured: app.containers.shell.isConfigured,
     containerCheckCron: settings.current.containerCheckCron,
     dockerCheckCron: settings.current.dockerCheckCron,
+    homeAssistantCheckCron: settings.current.homeAssistantCheckCron,
   },
   'ReleaseWatcher started',
 );

@@ -847,6 +847,30 @@ export const MIGRATIONS: readonly string[] = [
      updated_at TEXT    NOT NULL
    );
    CREATE UNIQUE INDEX idx_git_host_tokens_host ON git_host_tokens (provider, host);`,
+  // Home Assistant instances read through their REST API (token encrypted) and their update entities that name a
+  // repository (`repository` = lower-case `fullName()`). Components keep their id while the entity exists.
+  `CREATE TABLE home_assistant_connections (
+     id              INTEGER PRIMARY KEY,
+     name            TEXT    NOT NULL,
+     url             TEXT    NOT NULL,
+     token           TEXT    NOT NULL,
+     is_enabled      INTEGER NOT NULL DEFAULT 1,
+     last_checked_at TEXT,
+     last_error      TEXT,
+     created_at      TEXT    NOT NULL
+   );
+   CREATE TABLE home_assistant_components (
+     id                INTEGER PRIMARY KEY,
+     connection_id     INTEGER NOT NULL REFERENCES home_assistant_connections (id) ON DELETE CASCADE,
+     entity_id         TEXT    NOT NULL,
+     name              TEXT    NOT NULL,
+     installed_version TEXT,
+     latest_version    TEXT,
+     release_url       TEXT,
+     repository        TEXT    NOT NULL,
+     UNIQUE (connection_id, entity_id)
+   );
+   CREATE INDEX idx_home_assistant_components_repository ON home_assistant_components (repository);`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

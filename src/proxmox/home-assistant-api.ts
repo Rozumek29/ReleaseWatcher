@@ -30,9 +30,14 @@ export class HomeAssistantApi {
     this.fetch = fetchImpl;
   }
 
+  /** Every state as Home Assistant returns it (`GET /api/states`). */
+  async states(): Promise<unknown> {
+    return this.request('GET', '/api/states');
+  }
+
   /** Pending update entities, read live. */
   async pendingEntities(): Promise<UpdateEntity[]> {
-    return updateEntitiesFromStates(await this.request('GET', '/api/states'));
+    return updateEntitiesFromStates(await this.states());
   }
 
   /** State of one update entity: whether it is still pending or being installed, and the installed version. */

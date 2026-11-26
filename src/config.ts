@@ -19,6 +19,7 @@ export interface Config {
   advisoryCheckCron: string;
   /** Cron schedule of Docker endpoint checks and registry checks of Docker images. */
   dockerCheckCron: string;
+  homeAssistantCheckCron: string;
   /** Delay of the first release check (and vulnerability catch-up) after startup. */
   initialDelayMs: number;
   github: {
@@ -100,6 +101,7 @@ export function loadConfig(env: Env = process.env): Config {
       (str(env, 'POLL_INTERVAL_MINUTES') ? intervalToCron(int(env, 'POLL_INTERVAL_MINUTES', 15)) : '*/15 * * * *'),
     advisoryCheckCron: str(env, 'ADVISORY_CHECK_CRON') ?? '0 */6 * * *',
     dockerCheckCron: str(env, 'DOCKER_CHECK_CRON') ?? '0 */6 * * *',
+    homeAssistantCheckCron: str(env, 'HOME_ASSISTANT_CHECK_CRON') ?? '0 */6 * * *',
     initialDelayMs: int(env, 'POLL_INITIAL_DELAY_SECONDS', 10) * 1000,
     github: {
       apiBaseUrl: str(env, 'GITHUB_API_URL') ?? 'https://api.github.com',
