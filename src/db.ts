@@ -836,6 +836,17 @@ export const MIGRATIONS: readonly string[] = [
   // `installed_version_field` as its path/selector and an optional version pattern.
   `ALTER TABLE watched_repositories ADD COLUMN installed_version_format TEXT;
    ALTER TABLE watched_repositories ADD COLUMN installed_version_pattern TEXT;`,
+  // One access token per Gitea/Forgejo or GitLab instance (encrypted), used by its repositories without a token of
+  // their own. `host` is lower-case like `watched_repositories.host`.
+  `CREATE TABLE git_host_tokens (
+     id         INTEGER PRIMARY KEY,
+     provider   TEXT    NOT NULL,
+     host       TEXT    NOT NULL,
+     token      TEXT    NOT NULL,
+     created_at TEXT    NOT NULL,
+     updated_at TEXT    NOT NULL
+   );
+   CREATE UNIQUE INDEX idx_git_host_tokens_host ON git_host_tokens (provider, host);`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */

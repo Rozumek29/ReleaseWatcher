@@ -35,7 +35,8 @@ This file does not repeat those; it describes the **shape** of the system, the *
 - **Release sources:** `ReleaseSource` (`src/release-source.ts`) takes a `RepositoryRef` (`provider`, `host`, `owner`,
   `name`); `ProviderReleaseSource` hands each repository to `github.ts`, `gitea.ts` (Gitea and Forgejo) or `gitlab.ts`.
   Only GitHub has security advisories and a global token – a repository on another host is read with its own token
-  only. `watched_repositories` stores `provider` and `host` (NULL on GitHub); its generated, unique `full_name`
+  or, without one, the token saved for its host (`git_host_tokens`, `src/git-host-tokens/`; `withGitHostTokens()` wraps
+  the source in `buildApp`), never with GitHub's or another host's. `watched_repositories` stores `provider` and `host` (NULL on GitHub); its generated, unique `full_name`
   (lower-case `fullName()`) is the key repositories are matched by – also by Docker labels and their triggers.
   A repository is watched by its releases (newest by date) or its tags (`releaseSource`, newest by version –
   `selectNewVersions()`), optionally filtered by a user `versionPattern`; user regexes only run through `matchPattern()`

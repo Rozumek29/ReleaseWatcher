@@ -70,6 +70,9 @@ import type { NodeShell } from './proxmox/ssh.ts';
 import { MAX_RUN_HISTORY, MIN_RUN_HISTORY } from './proxmox/domain.ts';
 import { ContainerStore } from './proxmox/store.ts';
 import { type KeyTool, SshKeygen } from './hosts/keys.ts';
+import { gitHostTokenRoutes } from './git-host-tokens/routes.ts';
+import { withGitHostTokens } from './git-host-tokens/source.ts';
+import { GitHostTokenStore } from './git-host-tokens/store.ts';
 import { hostRoutes } from './hosts/routes.ts';
 import type { DockerEngine } from './docker/engine.ts';
 import { OciRegistryClient, type RegistryClient } from './docker/registry.ts';
@@ -577,9 +580,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
   };
   /** Stored impacts of the advisories on the installed versions; `refresh()` before reading summaries or pages. */
   const impacts = new AdvisoryImpacts(deps.store, linkedAppVersions);
+  // Repositories on a Gitea/Forgejo or GitLab instance without a token of their own use the token of their host.
+  const gitHostTokens = new GitHostTokenStore(deps.store.database, deps.store.secretBox);
+  const source = withGitHostTokens(deps.source, (provider, host) => gitHostTokens.tokenFor(provider, host));
   const checker = new ReleaseChecker({
     store: deps.store,
-    source: deps.source,
+    source,
     dispatcher,
     log,
     ...(deps.fetchInstalledVersion ? { fetchInstalledVersion: deps.fetchInstalledVersion } : {}),
@@ -588,7 +594,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     linkedVersions,
     advisoryCron: () => deps.settings.current.advisoryCheckCron,
   });
-  const { store, source, settings } = deps;
+  const { store, settings } = deps;
   // Scheduled runs due in the same minute run one after another, as one digest: releases → vulnerabilities → containers.
   const sequencer = new RunSequencer({ batch: (task) => dispatcher.batch(task) });
   /** Reachable enabled containers whose apps show an older latest version than their linked repository (all, or one). */
@@ -712,6 +718,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     store,
     settings,
     hosts: hostStore,
+    gitHostTokens,
     containers: containerStore,
     docker: dockerStore,
     isBusy: (id) => containers.isBusy(id) || updater.isQueued(id),
@@ -975,7 +982,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
         return problem(502, 'Bad Gateway', { detail: failures.join(' ') });
       }
       const where = candidates.length === 1 ? PROVIDER_LABELS[candidates[0]!] : 'Gitea/Forgejo or GitLab';
-      const tokenHint = candidates[0] === 'github' ? 'A private repository needs a token with access to it.' : 'A private repository needs a token of that instance.';
+      const tokenHint = candidates[0] === 'github' ? 'A private repository needs a token with access to it.' : 'A private repository needs a token of that instance – for the repository, or for its host in Settings.';
       return validationProblem('repository', `Repository ${label} was not found on ${where}${host ? ` (${host})` : ''}. ${tokenHint}`);
     }
 
@@ -1431,6 +1438,7 @@ export async function buildApp(deps: AppDeps): Promise<App> {
             }
           },
         }),
+        ...gitHostTokenRoutes({ tokens: gitHostTokens, log }),
         ...hostRoutes({
           hosts: hostStore,
           shells,

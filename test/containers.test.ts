@@ -104,6 +104,7 @@ describe('containers API', () => {
       'idx_docker_containers_repository',
       'idx_docker_containers_source',
       'idx_docker_containers_target',
+      'idx_git_host_tokens_host',
       'idx_hosts_ssh_key',
       'idx_repository_advisories_page',
       'idx_sessions_expires',

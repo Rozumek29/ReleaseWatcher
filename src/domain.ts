@@ -378,6 +378,26 @@ const SEGMENT_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,99}$/;
 /** GitLab groups nest; deeper paths are not supported. */
 const MAX_PATH_SEGMENTS = 10;
 
+/**
+ * Parses the host of a Gitea/Forgejo or GitLab instance: `git.example.com`, `git.example.com:3000` or an HTTPS URL of
+ * it (path ignored). Returned lower-case without `www.`, like the hosts of parsed repositories. Returns null for invalid
+ * input, another scheme, credentials in the URL and github.com.
+ */
+export function parseGitHost(input: string | null | undefined): string | null {
+  const value = input?.trim();
+  if (!value || (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) && !/^https:\/\//i.test(value))) {
+    return null;
+  }
+  let url: URL;
+  try {
+    url = new URL(/^https:\/\//i.test(value) ? value : `https://${value}`);
+  } catch {
+    return null;
+  }
+  const host = url.host.toLowerCase().replace(/^www\./, '');
+  return url.username || url.password || !HOST_PATTERN.test(host) || host === 'github.com' ? null : host;
+}
+
 /** A repository named by the user or a label: host (null = GitHub), owner and name; the provider when the host tells it. */
 export interface ParsedRepository {
   host: string | null;
