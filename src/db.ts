@@ -1494,6 +1494,9 @@ export class RepositoryStore {
     // Foreign keys are off while migrating (the pragma cannot change inside a transaction): rebuilding a table
     // (create new → copy → drop old → rename) must not cascade deletes into the tables that reference it.
     this.db.run('PRAGMA foreign_keys = OFF');
+    // With foreign keys off, a legacy `ALTER TABLE … RENAME` leaves the references of other tables on the old name.
+    // The SQLite that Bun uses on macOS (the system library) has it on by default.
+    this.db.run('PRAGMA legacy_alter_table = OFF');
     try {
       for (let i = version; i < MIGRATIONS.length; i++) {
         apply(i);
