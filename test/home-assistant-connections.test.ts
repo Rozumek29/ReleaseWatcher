@@ -155,7 +155,7 @@ describe('Home Assistant connections: API', () => {
     assert.ok(connection.lastCheckedAt);
     assert.match(connection.tokenMasked, /oken$/);
     assert.deepEqual(
-      overview.body.components.map((c: Record<string, unknown>) => [c['name'], c['repository'], c['installedVersion'], c['versionComparable'], c['updateAvailable']]),
+      overview.body.components.map((c: Record<string, unknown>) => [c['name'], c['repositoryName'], c['installedVersion'], c['versionComparable'], c['homeAssistantUpdate']]),
       [
         ['Button Card', 'custom-cards/button-card', 'v7.0.0', true, true],
         ['Home Assistant Core', 'home-assistant/core', '2026.11.3', true, false],
@@ -193,7 +193,7 @@ describe('Home Assistant connections: API', () => {
     assert.equal(after.length, 1);
     assert.equal(after[0].id, before.find((c: { name: string }) => c.name === 'Button Card').id);
     assert.equal(after[0].installedVersion, 'v7.0.1');
-    assert.equal(after[0].updateAvailable, false);
+    assert.equal(after[0].homeAssistantUpdate, false);
   });
 
   it('keeps the components and reports the error when Home Assistant cannot be read', async () => {

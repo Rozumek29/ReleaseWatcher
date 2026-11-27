@@ -20,11 +20,13 @@ export class ConnectionBusyError extends Error {
 }
 
 /** What the API shows of a component. */
-export interface HomeAssistantComponentView extends HomeAssistantComponent {
+export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent, 'repository'> {
+  /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
+  repositoryName: string;
   /** False for a commit hash (a repository without releases): shown, but not compared with releases. */
   versionComparable: boolean;
   /** Home Assistant itself knows a version other than the installed one. */
-  updateAvailable: boolean;
+  homeAssistantUpdate: boolean;
 }
 
 /**
@@ -98,10 +100,12 @@ export class HomeAssistantService {
   }
 
   describe(components: readonly HomeAssistantComponent[]): HomeAssistantComponentView[] {
-    return components.map((c) => ({
+    // Named so that the watched repository and a release-based `updateAvailable` can join later, as for Docker containers.
+    return components.map(({ repository: repositoryName, ...c }) => ({
       ...c,
+      repositoryName,
       versionComparable: isComparableVersion(c.installedVersion),
-      updateAvailable: c.installedVersion !== null && c.latestVersion !== null && c.installedVersion !== c.latestVersion,
+      homeAssistantUpdate: c.installedVersion !== null && c.latestVersion !== null && c.installedVersion !== c.latestVersion,
     }));
   }
 }
