@@ -81,6 +81,9 @@ export class HomeAssistantPage {
       untracked(() => void this.load());
     });
     effect((onCleanup) => {
+      // Read the data too: `checking` stays true across a reload, and the effect only runs again when what it read
+      // changed – without this it would reload once and then wait forever.
+      this.overview();
       if (!this.checking()) return;
       const timer = setTimeout(() => void this.load(), POLL_MS);
       onCleanup(() => clearTimeout(timer));

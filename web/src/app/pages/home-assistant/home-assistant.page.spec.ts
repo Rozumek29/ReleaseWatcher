@@ -80,4 +80,18 @@ describe('HomeAssistantPage', () => {
     expect(el.querySelector('.source-actions')?.textContent).toContain('Checking…');
     fixture.destroy();
   });
+  it('keeps reloading while a check takes longer than one round', async () => {
+    const round = () => new Promise((resolve) => setTimeout(resolve, 2100));
+    const { fixture, el } = await create(haOverview({ connections: [haConnection({ isChecking: true })] }));
+    // Still checking after the first round …
+    await round();
+    http.expectOne('/api/home-assistant').flush(haOverview({ connections: [haConnection({ isChecking: true })] }));
+    await settle(fixture);
+    // … so it asks again, and shows the result once it is done.
+    await round();
+    http.expectOne('/api/home-assistant').flush(haOverview());
+    await settle(fixture);
+    expect(el.querySelector('.source-actions')?.textContent).not.toContain('Checking…');
+  }, 10_000);
+
 });

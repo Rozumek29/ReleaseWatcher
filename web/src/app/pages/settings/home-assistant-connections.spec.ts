@@ -129,4 +129,16 @@ describe('HomeAssistantConnections', () => {
     expect(el.textContent).toContain('Paused');
   });
 
+  it('keeps reloading while a connection is read longer than one round', async () => {
+    const round = () => new Promise((resolve) => setTimeout(resolve, 2100));
+    const { http, fixture, el } = await setup([haConnection({ isChecking: true })]);
+    await round();
+    http.expectOne('/api/home-assistant/connections').flush([haConnection({ isChecking: true })]);
+    await settle(fixture);
+    await round();
+    http.expectOne('/api/home-assistant/connections').flush([haConnection()]);
+    await settle(fixture);
+    expect(el.textContent).not.toContain('Checking…');
+  }, 10_000);
+
 });

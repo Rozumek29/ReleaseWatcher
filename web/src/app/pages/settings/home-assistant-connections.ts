@@ -39,6 +39,9 @@ export class HomeAssistantConnections implements OnInit {
 
   constructor() {
     effect((onCleanup) => {
+      // Read the list too: `checking` stays true across a reload, and the effect only runs again when what it read
+      // changed – without this it would reload once and then wait forever.
+      this.connections();
       if (!this.checking()) return;
       const timer = setTimeout(() => void this.reload(), POLL_MS);
       onCleanup(() => clearTimeout(timer));
