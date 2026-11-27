@@ -269,4 +269,21 @@ describe('ConnectionsPanel', () => {
     await settle(fixture);
     expect(el.textContent).toContain('No Docker endpoints yet');
   });
+  it('pauses a Docker endpoint with the switch in the dialog', async () => {
+    const { http, fixture, el, button } = await setup([], [], [dockerEndpoint()]);
+    const row = [...el.querySelectorAll<HTMLElement>('.row')].find((r) => r.textContent?.includes('tcp://socket-proxy:2375'))!;
+    button('Edit', row).click();
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('app-docker-endpoint-dialog app-switch button')!.click();
+    await settle(fixture);
+    el.querySelector<HTMLFormElement>('app-docker-endpoint-dialog form')!.dispatchEvent(new Event('submit'));
+    const put = http.expectOne({ method: 'PUT', url: '/api/docker/endpoints/1' });
+    expect(put.request.body.isEnabled).toBe(false);
+    put.flush(dockerEndpoint({ isEnabled: false }));
+    await settle(fixture);
+    http.expectOne('/api/docker/endpoints').flush([dockerEndpoint({ isEnabled: false })]);
+    await settle(fixture);
+    expect(el.textContent).toContain('Paused');
+  });
+
 });

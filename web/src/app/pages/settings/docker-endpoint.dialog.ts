@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError, fieldErrors } from '../../core/api.service';
@@ -50,7 +50,8 @@ export class DockerEndpointDialog {
         this.name = data.endpoint?.name ?? '';
         this.url = data.endpoint?.url ?? '';
         this.isEnabled.set(data.endpoint?.isEnabled ?? true);
-        this.savedValues = this.values();
+        // Untracked: reading the switch here would run this effect again – and reset the form – when it is toggled.
+        this.savedValues = untracked(() => this.values());
         this.testResult.set(null);
         this.errors.set({});
         this.saveError.set(null);
