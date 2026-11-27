@@ -18,6 +18,7 @@ interface ComponentRow {
   connection_id: number;
   entity_id: string;
   name: string;
+  has_update: number;
   installed_version: string | null;
   latest_version: string | null;
   release_url: string | null;
@@ -29,6 +30,7 @@ const toComponent = (r: ComponentRow): HomeAssistantComponent => ({
   connectionId: r.connection_id,
   entityId: r.entity_id,
   name: r.name,
+  hasUpdate: r.has_update === 1,
   installedVersion: r.installed_version,
   latestVersion: r.latest_version,
   releaseUrl: r.release_url,
@@ -95,11 +97,11 @@ export class HomeAssistantStore {
    */
   replaceComponents(connectionId: number, components: readonly ReadComponent[]): void {
     const upsert = this.db.query(
-      `INSERT INTO home_assistant_components (connection_id, entity_id, name, installed_version, latest_version, release_url, repository)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO home_assistant_components (connection_id, entity_id, name, has_update, installed_version, latest_version, release_url, repository)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (connection_id, entity_id) DO UPDATE SET
-         name = excluded.name, installed_version = excluded.installed_version, latest_version = excluded.latest_version,
-         release_url = excluded.release_url, repository = excluded.repository`,
+         name = excluded.name, has_update = excluded.has_update, installed_version = excluded.installed_version,
+         latest_version = excluded.latest_version, release_url = excluded.release_url, repository = excluded.repository`,
     );
     const remove = this.db.query('DELETE FROM home_assistant_components WHERE id = ?');
     this.db.transaction(() => {
@@ -108,7 +110,7 @@ export class HomeAssistantStore {
         if (!seen.has(existing.entityId)) remove.run(existing.id);
       }
       for (const c of components) {
-        upsert.run(connectionId, c.entityId, c.name, c.installedVersion, c.latestVersion, c.releaseUrl, c.repository);
+        upsert.run(connectionId, c.entityId, c.name, c.hasUpdate ? 1 : 0, c.installedVersion, c.latestVersion, c.releaseUrl, c.repository);
       }
     })();
   }

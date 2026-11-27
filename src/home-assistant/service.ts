@@ -25,7 +25,7 @@ export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent,
   repositoryName: string;
   /** False for a commit hash (a repository without releases): shown, but not compared with releases. */
   versionComparable: boolean;
-  /** Home Assistant itself knows a version other than the installed one. */
+  /** Home Assistant reports an update for the entity (its state is `on`). */
   homeAssistantUpdate: boolean;
 }
 
@@ -105,7 +105,7 @@ export class HomeAssistantService {
       ...c,
       repositoryName,
       versionComparable: isComparableVersion(c.installedVersion),
-      homeAssistantUpdate: c.installedVersion !== null && c.latestVersion !== null && c.installedVersion !== c.latestVersion,
+      homeAssistantUpdate: c.hasUpdate,
     }));
   }
 }

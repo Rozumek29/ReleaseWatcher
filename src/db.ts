@@ -864,6 +864,7 @@ export const MIGRATIONS: readonly string[] = [
      connection_id     INTEGER NOT NULL REFERENCES home_assistant_connections (id) ON DELETE CASCADE,
      entity_id         TEXT    NOT NULL,
      name              TEXT    NOT NULL,
+     has_update        INTEGER NOT NULL DEFAULT 0,
      installed_version TEXT,
      latest_version    TEXT,
      release_url       TEXT,

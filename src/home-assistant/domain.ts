@@ -33,6 +33,11 @@ export interface HomeAssistantComponent {
   /** `update.…` – unique within a connection. */
   entityId: string;
   name: string;
+  /**
+   * Home Assistant reports an update (state `on`). Not the same as "installed differs from latest": a newer
+   * pre-release than the latest version, or a skipped version, is no update.
+   */
+  hasUpdate: boolean;
   installedVersion: string | null;
   /** Newest version Home Assistant knows of (it checks on its own schedule). */
   latestVersion: string | null;
@@ -127,6 +132,7 @@ export function componentsFromStates(states: unknown): ReadComponent[] {
       latestVersion: str(attributes['latest_version'])?.slice(0, 100) ?? null,
       releaseUrl: releaseUrl?.slice(0, 500) ?? null,
       repository,
+      hasUpdate: state['state'] === 'on',
     });
   }
   return result.sort((a, b) => a.name.localeCompare(b.name) || a.entityId.localeCompare(b.entityId));

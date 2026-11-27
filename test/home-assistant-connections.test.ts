@@ -196,6 +196,21 @@ describe('Home Assistant connections: API', () => {
     assert.equal(after[0].homeAssistantUpdate, false);
   });
 
+  it('takes "update available" from Home Assistant, not from comparing versions', async () => {
+    states = [
+      // A pre-release newer than the latest version, and a skipped version: Home Assistant reports no update.
+      update('update.beta_update', { title: 'Beta', installed_version: 'v3.0.0-beta.2', latest_version: 'v2.3.1', release_url: 'https://github.com/owner/beta/releases/tag/v2.3.1' }),
+      update('update.skipped_update', { title: 'Skipped', installed_version: '3.6.0', latest_version: '3.6.1', skipped_version: '3.6.1', release_url: 'https://github.com/owner/skipped/releases/tag/3.6.1' }),
+      update('update.pending_update', { title: 'Pending', installed_version: '1.0', latest_version: '1.1', release_url: 'https://github.com/owner/pending/releases/tag/1.1' }, 'on'),
+    ];
+    await addConnection();
+    const components = (await request('GET', '/api/home-assistant')).body.components;
+    assert.deepEqual(
+      components.map((c: Record<string, unknown>) => [c['name'], c['homeAssistantUpdate']]),
+      [['Beta', false], ['Pending', true], ['Skipped', false]],
+    );
+  });
+
   it('keeps the components and reports the error when Home Assistant cannot be read', async () => {
     const { body: connection } = await addConnection();
     failure = new Response('Bad Gateway', { status: 502 });
