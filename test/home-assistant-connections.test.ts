@@ -78,6 +78,8 @@ describe('Home Assistant connections: API', () => {
   /** What the fake Home Assistant answers `GET /api/states` with. */
   let states: unknown[];
   let failure: Response | null;
+  /** `state` of `GET /api/config`: `RUNNING`, or e.g. `NOT_RUNNING` while Home Assistant starts. */
+  let haState: string;
   let requests: { url: string; authorization: string | null }[];
 
   const requestedUrls = () => requests.map((r) => r.url);
@@ -87,6 +89,9 @@ describe('Home Assistant connections: API', () => {
     requests.push({ url: input, authorization });
     if (authorization !== `Bearer ${TOKEN}`) {
       return new Response('401: Unauthorized', { status: 401 });
+    }
+    if (new URL(input).pathname === '/api/config') {
+      return failure ?? Response.json({ state: haState });
     }
     return failure ?? Response.json(states);
   };
@@ -109,6 +114,7 @@ describe('Home Assistant connections: API', () => {
   beforeEach(async () => {
     requests = [];
     failure = null;
+    haState = 'RUNNING';
     states = [
       update('update.button_card_update', {
         title: 'Button Card',
@@ -162,7 +168,7 @@ describe('Home Assistant connections: API', () => {
         ['Some integration', 'owner/some-integration', 'a358575', false, false],
       ],
     );
-    assert.deepEqual(requestedUrls(), [`${HA_URL}/api/states`]);
+    assert.deepEqual(requestedUrls(), [`${HA_URL}/api/config`, `${HA_URL}/api/states`]);
     // Encrypted at rest.
     const row = store.database.query<{ token: string }, []>('SELECT token FROM home_assistant_connections').get()!;
     assert.ok(!row.token.includes(TOKEN));
@@ -221,6 +227,18 @@ describe('Home Assistant connections: API', () => {
     assert.equal(overview.components.length, 3);
   });
 
+  it('keeps the components while Home Assistant is still starting', async () => {
+    const { body: connection } = await addConnection();
+    // Starting: the API answers, but the integrations and their update entities are not loaded yet.
+    haState = 'NOT_RUNNING';
+    states = [];
+    await request('POST', `/api/home-assistant/connections/${connection.id}/check`);
+    await app.homeAssistant.idle();
+    const overview = (await request('GET', '/api/home-assistant')).body;
+    assert.equal(overview.components.length, 3);
+    assert.match(overview.connections[0].lastError, /still starting/);
+  });
+
   it('tests a connection without saving it', async () => {
     const ok = await request('POST', '/api/home-assistant/connections/test', { url: HA_URL, token: TOKEN });
     assert.deepEqual(ok.body, { components: 3 });
@@ -254,7 +272,7 @@ describe('Home Assistant connections: API', () => {
     const moved = await request('PUT', path, { name: 'Flat', url: 'http://other.test:8123', token: TOKEN, isEnabled: true });
     assert.equal(moved.status, 200);
     await app.homeAssistant.idle();
-    assert.deepEqual(requestedUrls(), ['http://other.test:8123/api/states']);
+    assert.deepEqual(requestedUrls(), ['http://other.test:8123/api/config', 'http://other.test:8123/api/states']);
 
     assert.equal((await request('PUT', '/api/home-assistant/connections/999', { name: 'x', url: HA_URL })).status, 404);
   });
@@ -274,7 +292,7 @@ describe('Home Assistant connections: API', () => {
     assert.equal((await request('POST', '/api/home-assistant/check')).status, 202);
     while (app.homeAssistantJob.status.isRunning) await Bun.sleep(5);
     await app.homeAssistant.idle();
-    assert.deepEqual(requestedUrls(), [`${HA_URL}/api/states`]);
+    assert.deepEqual(requestedUrls(), [`${HA_URL}/api/config`, `${HA_URL}/api/states`]);
   });
 
   it('saves the check schedule', async () => {

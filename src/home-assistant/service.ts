@@ -1,6 +1,6 @@
 import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
-import { type FetchLike, HomeAssistantApi } from '../proxmox/home-assistant-api.ts';
+import { type FetchLike, HomeAssistantApi, HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
 import { componentsFromStates, type HomeAssistantComponent, type HomeAssistantConnection, isComparableVersion, type ReadComponent } from './domain.ts';
 import type { HomeAssistantStore } from './store.ts';
 
@@ -11,6 +11,9 @@ export interface HomeAssistantServiceDeps {
   fetch?: FetchLike;
   now?: () => Date;
 }
+
+/** Shown while Home Assistant is starting; the components read before are kept. */
+export const STARTING_MESSAGE = 'Home Assistant is still starting – the components read before are kept until it is running.';
 
 export class ConnectionBusyError extends Error {
   override name = 'ConnectionBusyError';
@@ -47,9 +50,16 @@ export class HomeAssistantService {
     return this.busy.has(connectionId);
   }
 
-  /** Reads the components of a Home Assistant without saving anything ("Test connection"). */
+  /**
+   * Reads the components of a Home Assistant without saving anything ("Test connection"). Refuses while Home Assistant
+   * is still starting: its update entities are not all loaded then, and storing that list would drop the others.
+   */
   async read(connection: Pick<HomeAssistantConnection, 'url' | 'token'>): Promise<ReadComponent[]> {
-    return componentsFromStates(await new HomeAssistantApi(connection, this.deps.fetch).states());
+    const api = new HomeAssistantApi(connection, this.deps.fetch);
+    if (!(await api.isRunning())) {
+      throw new HomeAssistantApiError(STARTING_MESSAGE);
+    }
+    return componentsFromStates(await api.states());
   }
 
   /** Starts a check of the connection in the background (see {@link check}). */
