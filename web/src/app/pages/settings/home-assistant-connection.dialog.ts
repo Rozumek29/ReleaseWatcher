@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, viewChild } from '@angular/core';
+import { ChangeDetectionStrategy, Component, ElementRef, effect, inject, input, output, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { firstValueFrom } from 'rxjs';
 import { ApiService, describeError, fieldErrors } from '../../core/api.service';
@@ -53,7 +53,8 @@ export class HomeAssistantConnectionDialog {
         this.url = data.connection?.url ?? '';
         this.token = '';
         this.isEnabled.set(data.connection?.isEnabled ?? true);
-        this.savedValues = this.values();
+        // Untracked: reading the switch here would make the effect run again – and reset the form – when it is toggled.
+        this.savedValues = untracked(() => this.values());
         this.showToken.set(false);
         this.testResult.set(null);
         this.errors.set({});

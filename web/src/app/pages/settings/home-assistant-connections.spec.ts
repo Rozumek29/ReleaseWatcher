@@ -113,4 +113,20 @@ describe('HomeAssistantConnections', () => {
     await settle(fixture);
     expect(el.textContent).toContain('No Home Assistant yet');
   });
+  it('pauses a connection with the switch in the dialog', async () => {
+    const { http, fixture, el, button, submit } = await setup([haConnection()]);
+    button('Edit').click();
+    await settle(fixture);
+    el.querySelector<HTMLButtonElement>('app-home-assistant-connection-dialog app-switch button')!.click();
+    await settle(fixture);
+    submit();
+    const put = http.expectOne({ method: 'PUT', url: '/api/home-assistant/connections/1' });
+    expect(put.request.body.isEnabled).toBe(false);
+    put.flush(haConnection({ isEnabled: false }));
+    await settle(fixture);
+    http.expectOne('/api/home-assistant/connections').flush([haConnection({ isEnabled: false })]);
+    await settle(fixture);
+    expect(el.textContent).toContain('Paused');
+  });
+
 });
