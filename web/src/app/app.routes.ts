@@ -46,6 +46,12 @@ export const routes: Routes = [
     canActivate: [authGuard],
     loadComponent: () => import('./pages/docker/docker.page').then((m) => m.DockerPage),
   },
+  {
+    path: 'home-assistant',
+    title: 'Home Assistant · ReleaseWatcher',
+    canActivate: [authGuard],
+    loadComponent: () => import('./pages/home-assistant/home-assistant.page').then((m) => m.HomeAssistantPage),
+  },
   // The page was called Containers before servers and several Proxmox nodes (old links and notifications).
   { path: 'containers', redirectTo: 'machines' },
   {

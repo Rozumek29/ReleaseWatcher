@@ -11,6 +11,7 @@ const settings: AppSettings = {
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   docker: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
+  homeAssistant: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
   proxmox: {
     configured: true,
     nodes: [
@@ -149,7 +150,7 @@ describe('SettingsPage', () => {
 
     const save = http.expectOne('/api/settings');
     expect(save.request.method).toBe('PUT');
-    expect(save.request.body).toEqual({ releaseCheckCron: '0 * * * *', advisoryCheckCron: '30 4 * * *', dockerCheckCron: '15 */12 * * *' });
+    expect(save.request.body).toEqual({ releaseCheckCron: '0 * * * *', advisoryCheckCron: '30 4 * * *', dockerCheckCron: '15 */12 * * *', homeAssistantCheckCron: '0 */6 * * *' });
     save.flush(
       { status: 400, errors: { advisoryCheckCron: ['minute must be between 0 and 59, got 61.'] } },
       { status: 400, statusText: 'Bad Request' },

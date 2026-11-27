@@ -83,7 +83,7 @@ describe('AppearancePanel', () => {
     expect(navigation.editing()).toBe(true);
     expect(button('Done').getAttribute('aria-pressed')).toBe('true');
 
-    navigation.move(3, 0);
+    navigation.move(4, 0);
     await settle(fixture);
     expect(el.querySelector('.page-order li')?.textContent).toContain('Vulnerabilities');
 

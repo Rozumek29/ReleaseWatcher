@@ -20,6 +20,9 @@ import {
   DockerEndpoint,
   DockerEndpointRequest,
   DockerOverview,
+  HomeAssistantConnection,
+  HomeAssistantConnectionRequest,
+  HomeAssistantOverview,
   HeaderInput,
   Host,
   HostInput,
@@ -307,6 +310,43 @@ export class ApiService {
 
   updateDockerContainer(id: number, request: DockerContainerRequest): Observable<DockerContainer> {
     return this.http.put<DockerContainer>(`${this.baseUrl}/docker/containers/${id}`, request);
+  }
+
+  /* ---------- Home Assistant ---------- */
+
+  /** Home Assistant connections and the components read from them. */
+  getHomeAssistant(): Observable<HomeAssistantOverview> {
+    return this.http.get<HomeAssistantOverview>(`${this.baseUrl}/home-assistant`);
+  }
+
+  /** Reads every enabled connection now. */
+  checkHomeAssistant(): Observable<HomeAssistantOverview> {
+    return this.http.post<HomeAssistantOverview>(`${this.baseUrl}/home-assistant/check`, {});
+  }
+
+  getHomeAssistantConnections(): Observable<HomeAssistantConnection[]> {
+    return this.http.get<HomeAssistantConnection[]>(`${this.baseUrl}/home-assistant/connections`);
+  }
+
+  addHomeAssistantConnection(request: HomeAssistantConnectionRequest): Observable<HomeAssistantConnection> {
+    return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections`, request);
+  }
+
+  updateHomeAssistantConnection(id: number, request: HomeAssistantConnectionRequest): Observable<HomeAssistantConnection> {
+    return this.http.put<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${id}`, request);
+  }
+
+  deleteHomeAssistantConnection(id: number): Observable<void> {
+    return this.http.delete<void>(`${this.baseUrl}/home-assistant/connections/${id}`);
+  }
+
+  /** Reads a Home Assistant without saving anything; `id` = use the saved token of that connection when none is given. */
+  testHomeAssistantConnection(request: { url: string; token?: string | null; id?: number | null }): Observable<{ components: number }> {
+    return this.http.post<{ components: number }>(`${this.baseUrl}/home-assistant/connections/test`, request);
+  }
+
+  checkHomeAssistantConnection(id: number): Observable<HomeAssistantConnection> {
+    return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${id}/check`, {});
   }
 
   /* ---------- Proxmox containers ---------- */

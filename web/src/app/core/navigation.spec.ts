@@ -18,7 +18,7 @@ const stubRoutes: Route[] = routes.map((r) =>
 
 describe('normalizeNavOrder', () => {
   it('keeps a valid order', () => {
-    const order = ['settings', 'docker', 'machines', 'vulnerabilities', 'repositories'];
+    const order = ['settings', 'docker', 'machines', 'home-assistant', 'vulnerabilities', 'repositories'];
     expect(normalizeNavOrder(order)).toEqual(order);
   });
 
@@ -28,6 +28,7 @@ describe('normalizeNavOrder', () => {
       'settings',
       'repositories',
       'machines',
+      'home-assistant',
       'vulnerabilities',
     ]);
   });
@@ -53,6 +54,7 @@ describe('NavigationService', () => {
       'docker',
       'repositories',
       'machines',
+      'home-assistant',
       'vulnerabilities',
       'settings',
     ]);

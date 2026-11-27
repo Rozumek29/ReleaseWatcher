@@ -5,6 +5,7 @@ export const NAV_PAGES = [
   { id: 'repositories', label: 'Repositories', icon: 'repo' },
   { id: 'machines', label: 'Machines', icon: 'box' },
   { id: 'docker', label: 'Docker', icon: 'container' },
+  { id: 'home-assistant', label: 'Home Assistant', icon: 'home' },
   { id: 'vulnerabilities', label: 'Vulnerabilities', icon: 'shield' },
   { id: 'settings', label: 'Settings', icon: 'settings' },
 ] as const satisfies readonly { id: string; label: string; icon: IconName }[];

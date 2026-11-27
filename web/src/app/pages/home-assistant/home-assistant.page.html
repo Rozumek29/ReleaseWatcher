@@ -1,0 +1,150 @@
+<header class="page-header">
+  <div>
+    <h1>Home Assistant</h1>
+    <p>What is installed in your Home Assistant – Core, add-ons, integrations and cards that name their repository.</p>
+    @if (overview()?.check; as job) {
+      <p class="schedule">
+        Read {{ describeCron(job.cron).toLowerCase() }}
+        @if (job.isRunning) {
+          · reading now…
+        } @else if (job.nextRunAt) {
+          · next {{ job.nextRunAt | relativeTime: now() }}
+        }
+      </p>
+    }
+  </div>
+  <div class="header-actions">
+    <button type="button" class="btn btn-secondary" (click)="checkAll()" [disabled]="checkingAll() || overview()?.check?.isRunning">
+      <app-icon name="refresh" [size]="16" [class.spin]="checkingAll() || overview()?.check?.isRunning" />
+      {{ checkingAll() || overview()?.check?.isRunning ? 'Checking…' : 'Check now' }}
+    </button>
+    <a class="btn btn-secondary" routerLink="/settings" [queryParams]="{ tab: 'connections' }">
+      <app-icon name="settings" [size]="16" /> Manage connections
+    </a>
+  </div>
+</header>
+
+@if (overview() === null) {
+  @if (loadError(); as e) {
+    <div class="callout" role="alert"><app-icon name="alert" /> <span>{{ e }}</span></div>
+  } @else {
+    <div class="card source skeleton"></div>
+  }
+} @else if (overview()!.connections.length === 0) {
+  <div class="card empty">
+    <span class="empty-icon"><app-icon name="home" [size]="22" /></span>
+    <h2>No Home Assistant yet</h2>
+    <p>
+      Connect one with its address and a long-lived access token under
+      <a routerLink="/settings" [queryParams]="{ tab: 'connections' }">Settings → Connections</a>. ReleaseWatcher then
+      reads its update entities – it changes nothing in Home Assistant.
+    </p>
+  </div>
+} @else {
+  <div class="toolbar">
+    <div class="tabs" role="tablist" aria-label="Filter components">
+      @for (f of filters; track f.value) {
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.active]="filter() === f.value"
+          [attr.aria-selected]="filter() === f.value"
+          (click)="filter.set(f.value)"
+        >
+          {{ f.label }}
+          <span class="tab-count" [class.warning]="f.value === 'updates' && counts().updates > 0">{{ counts()[f.value] }}</span>
+        </button>
+      }
+    </div>
+  </div>
+
+  @for (card of cards(); track card.connection.id; let i = $index) {
+    <section class="card source enter" [style.--i]="i < 12 ? i : 12" [attr.aria-label]="card.connection.name">
+      <header class="source-head">
+        <div class="source-title">
+          <app-icon name="home" [size]="18" />
+          <h2>{{ card.connection.name }}</h2>
+          <span class="mono muted small">{{ card.connection.url }}</span>
+          @if (!card.connection.isEnabled) {
+            <span class="badge">Paused</span>
+          }
+        </div>
+        <div class="source-actions">
+          @if (card.connection.isChecking) {
+            <span class="muted small"><app-icon name="refresh" [size]="14" class="spin" /> Checking…</span>
+          } @else if (card.connection.lastCheckedAt) {
+            <span class="muted small">checked {{ card.connection.lastCheckedAt | relativeTime: now() }}</span>
+          }
+          <button
+            type="button"
+            class="icon-btn"
+            (click)="checkConnection(card.connection)"
+            [disabled]="card.connection.isChecking"
+            [attr.aria-label]="'Check ' + card.connection.name"
+            title="Check now"
+          >
+            <app-icon name="refresh" [size]="16" />
+          </button>
+          <a
+            class="icon-btn"
+            routerLink="/settings"
+            [queryParams]="{ tab: 'connections' }"
+            [attr.aria-label]="'Edit ' + card.connection.name"
+            title="Edit under Settings → Connections"
+          >
+            <app-icon name="settings" [size]="16" />
+          </a>
+        </div>
+      </header>
+      @if (card.connection.lastError; as error) {
+        <div class="error-line"><app-icon name="alert" [size]="14" /> <span>{{ error }}</span></div>
+      }
+      @if (!card.connection.lastCheckedAt && !card.connection.lastError) {
+        <p class="muted small">Not checked yet.</p>
+      } @else {
+        @for (c of card.components; track c.id) {
+          <div class="row">
+            <span class="name" [title]="c.entityId">{{ c.name }}</span>
+            <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
+              {{ c.repositoryName }} <app-icon name="external" [size]="12" />
+            </a>
+            <span class="versions mono">
+              @if (c.installedVersion) {
+                {{ c.installedVersion }}
+              } @else {
+                <span class="muted">version unknown</span>
+              }
+              @if (c.homeAssistantUpdate) {
+                <span class="arrow">→</span> {{ c.latestVersion }}
+              }
+            </span>
+            @if (c.homeAssistantUpdate) {
+              @if (c.releaseUrl) {
+                <a class="badge badge-warning" [href]="c.releaseUrl" target="_blank" rel="noopener" title="Open the release Home Assistant links to">
+                  Update available <app-icon name="external" [size]="12" />
+                </a>
+              } @else {
+                <span class="badge badge-warning">Update available</span>
+              }
+            } @else if (c.installedVersion) {
+              <span class="badge badge-success" title="Home Assistant knows no newer version">Up to date</span>
+            }
+            @if (!c.versionComparable && c.installedVersion) {
+              <span class="badge" title="A commit, not a release – it cannot be compared with the releases of the repository">Commit</span>
+            }
+          </div>
+        } @empty {
+          @if (!card.connection.lastError) {
+            <p class="muted small">No update entity names a repository.</p>
+          }
+        }
+      }
+    </section>
+  } @empty {
+    <div class="card empty">
+      <h2>Nothing matches</h2>
+      <p>No component has an update.</p>
+    </div>
+  }
+}

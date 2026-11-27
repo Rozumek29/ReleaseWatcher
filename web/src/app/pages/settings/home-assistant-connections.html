@@ -1,0 +1,81 @@
+<section class="card section" aria-labelledby="home-assistant-title">
+  <div class="section-head">
+    <span class="section-icon"><app-icon name="home" /></span>
+    <div class="section-title">
+      <h2 id="home-assistant-title">Home Assistant</h2>
+      <p>Instances whose update entities are read – Core, add-ons, integrations and cards that name their repository.</p>
+    </div>
+    <div class="head-actions">
+      <button type="button" class="btn btn-sm" (click)="editing.set({ connection: null })" [disabled]="connections() === null">
+        <app-icon name="plus" [size]="14" /> Add connection
+      </button>
+    </div>
+  </div>
+
+  <div class="section-body">
+    @if (connections(); as list) {
+      @for (c of list; track c.id) {
+        <div class="row enter" [style.--i]="$index">
+          <div class="row-main">
+            <div class="row-title">
+              <span class="name">{{ c.name }}</span>
+              @if (!c.isEnabled) {
+                <span class="badge">Paused</span>
+              }
+              @if (c.lastError) {
+                <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Error</span>
+              }
+            </div>
+            <div class="row-meta">
+              <span class="mono">{{ c.url }}</span>
+              <span class="mono">{{ c.tokenMasked }}</span>
+              @if (c.isChecking) {
+                <span><app-icon name="refresh" [size]="12" class="spin" /> Checking…</span>
+              } @else if (c.lastCheckedAt) {
+                <span>Checked {{ c.lastCheckedAt | relativeTime: now() }}</span>
+              } @else {
+                <span>Not checked yet</span>
+              }
+            </div>
+          </div>
+          <div class="row-actions">
+            @if (confirming() === c.id) {
+              <span class="confirm-text">Remove {{ c.name }}? Its components are no longer shown.</span>
+              <button type="button" class="btn btn-sm" (click)="remove(c)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+            } @else {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="check(c)" [disabled]="busy().has(c.id) || c.isChecking">
+                <app-icon name="refresh" [size]="14" [class.spin]="busy().has(c.id) || c.isChecking" />
+                {{ busy().has(c.id) || c.isChecking ? 'Checking…' : 'Check now' }}
+              </button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="editing.set({ connection: c })" [disabled]="busy().has(c.id)">Edit</button>
+              <button type="button" class="btn btn-sm btn-danger-ghost" (click)="confirming.set(c.id)" [disabled]="busy().has(c.id)" title="Remove connection">
+                Remove
+              </button>
+            }
+          </div>
+          @if (c.lastError) {
+            <pre class="node-test failed" aria-label="Last error">{{ c.lastError }}</pre>
+          }
+        </div>
+      } @empty {
+        <div class="empty-row">
+          <app-icon name="home" [size]="20" />
+          <p>
+            No Home Assistant yet. Add one with its address (<code>http://homeassistant.local:8123</code>) and a
+            long-lived access token.
+          </p>
+        </div>
+      }
+    } @else {
+      <div class="skeleton row-skeleton"></div>
+    }
+    <p class="hint">
+      Only reading is needed and nothing is changed in Home Assistant. A long-lived access token cannot be limited to
+      reading, so create it for a user without administrator rights. What was read is shown on the
+      <strong>Home Assistant</strong> page.
+    </p>
+  </div>
+</section>
+
+<app-home-assistant-connection-dialog [data]="editing()" (saved)="saved($event, editing()?.connection === null)" (closed)="editing.set(null)" />

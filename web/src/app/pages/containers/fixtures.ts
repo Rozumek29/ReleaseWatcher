@@ -6,6 +6,7 @@ export const proxmoxSettings = (configured: boolean): AppSettings => ({
   github: { tokenConfigured: false, tokenMasked: null, tokenSource: null },
   polling: { releaseCron: '*/15 * * * *', releaseCronSource: 'env', advisoryCron: '0 */6 * * *', advisoryCronSource: 'env' },
   docker: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
+  homeAssistant: { checkCron: '0 */6 * * *', checkCronSource: 'env' },
   proxmox: {
     configured,
     nodes: configured ? [{ id: 1, name: 'pve', configured: true, backupStorage: null }] : [],

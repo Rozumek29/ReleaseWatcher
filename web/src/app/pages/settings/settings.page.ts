@@ -31,6 +31,7 @@ import { BackupPanel } from './backup';
 import { CHANNELS, ChannelCard } from './channel-card';
 import { ConnectionsPanel } from './connections';
 import { GitHostTokens } from './git-host-tokens';
+import { HomeAssistantConnections } from './home-assistant-connections';
 
 type Section = 'discord' | 'email' | 'notifications' | 'github' | 'polling' | 'advisories' | 'proxmox';
 const SECTIONS: readonly Section[] = ['discord', 'email', 'notifications', 'github', 'polling', 'advisories', 'proxmox'];
@@ -74,6 +75,7 @@ const ADVISORY_PRESETS = ['0 * * * *', '0 */3 * * *', '0 */6 * * *', '0 */12 * *
     ChannelCard,
     ConnectionsPanel,
     GitHostTokens,
+    HomeAssistantConnections,
     Icon,
     RelativeTimePipe,
     Switch,
@@ -116,6 +118,7 @@ export class SettingsPage implements OnInit {
   protected advisoryCron = '';
   protected checkCron = '';
   protected dockerCron = '';
+  protected homeAssistantCron = '';
   protected checkConcurrency: number | null = 3;
   protected backupDefault = false;
   protected runHistoryChecks: number | null = null;
@@ -267,6 +270,7 @@ export class SettingsPage implements OnInit {
       releaseCheckCron: this.releaseCron.trim() || null,
       advisoryCheckCron: this.advisoryCron.trim() || null,
       dockerCheckCron: this.dockerCron.trim() || null,
+      homeAssistantCheckCron: this.homeAssistantCron.trim() || null,
     };
     if (await this.save('polling', patch, 'Check schedules saved.')) {
       void this.statusService.refresh();
@@ -358,7 +362,7 @@ export class SettingsPage implements OnInit {
       case 'github':
         return this.token.trim();
       case 'polling':
-        return [this.releaseCron.trim(), this.advisoryCron.trim(), this.dockerCron.trim()];
+        return [this.releaseCron.trim(), this.advisoryCron.trim(), this.dockerCron.trim(), this.homeAssistantCron.trim()];
       case 'advisories':
         return [this.advisoriesGithub, this.advisoriesOsv];
       case 'proxmox':
@@ -434,6 +438,7 @@ export class SettingsPage implements OnInit {
         this.releaseCron = settings.polling.releaseCron;
         this.advisoryCron = settings.polling.advisoryCron;
         this.dockerCron = settings.docker.checkCron;
+        this.homeAssistantCron = settings.homeAssistant.checkCron;
         break;
       case 'proxmox':
         this.checkCron = settings.proxmox.checkCron;

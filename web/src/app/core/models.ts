@@ -356,6 +356,11 @@ export interface AppSettings {
     checkCron: string;
     checkCronSource: SettingSource;
   };
+  /** Schedule the update entities of the Home Assistant connections are read on. */
+  homeAssistant: {
+    checkCron: string;
+    checkCronSource: SettingSource;
+  };
   email: {
     /** True when host, sender and recipients are set. */
     configured: boolean;
@@ -465,6 +470,7 @@ export interface SettingsPatch extends Partial<Record<ChannelSettingKey, string 
   advisoriesOsv?: boolean | null;
   containerCheckCron?: string | null;
   dockerCheckCron?: string | null;
+  homeAssistantCheckCron?: string | null;
   containerCheckConcurrency?: number | null;
   backupBeforeUpdate?: boolean | null;
   runHistoryChecks?: number | null;
@@ -1155,4 +1161,55 @@ export interface ImportPreview {
 export interface ImportResponse {
   applied: boolean;
   preview: ImportPreview;
+}
+
+/* ---------- Home Assistant ---------- */
+
+/** A Home Assistant instance read through its REST API with a long-lived access token. */
+export interface HomeAssistantConnection {
+  id: number;
+  name: string;
+  /** Base URL, e.g. `http://homeassistant.local:8123`. */
+  url: string;
+  /** The access token, masked – it is never returned in full. */
+  tokenMasked: string;
+  isEnabled: boolean;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+  createdAt: string;
+  isChecking: boolean;
+}
+
+/** An update entity of a connection that names a repository (Core, an add-on, an integration, a card …). */
+export interface HomeAssistantComponent {
+  id: number;
+  connectionId: number;
+  /** `update.…` */
+  entityId: string;
+  name: string;
+  installedVersion: string | null;
+  /** Newest version Home Assistant knows of. */
+  latestVersion: string | null;
+  releaseUrl: string | null;
+  /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
+  repositoryName: string;
+  /** False for a commit hash (a repository without releases). */
+  versionComparable: boolean;
+  /** Home Assistant knows a version other than the installed one. */
+  homeAssistantUpdate: boolean;
+}
+
+export interface HomeAssistantOverview {
+  connections: HomeAssistantConnection[];
+  components: HomeAssistantComponent[];
+  /** Scheduled run that reads the connections. */
+  check: JobStatus;
+}
+
+/** `token` omitted or empty when editing = keep the saved one. */
+export interface HomeAssistantConnectionRequest {
+  name: string;
+  url: string;
+  token?: string | null;
+  isEnabled?: boolean;
 }

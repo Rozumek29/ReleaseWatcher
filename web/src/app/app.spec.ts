@@ -47,8 +47,9 @@ describe('App shell', () => {
     expect(links[0]).toContain('Repositories');
     expect(links[1]).toContain('Machines');
     expect(links[2]).toContain('Docker');
-    expect(links[3]).toContain('Vulnerabilities');
-    expect(links[4]).toContain('Settings');
+    expect(links[3]).toContain('Home Assistant');
+    expect(links[4]).toContain('Vulnerabilities');
+    expect(links[5]).toContain('Settings');
     const counts = [...el.querySelectorAll('nav .count')].map((c) => c.textContent?.trim());
     expect(counts).toEqual(['3', '4', '2']);
     expect(el.querySelector('nav .count.danger')?.textContent?.trim()).toBe('2');
@@ -127,6 +128,8 @@ describe('App shell', () => {
       'Repositories',
       'Machines',
       'Vulnerabilities',
+      // Not in the saved order yet (added in a newer version): appended.
+      'Home Assistant',
     ]);
   });
 
@@ -136,7 +139,7 @@ describe('App shell', () => {
     await settle(fixture);
 
     expect(el.querySelector('nav a')).toBeNull();
-    expect(labels('.nav-item')).toEqual(['Repositories', 'Machines', 'Docker', 'Vulnerabilities', 'Settings']);
+    expect(labels('.nav-item')).toEqual(['Repositories', 'Machines', 'Docker', 'Home Assistant', 'Vulnerabilities', 'Settings']);
     expect(el.querySelector('.nav-item .home-mark')).not.toBeNull();
 
     el.querySelectorAll<HTMLButtonElement>('.nav-item')[2]!.dispatchEvent(
@@ -144,9 +147,9 @@ describe('App shell', () => {
     );
     await settle(fixture);
 
-    expect(labels('.nav-item')).toEqual(['Docker', 'Repositories', 'Machines', 'Vulnerabilities', 'Settings']);
+    expect(labels('.nav-item')).toEqual(['Docker', 'Repositories', 'Machines', 'Home Assistant', 'Vulnerabilities', 'Settings']);
     expect(navigation.home()).toBe('docker');
-    expect(el.querySelector('[aria-live]')?.textContent).toContain('Docker moved to position 1 of 5.');
+    expect(el.querySelector('[aria-live]')?.textContent).toContain('Docker moved to position 1 of 6.');
 
     [...el.querySelectorAll<HTMLButtonElement>('nav .btn')].find((b) => b.textContent?.includes('Done'))!.click();
     await settle(fixture);
@@ -175,7 +178,7 @@ describe('App shell', () => {
     pointer('pointerup', 95);
     await settle(fixture);
 
-    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Repositories', 'Vulnerabilities', 'Settings']);
+    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Repositories', 'Home Assistant', 'Vulnerabilities', 'Settings']);
     expect(item.classList).not.toContain('dragging');
   });
 
@@ -183,16 +186,16 @@ describe('App shell', () => {
     const { fixture, el, labels, navigation } = await signedIn();
     navigation.editing.set(true);
     await settle(fixture);
-    // A sidebar 120px high that can scroll by 100px; items 36px high with a 4px gap.
+    // A sidebar 120px high that can scroll by 140px; items 36px high with a 4px gap.
     const sidebar = el.querySelector<HTMLElement>('.sidebar')!;
     let scrollTop = 0;
     Object.defineProperty(sidebar, 'scrollTop', {
       get: () => scrollTop,
-      set: (value: number) => (scrollTop = Math.max(0, Math.min(100, value))),
+      set: (value: number) => (scrollTop = Math.max(0, Math.min(140, value))),
     });
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
       if (this === sidebar) return { top: 0, bottom: 120, height: 120 } as DOMRect;
-      if (this.localName === 'nav') return { top: -scrollTop, bottom: 200 - scrollTop } as DOMRect;
+      if (this.localName === 'nav') return { top: -scrollTop, bottom: 240 - scrollTop } as DOMRect;
       const index = [...el.querySelectorAll('.nav-item')].indexOf(this);
       return { top: index * 40 - scrollTop, bottom: index * 40 + 36 - scrollTop, height: 36 } as DOMRect;
     });
@@ -202,12 +205,12 @@ describe('App shell', () => {
 
     pointer('pointerdown', 10);
     pointer('pointermove', 115);
-    // Only as far as the end of the list (200px + 8px of room - 120px).
-    await vi.waitFor(() => expect(scrollTop).toBe(88));
+    // Only as far as the end of the list (240px + 8px of room - 120px).
+    await vi.waitFor(() => expect(scrollTop).toBe(128));
     pointer('pointerup', 115);
     await settle(fixture);
 
-    // 115px on screen + 88px scrolled is below the last item.
-    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Vulnerabilities', 'Settings', 'Repositories']);
+    // 115px on screen + 128px scrolled is below the last item.
+    expect(labels('.nav-item')).toEqual(['Machines', 'Docker', 'Home Assistant', 'Vulnerabilities', 'Settings', 'Repositories']);
   });
 });

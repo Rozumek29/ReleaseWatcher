@@ -1,0 +1,33 @@
+.dialog {
+  width: min(540px, calc(100vw - 32px));
+}
+
+.dialog-head > app-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: var(--accent-strong);
+}
+
+.test-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.test-result {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  color: var(--danger);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+
+  app-icon {
+    margin-top: 3px;
+  }
+
+  &.ok {
+    color: var(--success);
+  }
+}

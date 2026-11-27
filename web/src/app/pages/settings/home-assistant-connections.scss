@@ -1,0 +1,12 @@
+@use './list-rows';
+
+:host {
+  display: block;
+  margin-top: 20px;
+  container-type: inline-size;
+}
+
+.section-icon {
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}

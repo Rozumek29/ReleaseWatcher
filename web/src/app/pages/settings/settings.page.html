@@ -269,6 +269,41 @@
           </span>
         </div>
 
+        <div class="field">
+          <label for="home-assistant-cron">Home Assistant (cron)</label>
+          <div class="presets" role="radiogroup" aria-label="Home Assistant check schedule">
+            @for (p of advisoryPresets; track p) {
+              <button
+                type="button"
+                role="radio"
+                class="preset"
+                [class.active]="homeAssistantCron.trim() === p"
+                [attr.aria-checked]="homeAssistantCron.trim() === p"
+                (click)="homeAssistantCron = p"
+              >
+                {{ describeCron(p) }}
+              </button>
+            }
+          </div>
+          <input
+            id="home-assistant-cron"
+            class="input mono cron-input"
+            name="homeAssistantCheckCron"
+            [(ngModel)]="homeAssistantCron"
+            placeholder="0 */6 * * *"
+            autocomplete="off"
+            spellcheck="false"
+            [class.invalid]="errors()['homeAssistantCheckCron']"
+          />
+          @if (errors()['homeAssistantCheckCron']; as e) {
+            <span class="error">{{ e }}</span>
+          }
+          <span class="hint">
+            {{ sourceLabel(s.homeAssistant.checkCronSource) }} · {{ describeCron(s.homeAssistant.checkCron) }}. Reads the update
+            entities of the Home Assistant connections (one request per connection).
+          </span>
+        </div>
+
         <p class="cron-note">
           <code>minute hour day month weekday</code> in the server's time zone, e.g. <code>0 */6 * * *</code> (every 6
           hours). Empty a field to use the environment default. Container checks have their own schedule in the
@@ -485,6 +520,7 @@
   } @else if (tab() === 'connections') {
   <div class="fade-in" id="panel-connections" role="tabpanel" aria-labelledby="tab-connections">
     <app-connections (changed)="connectionsChanged()" />
+    <app-home-assistant-connections class="enter" style="--i: 3" />
   </div>
   } @else {
   <div class="sections notifications fade-in" id="panel-notifications" role="tabpanel" aria-labelledby="tab-notifications">
