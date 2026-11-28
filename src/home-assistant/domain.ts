@@ -44,10 +44,14 @@ export interface HomeAssistantComponent {
   releaseUrl: string | null;
   /** Repository named by the entity as its lower-case `fullName()`. */
   repository: string;
+  /** When the entity was last read; null = before this was stored. */
+  lastSeenAt: string | null;
+  /** The watched repository with that name – a component is linked to it without any setting; null = not watched. */
+  repositoryId: number | null;
 }
 
 /** A component as read from the states, before it is stored. */
-export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId'>;
+export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId' | 'lastSeenAt' | 'repositoryId'>;
 
 /** Longest name accepted for a connection. */
 export const MAX_NAME_LENGTH = 100;
@@ -57,6 +61,9 @@ export const MAX_TOKEN_LENGTH = 1000;
 /** Home Assistant Core links its release notes page instead of a repository. */
 export const CORE_ENTITY_ID = 'update.home_assistant_core_update';
 export const CORE_REPOSITORY = 'home-assistant/core';
+
+/** `UpdateEntityFeature.INSTALL` of Home Assistant (`supported_features` of an update entity). */
+const FEATURE_INSTALL = 1;
 
 const str = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
 
@@ -103,8 +110,9 @@ export function entityRepository(entityId: string, releaseUrl: string | null): s
 }
 
 /**
- * Maps `GET /api/states` to the components: every update entity that names a repository, whether an update is pending
- * or not. Sorted by name.
+ * Maps `GET /api/states` to the components: every update entity Home Assistant can install that names a repository,
+ * whether an update is pending or not – one it only announces is about something running elsewhere (an integration
+ * reporting the version of its server) and left out. Sorted by name.
  */
 export function componentsFromStates(states: unknown): ReadComponent[] {
   if (!Array.isArray(states)) {
@@ -123,6 +131,10 @@ export function componentsFromStates(states: unknown): ReadComponent[] {
     const releaseUrl = str(attributes['release_url']);
     const repository = entityRepository(entityId, releaseUrl);
     if (!repository) {
+      continue;
+    }
+    const features = attributes['supported_features'];
+    if (typeof features === 'number' && (features & FEATURE_INSTALL) === 0) {
       continue;
     }
     result.push({

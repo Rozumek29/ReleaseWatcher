@@ -93,7 +93,7 @@ export type InstalledVersionSource = 'none' | 'url' | 'manual' | 'machine';
 
 /** An app on a machine: an application of a target or a Docker container. */
 export interface MachineAppRef {
-  kind: 'app' | 'docker';
+  kind: 'app' | 'docker' | 'home-assistant';
   id: number;
 }
 
@@ -116,7 +116,7 @@ export interface MachineAppOption extends MachineAppRef {
 
 /** A machine (target) or Docker connection with its apps. */
 export interface MachineAppGroup {
-  machine: { kind: 'target' | 'endpoint'; id: number; name: string };
+  machine: { kind: 'target' | 'endpoint' | 'home-assistant'; id: number; name: string };
   apps: MachineAppOption[];
 }
 
@@ -1193,10 +1193,18 @@ export interface HomeAssistantComponent {
   releaseUrl: string | null;
   /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
   repositoryName: string;
+  /** When the entity was last read. */
+  lastSeenAt: string | null;
   /** False for a commit hash (a repository without releases). */
   versionComparable: boolean;
   /** Home Assistant knows a version other than the installed one. */
   homeAssistantUpdate: boolean;
+  /** The watched repository the component names; null = not watched. */
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository the component names that is not watched yet (offered as "Watch"); null = already watched. */
+  suggestedRepository: string | null;
+  /** The repository has a newer release than the installed version; null = not watched or not comparable. */
+  updateAvailable: boolean | null;
 }
 
 export interface HomeAssistantOverview {

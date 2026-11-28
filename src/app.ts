@@ -463,7 +463,7 @@ const updateRepositorySchema = body({
    * App on a machine to read the installed version from (it is linked to the repository); omit = keep, null = stop
    * (the last version stays as entered by hand). Not together with a version URL.
    */
-  installedVersionApp: z.object({ kind: z.enum(['app', 'docker']), id: z.int() }).nullish(),
+  installedVersionApp: z.object({ kind: z.enum(['app', 'docker', 'home-assistant']), id: z.int() }).nullish(),
   /** Omit = keep, null/"" = remove (use the global token). */
   accessToken: z.string().max(1000).nullish(),
   /** OSV.dev package; omit = keep, null/"" = none. Both are set together. */
@@ -564,16 +564,27 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     others: deps.settings.current.runHistoryUpdates,
   }));
   const dockerStore = new DockerStore(deps.store.database);
-  const machineApps = new MachineApps({ repositories: deps.store, containers: containerStore, docker: dockerStore });
-  /** Installed versions of the container apps and Docker containers linked to a repository. */
+  const homeAssistantStore = new HomeAssistantStore(deps.store.database, deps.store.secretBox);
+  const machineApps = new MachineApps({
+    repositories: deps.store,
+    containers: containerStore,
+    docker: dockerStore,
+    homeAssistant: homeAssistantStore,
+  });
+  /** Installed versions of the container apps, Docker containers and Home Assistant components linked to a repository. */
   const linkedVersions = (repositoryId: number): (string | null)[] => [
     ...containerStore.linkedAppVersions(repositoryId),
     ...dockerStore.linkedVersions(repositoryId),
+    ...homeAssistantStore.listLinked(repositoryId).map((c) => c.installedVersion),
   ];
   /** Installed versions of container apps and Docker containers per linked repository (compared with its advisories). */
   const linkedAppVersions = (): Map<number, (string | null)[]> => {
     const byRepository = new Map<number, (string | null)[]>();
-    for (const { repositoryId, installedVersion } of [...containerStore.listAppVersions(), ...dockerStore.listLinkedVersions()]) {
+    for (const { repositoryId, installedVersion } of [
+      ...containerStore.listAppVersions(),
+      ...dockerStore.listLinkedVersions(),
+      ...homeAssistantStore.listLinked(),
+    ]) {
       if (repositoryId !== null) {
         const versions = byRepository.get(repositoryId);
         if (versions) {
@@ -695,10 +706,11 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     log,
     sequence: sequencer.slot(4),
   });
-  const homeAssistantStore = new HomeAssistantStore(deps.store.database, deps.store.secretBox);
   const homeAssistant = new HomeAssistantService({
     store: homeAssistantStore,
     log,
+    repositories: () => dockerStore.listRepositoryLinks(),
+    onLinked: (app, repositoryId) => machineApps.adopt(app, repositoryId),
     ...(deps.homeAssistantFetch === undefined ? {} : { fetch: deps.homeAssistantFetch }),
   });
   const homeAssistantJob = new CronJob({
@@ -1020,8 +1032,10 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     }
     // Establish the baseline right away so the UI shows the current latest release.
     await checker.check(repo);
+    // Home Assistant components that name the repository become its installed version.
+    homeAssistant.adoptRepository(repo.id);
 
-    return Response.json(repositoryDto(repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
+    return Response.json(repositoryDto(store.get(repo.id) ?? repo), { status: 201, headers: { location: `/api/repositories/${repo.id}` } });
   };
 
   /** Adds a web source (provider `web`) and reads it once to set the baseline. */
@@ -1069,8 +1083,12 @@ export async function buildApp(deps: AppDeps): Promise<App> {
     if ((machineApp === undefined ? repo.installedVersionApp : machineApp) && finalUrl) {
       return validationProblem('installedVersionApp', 'Remove the version URL to read the installed version from an app on a machine.');
     }
-    if (machineApp && !machineApps.find(machineApp)) {
+    const machineOption = machineApp ? machineApps.find(machineApp) : null;
+    if (machineApp && !machineOption) {
       return validationProblem('installedVersionApp', 'The app is not on any machine (any more) – check the machine first.');
+    }
+    if (machineApp?.kind === 'home-assistant' && machineOption?.repositoryId !== repo.id) {
+      return validationProblem('installedVersionApp', 'This Home Assistant component names another repository.');
     }
     const icon = body.icon === undefined ? undefined : body.icon?.trim() || null;
     const iconError = icon ? validateIcon(icon) : null;

@@ -140,7 +140,7 @@ Full endpoint list: wiki → *REST API*. Rules for new endpoints:
 - **Copies across features:** a value one feature copies from another's table and that every write path (checks,
   settings, backup import, cascading deletes) must keep current is maintained by SQLite triggers, created in the
   migration next to the column – e.g. a repository's installed version read from an app on a machine
-  (`installed_app_id` / `installed_docker_id`, `MachineApps` in `src/machine-apps.ts`). Stores then never overwrite the
+  (`installed_app_id` / `installed_docker_id` / `installed_home_assistant_id`, `MachineApps` in `src/machine-apps.ts`). Stores then never overwrite the
   copy (`RepositoryStore.save()` skips it), so an entity read before the source changed cannot undo the trigger.
 - **Long lists are paged on the server with a cursor (keyset), never `OFFSET`:** sort by stored columns ending in a
   unique key, cover the order with an index, and pass the last row's key as an opaque `cursor`

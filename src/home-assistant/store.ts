@@ -23,7 +23,14 @@ interface ComponentRow {
   latest_version: string | null;
   release_url: string | null;
   repository: string;
+  last_seen_at: string | null;
+  repository_id: number | null;
 }
+
+/** Components with the id of the watched repository they name (`full_name` has a unique index). */
+const SELECT_COMPONENTS = `SELECT c.*, r.id AS repository_id
+                             FROM home_assistant_components c
+                             LEFT JOIN watched_repositories r ON r.full_name = c.repository`;
 
 const toComponent = (r: ComponentRow): HomeAssistantComponent => ({
   id: r.id,
@@ -35,6 +42,8 @@ const toComponent = (r: ComponentRow): HomeAssistantComponent => ({
   latestVersion: r.latest_version,
   releaseUrl: r.release_url,
   repository: r.repository,
+  lastSeenAt: r.last_seen_at,
+  repositoryId: r.repository_id,
 });
 
 /** SQLite persistence of Home Assistant connections (token encrypted) and their components (tables from `RepositoryStore`). */
@@ -84,10 +93,24 @@ export class HomeAssistantStore {
   listComponents(connectionId?: number): HomeAssistantComponent[] {
     const rows =
       connectionId === undefined
-        ? this.db.query<ComponentRow, []>('SELECT * FROM home_assistant_components ORDER BY name COLLATE NOCASE, id').all()
+        ? this.db.query<ComponentRow, []>(`${SELECT_COMPONENTS} ORDER BY c.name COLLATE NOCASE, c.id`).all()
         : this.db
-            .query<ComponentRow, [number]>('SELECT * FROM home_assistant_components WHERE connection_id = ? ORDER BY name COLLATE NOCASE, id')
+            .query<ComponentRow, [number]>(`${SELECT_COMPONENTS} WHERE c.connection_id = ? ORDER BY c.name COLLATE NOCASE, c.id`)
             .all(connectionId);
+    return rows.map(toComponent);
+  }
+
+  getComponent(id: number): HomeAssistantComponent | null {
+    const row = this.db.query<ComponentRow, [number]>(`${SELECT_COMPONENTS} WHERE c.id = ?`).get(id);
+    return row ? toComponent(row) : null;
+  }
+
+  /** Components that name a watched repository (all, or those of one repository). */
+  listLinked(repositoryId?: number): HomeAssistantComponent[] {
+    const rows =
+      repositoryId === undefined
+        ? this.db.query<ComponentRow, []>(`${SELECT_COMPONENTS} WHERE r.id IS NOT NULL ORDER BY c.id`).all()
+        : this.db.query<ComponentRow, [number]>(`${SELECT_COMPONENTS} WHERE r.id = ? ORDER BY c.id`).all(repositoryId);
     return rows.map(toComponent);
   }
 
@@ -95,14 +118,17 @@ export class HomeAssistantStore {
    * Stores what a connection's update entities say now: known entities are updated in place (they keep their id), new
    * ones are added and those Home Assistant no longer has are removed.
    */
-  replaceComponents(connectionId: number, components: readonly ReadComponent[]): void {
+  replaceComponents(connectionId: number, components: readonly ReadComponent[], now: Date): void {
     const upsert = this.db.query(
-      `INSERT INTO home_assistant_components (connection_id, entity_id, name, has_update, installed_version, latest_version, release_url, repository)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO home_assistant_components (connection_id, entity_id, name, has_update, installed_version, latest_version, release_url,
+                                              repository, last_seen_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (connection_id, entity_id) DO UPDATE SET
          name = excluded.name, has_update = excluded.has_update, installed_version = excluded.installed_version,
-         latest_version = excluded.latest_version, release_url = excluded.release_url, repository = excluded.repository`,
+         latest_version = excluded.latest_version, release_url = excluded.release_url, repository = excluded.repository,
+         last_seen_at = excluded.last_seen_at`,
     );
+    const seenAt = now.toISOString();
     const remove = this.db.query('DELETE FROM home_assistant_components WHERE id = ?');
     this.db.transaction(() => {
       const seen = new Set(components.map((c) => c.entityId));
@@ -110,7 +136,7 @@ export class HomeAssistantStore {
         if (!seen.has(existing.entityId)) remove.run(existing.id);
       }
       for (const c of components) {
-        upsert.run(connectionId, c.entityId, c.name, c.hasUpdate ? 1 : 0, c.installedVersion, c.latestVersion, c.releaseUrl, c.repository);
+        upsert.run(connectionId, c.entityId, c.name, c.hasUpdate ? 1 : 0, c.installedVersion, c.latestVersion, c.releaseUrl, c.repository, seenAt);
       }
     })();
   }

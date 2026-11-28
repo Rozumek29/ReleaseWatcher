@@ -60,6 +60,7 @@ interface Row {
   installed_version_error: string | null;
   installed_app_id: number | null;
   installed_docker_id: number | null;
+  installed_home_assistant_id: number | null;
   access_token: string | null;
   advisories_etag: string | null;
   advisories_checked_at: string | null;
@@ -159,7 +160,9 @@ const toEntity = (r: Row, secrets: SecretBox): WatchedRepository => ({
       ? { kind: 'app', id: r.installed_app_id }
       : r.installed_docker_id !== null
         ? { kind: 'docker', id: r.installed_docker_id }
-        : null,
+        : r.installed_home_assistant_id !== null
+          ? { kind: 'home-assistant', id: r.installed_home_assistant_id }
+          : null,
   accessToken: secrets.decryptNullable(r.access_token),
   advisoriesEtag: r.advisories_etag,
   advisoriesCheckedAt: r.advisories_checked_at,
@@ -872,6 +875,35 @@ export const MIGRATIONS: readonly string[] = [
      UNIQUE (connection_id, entity_id)
    );
    CREATE INDEX idx_home_assistant_components_repository ON home_assistant_components (repository);`,
+  // A repository can read its installed version from a Home Assistant component that names it – the third source next
+  // to `installed_app_id` / `installed_docker_id`. A component belongs to the repository whose `full_name` it names, so
+  // there is no link to store; the triggers copy version and check time and drop the source when the component names
+  // another repository or is removed (also by the cascade of a removed connection).
+  `ALTER TABLE home_assistant_components ADD COLUMN last_seen_at TEXT;
+   ALTER TABLE watched_repositories ADD COLUMN installed_home_assistant_id INTEGER REFERENCES home_assistant_components (id) ON DELETE SET NULL;
+   CREATE INDEX idx_watched_repositories_installed_home_assistant ON watched_repositories (installed_home_assistant_id)
+    WHERE installed_home_assistant_id IS NOT NULL;
+
+   CREATE TRIGGER home_assistant_component_installed_version
+   AFTER UPDATE OF installed_version, repository, last_seen_at ON home_assistant_components
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_home_assistant_id = NULL,
+            installed_version_error = 'The Home Assistant component no longer names this repository, so its last version is kept as entered by hand.'
+      WHERE installed_home_assistant_id = NEW.id AND full_name IS NOT NEW.repository;
+     UPDATE watched_repositories
+        SET installed_version = coalesce(NEW.installed_version, installed_version),
+            installed_version_checked_at = NEW.last_seen_at,
+            installed_version_error = NULL
+      WHERE installed_home_assistant_id = NEW.id;
+   END;
+   CREATE TRIGGER home_assistant_component_installed_version_removed BEFORE DELETE ON home_assistant_components
+   BEGIN
+     UPDATE watched_repositories
+        SET installed_home_assistant_id = NULL,
+            installed_version_error = 'The component was removed from Home Assistant, so its last version is kept as entered by hand.'
+      WHERE installed_home_assistant_id = OLD.id;
+   END;`,
 ];
 
 /** ReleaseWatcher's own repository: watched in every new database, so the app announces its own releases. */
@@ -890,7 +922,7 @@ export interface InstalledVersionAppName extends MachineAppRef {
 }
 
 /** SQL condition: the installed version of the repository row is read from an app on a machine. */
-const FROM_MACHINE = '(installed_app_id IS NOT NULL OR installed_docker_id IS NOT NULL)';
+const FROM_MACHINE = '(installed_app_id IS NOT NULL OR installed_docker_id IS NOT NULL OR installed_home_assistant_id IS NOT NULL)';
 
 /** SQLite-backed store of watched repositories (uses Bun's built-in bun:sqlite module). */
 export class RepositoryStore {
@@ -1081,24 +1113,36 @@ export class RepositoryStore {
   setInstalledVersionApp(repositoryId: number, app: MachineAppRef | null): void {
     if (app === null) {
       this.db
-        .query('UPDATE watched_repositories SET installed_app_id = NULL, installed_docker_id = NULL WHERE id = ?')
+        .query('UPDATE watched_repositories SET installed_app_id = NULL, installed_docker_id = NULL, installed_home_assistant_id = NULL WHERE id = ?')
         .run(repositoryId);
     } else if (app.kind === 'app') {
       this.db
         .query(
           `UPDATE watched_repositories
-              SET installed_app_id = a.id, installed_docker_id = NULL,
+              SET installed_app_id = a.id, installed_docker_id = NULL, installed_home_assistant_id = NULL,
                   installed_version = coalesce(a.installed_version, watched_repositories.installed_version),
                   installed_version_checked_at = a.checked_at, installed_version_error = a.error
              FROM target_apps a
             WHERE a.id = ?2 AND watched_repositories.id = ?1`,
         )
         .run(repositoryId, app.id);
+    } else if (app.kind === 'home-assistant') {
+      // Only a component that names the repository can be its source (the triggers would drop any other at once).
+      this.db
+        .query(
+          `UPDATE watched_repositories
+              SET installed_home_assistant_id = h.id, installed_app_id = NULL, installed_docker_id = NULL,
+                  installed_version = coalesce(h.installed_version, watched_repositories.installed_version),
+                  installed_version_checked_at = h.last_seen_at, installed_version_error = NULL
+             FROM home_assistant_components h
+            WHERE h.id = ?2 AND watched_repositories.id = ?1 AND h.repository = watched_repositories.full_name`,
+        )
+        .run(repositoryId, app.id);
     } else {
       this.db
         .query(
           `UPDATE watched_repositories
-              SET installed_docker_id = d.id, installed_app_id = NULL,
+              SET installed_docker_id = d.id, installed_app_id = NULL, installed_home_assistant_id = NULL,
                   installed_version = coalesce(d.installed_version, watched_repositories.installed_version),
                   installed_version_checked_at = d.last_seen_at,
                   installed_version_error = IIF(d.present = 1, NULL, 'The Docker container was not found by the last check.')
@@ -1111,7 +1155,7 @@ export class RepositoryStore {
 
   /** Names of the apps the installed versions are read from, with their machines, by repository id. */
   installedVersionApps(): Map<number, InstalledVersionAppName> {
-    type NameRow = { repository_id: number; kind: 'app' | 'docker'; id: number; name: string; machine: string | null };
+    type NameRow = { repository_id: number; kind: MachineAppRef['kind']; id: number; name: string; machine: string | null };
     const rows = this.db
       .query<NameRow, []>(
         `SELECT r.id AS repository_id, 'app' AS kind, a.id, a.name, c.name AS machine
@@ -1123,7 +1167,12 @@ export class RepositoryStore {
            FROM watched_repositories r
            JOIN docker_containers d ON d.id = r.installed_docker_id
            LEFT JOIN targets c ON c.id = d.target_id
-           LEFT JOIN docker_endpoints e ON e.id = d.endpoint_id`,
+           LEFT JOIN docker_endpoints e ON e.id = d.endpoint_id
+         UNION ALL
+         SELECT r.id, 'home-assistant', h.id, h.name, n.name
+           FROM watched_repositories r
+           JOIN home_assistant_components h ON h.id = r.installed_home_assistant_id
+           JOIN home_assistant_connections n ON n.id = h.connection_id`,
       )
       .all();
     return new Map(rows.map((r) => [r.repository_id, { kind: r.kind, id: r.id, name: r.name, machine: r.machine ?? '' }]));
