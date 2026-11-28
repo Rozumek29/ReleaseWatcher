@@ -1,6 +1,8 @@
 import type { RepositoryStore } from './db.ts';
 import type { DockerStore } from './docker/store.ts';
 import { fullName, type MachineAppRef, type WatchedRepository } from './domain.ts';
+import { isComparableVersion } from './home-assistant/domain.ts';
+import type { HomeAssistantStore } from './home-assistant/store.ts';
 import type { ContainerStore } from './proxmox/store.ts';
 
 /** An app on a machine a repository can read its installed version from. */
@@ -15,9 +17,9 @@ export interface MachineAppOption extends MachineAppRef {
   repository: string | null;
 }
 
-/** A machine (target) or Docker connection with its apps. */
+/** A machine (target), Docker connection or Home Assistant connection with its apps. */
 export interface MachineAppGroup {
-  machine: { kind: 'target' | 'endpoint'; id: number; name: string };
+  machine: { kind: 'target' | 'endpoint' | 'home-assistant'; id: number; name: string };
   apps: MachineAppOption[];
 }
 
@@ -32,20 +34,26 @@ export const shouldAdoptMachineApp = (
 ): boolean => reportsVersion && !repo.installedVersionUrl && repo.installedVersionApp === null;
 
 /**
- * Apps on machines as sources of a repository's installed version: applications of targets and Docker containers. The
+ * Apps on machines as sources of a repository's installed version: applications of targets, Docker containers and
+ * Home Assistant components. The
  * link between an app and a repository is the one set on the machine side (an app's "latest version from" repository,
  * a Docker container's repository); reading the version from an app links it.
  */
 export class MachineApps {
   constructor(
-    private readonly deps: { repositories: RepositoryStore; containers: ContainerStore; docker: DockerStore },
+    private readonly deps: {
+      repositories: RepositoryStore;
+      containers: ContainerStore;
+      docker: DockerStore;
+      homeAssistant: HomeAssistantStore;
+    },
   ) {}
 
   /** Every machine with apps, by name; hidden and vanished Docker containers are left out. */
   list(): MachineAppGroup[] {
-    const { containers, docker } = this.deps;
+    const { containers, docker, homeAssistant } = this.deps;
     const groups = new Map<string, MachineAppGroup>();
-    const group = (kind: 'target' | 'endpoint', id: number, name: string): MachineAppGroup => {
+    const group = (kind: MachineAppGroup['machine']['kind'], id: number, name: string): MachineAppGroup => {
       const key = `${kind}:${id}`;
       let found = groups.get(key);
       if (!found) {
@@ -89,6 +97,19 @@ export class MachineApps {
       });
     }
 
+    // A Home Assistant component belongs to the repository it names – there is no other link to choose.
+    const connectionNames = new Map(homeAssistant.listConnections().map((c) => [c.id, c.name]));
+    for (const h of homeAssistant.listComponents()) {
+      group('home-assistant', h.connectionId, connectionNames.get(h.connectionId) ?? `#${h.connectionId}`).apps.push({
+        kind: 'home-assistant',
+        id: h.id,
+        name: h.name,
+        installedVersion: h.installedVersion,
+        checkedAt: h.lastSeenAt,
+        ...linkTo(h.repositoryId),
+      });
+    }
+
     const byName = (a: { name: string }, b: { name: string }) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     return [...groups.values()]
       .map((g) => ({ ...g, apps: g.apps.sort((a, b) => byName(a, b) || (a.kind === b.kind ? 0 : a.kind === 'app' ? -1 : 1)) }))
@@ -106,6 +127,9 @@ export class MachineApps {
    * falls back to the version entered by hand (database triggers).
    */
   link(ref: MachineAppRef, repositoryId: number): void {
+    if (ref.kind === 'home-assistant') {
+      return; // linked by the repository the component names
+    }
     if (ref.kind === 'app') {
       const app = this.deps.containers.findApp(ref.id);
       if (app && (app.latestSource !== 'repository' || app.repositoryId !== repositoryId)) {
@@ -137,7 +161,9 @@ export class MachineApps {
             const app = this.deps.containers.findApp(ref.id);
             return app !== null && (app.versionCommand !== null || app.installedVersion !== null);
           })()
-        : this.deps.docker.getContainer(ref.id)?.installedVersion != null;
+        : ref.kind === 'home-assistant'
+          ? isComparableVersion(this.deps.homeAssistant.getComponent(ref.id)?.installedVersion ?? null)
+          : this.deps.docker.getContainer(ref.id)?.installedVersion != null;
     if (shouldAdoptMachineApp(repo, reportsVersion)) {
       this.deps.repositories.setInstalledVersionApp(repositoryId, ref);
     }

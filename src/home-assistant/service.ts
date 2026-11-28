@@ -1,6 +1,9 @@
+import type { RepositoryLink } from '../docker/store.ts';
+import { fullName, iconUrls, type MachineAppRef, repositoryUrl } from '../domain.ts';
 import { errorMessage } from '../errors.ts';
 import type { Logger } from '../log.ts';
 import { type FetchLike, HomeAssistantApi, HomeAssistantApiError } from '../proxmox/home-assistant-api.ts';
+import { appUpdateAvailable } from '../proxmox/domain.ts';
 import { componentsFromStates, type HomeAssistantComponent, type HomeAssistantConnection, isComparableVersion, type ReadComponent } from './domain.ts';
 import type { HomeAssistantStore } from './store.ts';
 
@@ -9,6 +12,10 @@ export interface HomeAssistantServiceDeps {
   log: Pick<Logger, 'info' | 'warn' | 'error'>;
   /** `fetch` for the Home Assistant API (tests pass a fake). */
   fetch?: FetchLike;
+  /** Watched repositories with what components are compared with (latest release, icon). */
+  repositories?: () => readonly RepositoryLink[];
+  /** A component names a watched repository and reports a version it can be compared by (`MachineApps.adopt`). */
+  onLinked?: (app: MachineAppRef, repositoryId: number) => void;
   now?: () => Date;
 }
 
@@ -23,13 +30,19 @@ export class ConnectionBusyError extends Error {
 }
 
 /** What the API shows of a component. */
-export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent, 'repository'> {
+export interface HomeAssistantComponentView extends Omit<HomeAssistantComponent, 'repository' | 'repositoryId'> {
   /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
   repositoryName: string;
   /** False for a commit hash (a repository without releases): shown, but not compared with releases. */
   versionComparable: boolean;
   /** Home Assistant reports an update for the entity (its state is `on`). */
   homeAssistantUpdate: boolean;
+  /** The watched repository the component names; null = not watched. */
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository the component names that is not watched yet (offered as "Watch"); null = already watched. */
+  suggestedRepository: string | null;
+  /** Release-based: the repository has a newer release than the installed version; null = not watched or not comparable. */
+  updateAvailable: boolean | null;
 }
 
 /**
@@ -86,7 +99,8 @@ export class HomeAssistantService {
       const components = await this.read(connection);
       // The connection may have been removed (or pointed elsewhere) while Home Assistant answered.
       if (store.getConnection(connection.id)?.url !== connection.url) return;
-      store.replaceComponents(connection.id, components);
+      store.replaceComponents(connection.id, components, this.now());
+      this.adopt(store.listComponents(connection.id));
       log.info({ connection: connection.name, components: components.length }, 'Read Home Assistant update entities');
     } catch (error) {
       lastError = errorMessage(error).slice(0, 1000);
@@ -109,13 +123,40 @@ export class HomeAssistantService {
     }
   }
 
+  /**
+   * Tells `onLinked` about the components that name a watched repository and report a comparable version, so a
+   * repository without another source reads its installed version from Home Assistant.
+   */
+  adopt(components: readonly HomeAssistantComponent[]): void {
+    for (const c of components) {
+      if (c.repositoryId !== null && isComparableVersion(c.installedVersion)) {
+        this.deps.onLinked?.({ kind: 'home-assistant', id: c.id }, c.repositoryId);
+      }
+    }
+  }
+
+  /** A repository was added: the components that name it become its installed version (see {@link adopt}). */
+  adoptRepository(repositoryId: number): void {
+    this.adopt(this.deps.store.listLinked(repositoryId));
+  }
+
   describe(components: readonly HomeAssistantComponent[]): HomeAssistantComponentView[] {
-    // Named so that the watched repository and a release-based `updateAvailable` can join later, as for Docker containers.
-    return components.map(({ repository: repositoryName, ...c }) => ({
-      ...c,
-      repositoryName,
-      versionComparable: isComparableVersion(c.installedVersion),
-      homeAssistantUpdate: c.hasUpdate,
-    }));
+    const byId = new Map((this.deps.repositories?.() ?? []).map((r) => [r.id, r]));
+    return components.map((c) => {
+      const repo = c.repositoryId === null ? undefined : byId.get(c.repositoryId);
+      const comparable = isComparableVersion(c.installedVersion);
+      const { repository: repositoryName, repositoryId: _linked, ...rest } = c;
+      return {
+        ...rest,
+        repositoryName,
+        versionComparable: comparable,
+        homeAssistantUpdate: c.hasUpdate,
+        repository: repo
+          ? { id: repo.id, fullName: fullName(repo), url: repositoryUrl(repo), latestVersion: repo.lastSeenTag, iconUrls: iconUrls(repo.icon) }
+          : null,
+        suggestedRepository: c.repositoryId === null ? c.repository : null,
+        updateAvailable: repo && comparable ? appUpdateAvailable({ installedVersion: c.installedVersion, latestVersion: repo.lastSeenTag }) : null,
+      };
+    });
   }
 }

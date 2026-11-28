@@ -23,8 +23,12 @@ export const haComponent = (overrides: Partial<HomeAssistantComponent> = {}): Ho
   latestVersion: 'v7.0.1',
   releaseUrl: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1',
   repositoryName: 'custom-cards/button-card',
+  lastSeenAt: '2026-01-01T00:00:00Z',
   versionComparable: true,
   homeAssistantUpdate: true,
+  repository: null,
+  suggestedRepository: 'custom-cards/button-card',
+  updateAvailable: null,
   ...overrides,
 });
 
@@ -40,6 +44,7 @@ export const haOverview = (overrides: Partial<HomeAssistantOverview> = {}): Home
       latestVersion: '2026.11.3',
       releaseUrl: 'https://www.home-assistant.io/latest-release-notes/',
       repositoryName: 'home-assistant/core',
+      suggestedRepository: 'home-assistant/core',
       homeAssistantUpdate: false,
     }),
     haComponent({
@@ -50,6 +55,7 @@ export const haOverview = (overrides: Partial<HomeAssistantOverview> = {}): Home
       latestVersion: 'a358575',
       releaseUrl: 'https://github.com/owner/some-integration',
       repositoryName: 'owner/some-integration',
+      suggestedRepository: 'owner/some-integration',
       versionComparable: false,
       homeAssistantUpdate: false,
     }),

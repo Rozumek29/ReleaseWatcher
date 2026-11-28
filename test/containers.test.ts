@@ -121,6 +121,7 @@ describe('containers API', () => {
       'idx_watched_repositories_group',
       'idx_watched_repositories_installed_app',
       'idx_watched_repositories_installed_docker',
+      'idx_watched_repositories_installed_home_assistant',
     ]);
   });
 

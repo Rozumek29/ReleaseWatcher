@@ -57,6 +57,11 @@
         </button>
       }
     </div>
+    <div class="search">
+      <app-icon name="search" [size]="16" />
+      <label for="home-assistant-search" class="visually-hidden">Search components</label>
+      <input id="home-assistant-search" class="input" type="search" placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+    </div>
   </div>
 
   @for (card of cards(); track card.connection.id; let i = $index) {
@@ -106,32 +111,43 @@
         @for (c of card.components; track c.id) {
           <div class="row">
             <span class="name" [title]="c.entityId">{{ c.name }}</span>
-            <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
-              {{ c.repositoryName }} <app-icon name="external" [size]="12" />
-            </a>
+            @if (c.repository; as repo) {
+              <a class="repository mono" [href]="repo.url" target="_blank" rel="noopener" title="Watched – releases of this repository are compared with the installed version">
+                <app-icon name="repo" [size]="12" /> {{ repo.fullName }}
+              </a>
+            } @else {
+              <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
+                {{ c.repositoryName }} <app-icon name="external" [size]="12" />
+              </a>
+            }
             <span class="versions mono">
               @if (c.installedVersion) {
                 {{ c.installedVersion }}
               } @else {
                 <span class="muted">version unknown</span>
               }
-              @if (c.homeAssistantUpdate) {
-                <span class="arrow">→</span> {{ c.latestVersion }}
+              @if (newerVersion(c); as newer) {
+                <span class="arrow">→</span> {{ newer }}
               }
             </span>
-            @if (c.homeAssistantUpdate) {
-              @if (c.releaseUrl) {
+            @if (hasUpdate(c)) {
+              @if (c.updateAvailable !== true && c.releaseUrl) {
                 <a class="badge badge-warning" [href]="c.releaseUrl" target="_blank" rel="noopener" title="Open the release Home Assistant links to">
                   Update available <app-icon name="external" [size]="12" />
                 </a>
               } @else {
-                <span class="badge badge-warning">Update available</span>
+                <span class="badge badge-warning" [title]="c.updateAvailable === true ? 'The watched repository has a newer release' : 'Home Assistant knows a newer version'">Update available</span>
               }
             } @else if (c.installedVersion) {
-              <span class="badge badge-success" title="Home Assistant knows no newer version">Up to date</span>
+              <span class="badge badge-success" [title]="c.repository ? 'No newer release of the watched repository' : 'Home Assistant knows no newer version'">Up to date</span>
             }
             @if (!c.versionComparable && c.installedVersion) {
               <span class="badge" title="A commit, not a release – it cannot be compared with the releases of the repository">Commit</span>
+            }
+            @if (c.suggestedRepository; as suggested) {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="watch(c)" [disabled]="watching().has(c.id)" [title]="'Watch the releases of ' + suggested">
+                <app-icon name="plus" [size]="14" /> Watch
+              </button>
             }
           </div>
         } @empty {
@@ -144,7 +160,15 @@
   } @empty {
     <div class="card empty">
       <h2>Nothing matches</h2>
-      <p>No component has an update.</p>
+      <p>
+        @if (query().trim()) {
+          No component matches the search.
+        } @else if (filter() === 'updates') {
+          No component has an update.
+        } @else {
+          Every component's repository is watched.
+        }
+      </p>
     </div>
   }
 }

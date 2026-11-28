@@ -4,7 +4,7 @@ import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 import { HomeAssistantOverview } from '../../core/models';
 import { settle } from '../../testing';
-import { haConnection, haOverview } from './fixtures';
+import { haComponent, haConnection, haOverview } from './fixtures';
 import { HomeAssistantPage, repositoryLink } from './home-assistant.page';
 
 describe('HomeAssistantPage', () => {
@@ -93,5 +93,46 @@ describe('HomeAssistantPage', () => {
     await settle(fixture);
     expect(el.querySelector('.source-actions')?.textContent).not.toContain('Checking…');
   }, 10_000);
+  it('shows a watched repository, compares with its releases and offers the others to watch', async () => {
+    const watched = haComponent({
+      repository: { id: 7, fullName: 'custom-cards/button-card', url: 'https://github.com/custom-cards/button-card', latestVersion: 'v7.1.0', iconUrls: [] },
+      suggestedRepository: null,
+      updateAvailable: true,
+      homeAssistantUpdate: false,
+    });
+    const { fixture, el } = await create(haOverview({ components: [watched, ...haOverview().components.slice(1)] }));
+    const [card, core] = rows(el);
+    // The repository's release, not the version Home Assistant knows.
+    expect(card!.textContent).toContain('v7.1.0');
+    expect(card!.querySelector('button')).toBeNull();
+    expect(core!.querySelector('button')?.textContent).toContain('Watch');
+
+    const tab = (label: string) => [...el.querySelectorAll<HTMLButtonElement>('.tab')].find((t) => t.textContent?.includes(label))!;
+    expect(tab('Not watched').textContent).toContain('2');
+    tab('Not watched').click();
+    await settle(fixture);
+    expect(rows(el).map((r) => r.querySelector('.name')?.textContent?.trim())).toEqual(['Home Assistant Core', 'Some integration']);
+
+    rows(el)[0]!.querySelector<HTMLButtonElement>('button')!.click();
+    const add = http.expectOne({ method: 'POST', url: '/api/repositories' });
+    expect(add.request.body).toEqual({ repository: 'home-assistant/core', includePrereleases: false });
+    add.flush({ id: 8 });
+    await settle(fixture);
+    http.expectOne('/api/home-assistant').flush(haOverview());
+    await settle(fixture);
+  });
+
+  it('searches component and repository names', async () => {
+    const { fixture, el } = await create(haOverview());
+    const input = el.querySelector<HTMLInputElement>('#home-assistant-search')!;
+    input.value = 'core';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(rows(el).map((r) => r.querySelector('.name')?.textContent?.trim())).toEqual(['Home Assistant Core']);
+    input.value = 'nothing-like-this';
+    input.dispatchEvent(new Event('input'));
+    await settle(fixture);
+    expect(el.querySelector('.empty')?.textContent).toContain('No component matches the search.');
+  });
 
 });
