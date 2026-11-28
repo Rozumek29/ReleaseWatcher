@@ -6,7 +6,7 @@ import { RepositoryStore } from '../src/db.ts';
 import { componentsFromStates, entityRepository, isComparableVersion } from '../src/home-assistant/domain.ts';
 import { silentLogger } from '../src/log.ts';
 import { SettingsService } from '../src/settings.ts';
-import { FakeSource, RecordingNotifier } from './helpers.ts';
+import { FakeSource, RecordingNotifier, release } from './helpers.ts';
 
 const HA_URL = 'http://ha.test:8123';
 const TOKEN = 'long-lived-secret-token';
@@ -38,6 +38,7 @@ describe('Home Assistant connections: domain', () => {
         installed_version: 'v7.0.1',
         latest_version: 'v7.0.1',
         release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1',
+        supported_features: 1 | 4 | 16,
       }),
       update(
         'update.addon_update',
@@ -45,8 +46,10 @@ describe('Home Assistant connections: domain', () => {
         'on',
       ),
       update('update.home_assistant_core_update', { title: 'Home Assistant Core', installed_version: '2026.11.3', latest_version: '2026.11.3' }),
-      // Left out: device firmware without a link, an entity of another domain, a broken entry.
+      // Left out: device firmware without a link, a server running elsewhere that Home Assistant only announces,
+      // an entity of another domain, a broken entry.
       update('update.plug_firmware', { title: 'Plug firmware', installed_version: '1.0', latest_version: '1.1', release_url: null }),
+      update('update.server_version', { title: 'Server', installed_version: '2.0', latest_version: '2.1', release_url: 'https://github.com/owner/server/releases/tag/v2.1', supported_features: 16 }),
       { entity_id: 'sensor.temperature', state: '21', attributes: { release_url: 'https://github.com/owner/repo' } },
       null,
     ]);
@@ -74,6 +77,7 @@ describe('Home Assistant connections: domain', () => {
 describe('Home Assistant connections: API', () => {
   let app: App;
   let store: RepositoryStore;
+  let source: FakeSource;
   let baseUrl: URL;
   /** What the fake Home Assistant answers `GET /api/states` with. */
   let states: unknown[];
@@ -81,6 +85,14 @@ describe('Home Assistant connections: API', () => {
   /** `state` of `GET /api/config`: `RUNNING`, or e.g. `NOT_RUNNING` while Home Assistant starts. */
   let haState: string;
   let requests: { url: string; authorization: string | null }[];
+  /** Bodies of the `update.install` calls the fake Home Assistant got. */
+  let installs: { entity_id: string; backup?: boolean }[];
+  let installFailure: Response | null;
+  /** How many reads of a single state fail first (Home Assistant restarting). */
+  let unreachable: number;
+  /** Restart calls the fake Home Assistant got, and how many reads of all states fail after one. */
+  let restarts: number;
+  let statesDown: number;
 
   const requestedUrls = () => requests.map((r) => r.url);
 
@@ -90,8 +102,43 @@ describe('Home Assistant connections: API', () => {
     if (authorization !== `Bearer ${TOKEN}`) {
       return new Response('401: Unauthorized', { status: 401 });
     }
-    if (new URL(input).pathname === '/api/config') {
+    const path = new URL(input).pathname;
+    const entities = states as { entity_id: string; state: string; attributes: Record<string, unknown> }[];
+    if (path === '/api/services/update/install') {
+      const body = JSON.parse(String(init?.body)) as { entity_id: string; backup?: boolean };
+      installs.push(body);
+      if (installFailure) return installFailure;
+      const entity = entities.find((e) => e.entity_id === body.entity_id);
+      if (entity) {
+        entity.state = 'off';
+        entity.attributes['installed_version'] = entity.attributes['latest_version'];
+      }
+      return Response.json([]);
+    }
+    if (path === '/api/services/homeassistant/restart') {
+      restarts++;
+      if (installFailure) return installFailure;
+      statesDown = 2;
+      return Response.json([]);
+    }
+    if (path === '/api/config') {
+      if (statesDown > 0) {
+        statesDown--;
+        throw new TypeError('fetch failed');
+      }
       return failure ?? Response.json({ state: haState });
+    }
+    if (path === '/api/states' && statesDown > 0) {
+      statesDown--;
+      throw new TypeError('fetch failed');
+    }
+    if (path.startsWith('/api/states/')) {
+      if (unreachable > 0) {
+        unreachable--;
+        throw new TypeError('fetch failed');
+      }
+      const entity = entities.find((e) => e.entity_id === decodeURIComponent(path.slice('/api/states/'.length)));
+      return entity ? Response.json(entity) : new Response('Entity not found', { status: 404 });
     }
     return failure ?? Response.json(states);
   };
@@ -115,6 +162,11 @@ describe('Home Assistant connections: API', () => {
     requests = [];
     failure = null;
     haState = 'RUNNING';
+    installs = [];
+    installFailure = null;
+    unreachable = 0;
+    restarts = 0;
+    statesDown = 0;
     states = [
       update('update.button_card_update', {
         title: 'Button Card',
@@ -132,14 +184,18 @@ describe('Home Assistant connections: API', () => {
       update('update.plug_firmware', { title: 'Plug firmware', installed_version: '1.0', latest_version: '1.1' }),
     ];
     store = new RepositoryStore(':memory:');
+    source = new FakeSource();
+    source.existing.add('custom-cards/button-card').add('owner/some-integration').add('other/repo');
+    source.releases = [release('v7.0.1', 2), release('v7.0.0', 1)];
     app = await buildApp({
       store,
       settings: new SettingsService(store, loadConfig({})),
-      source: new FakeSource(),
+      source,
       notifiers: [new RecordingNotifier()],
       log: silentLogger,
       auth: { requireAuth: false },
       homeAssistantFetch: fakeHomeAssistant,
+      homeAssistantPollMs: 1,
     });
     baseUrl = app.listen({ port: 0, hostname: '127.0.0.1' }).url;
   });
@@ -308,4 +364,269 @@ describe('Home Assistant connections: API', () => {
     assert.ok(backup.body.secretsOmitted.includes('Home Assistant connection "Home"'));
     assert.ok(!backup.text.includes(TOKEN));
   });
+  // --- Linking to watched repositories ---
+
+  const watch = async (repository: string) => (await request('POST', '/api/repositories', { repository })).body;
+  const repository = async (id: number) =>
+    (await request('GET', '/api/repositories')).body.find((r: { id: number }) => r.id === id);
+  const component = async (name: string) =>
+    (await request('GET', '/api/home-assistant')).body.components.find((c: { name: string }) => c.name === name);
+  const recheck = async () => {
+    const [connection] = (await request('GET', '/api/home-assistant/connections')).body;
+    await request('POST', `/api/home-assistant/connections/${connection.id}/check`);
+    await app.homeAssistant.idle();
+  };
+
+  it('offers a component of a repository that is not watched as a suggestion', async () => {
+    await addConnection();
+    const card = await component('Button Card');
+    assert.equal(card.repository, null);
+    assert.equal(card.suggestedRepository, 'custom-cards/button-card');
+    assert.equal(card.updateAvailable, null);
+    // Nothing is added to the watch list on its own.
+    assert.deepEqual((await request('GET', '/api/repositories')).body, []);
+  });
+
+  it('links a component to the watched repository it names and gives the repository its installed version', async () => {
+    const repo = await watch('custom-cards/button-card');
+    await addConnection();
+    const card = await component('Button Card');
+    assert.equal(card.repository.id, repo.id);
+    assert.equal(card.repository.latestVersion, 'v7.0.1');
+    assert.equal(card.suggestedRepository, null);
+    assert.equal(card.updateAvailable, true);
+
+    const dto = await repository(repo.id);
+    assert.equal(dto.installedVersion, 'v7.0.0');
+    assert.equal(dto.installedVersionSource, 'machine');
+    assert.deepEqual(dto.installedVersionApp, { kind: 'home-assistant', id: card.id, name: 'Button Card', machine: 'Home' });
+
+    // The next check carries the new version over (trigger), also when saved through another code path.
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];
+    await recheck();
+    assert.equal((await repository(repo.id)).installedVersion, 'v7.0.1');
+    assert.equal((await component('Button Card')).updateAvailable, false);
+  });
+
+  it('gives a repository added later the version Home Assistant already reported', async () => {
+    await addConnection();
+    const repo = await watch('custom-cards/button-card');
+    assert.equal(repo.installedVersion, 'v7.0.0');
+    assert.equal(repo.installedVersionApp.kind, 'home-assistant');
+    assert.equal((await component('Button Card')).suggestedRepository, null);
+  });
+
+  it('does not take a commit hash as the installed version', async () => {
+    const repo = await watch('owner/some-integration');
+    await addConnection();
+    const dto = await repository(repo.id);
+    assert.equal(dto.installedVersion, null);
+    assert.equal(dto.installedVersionApp, null);
+    const integration = await component('Some integration');
+    assert.equal(integration.repository.id, repo.id);
+    assert.equal(integration.updateAvailable, null);
+  });
+
+  it('keeps a version URL or another source of a repository', async () => {
+    const repo = await watch('custom-cards/button-card');
+    await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionUrl: 'https://app.test/version' });
+    await addConnection();
+    const dto = await repository(repo.id);
+    assert.equal(dto.installedVersionApp, null);
+    assert.equal(dto.installedVersionUrl, 'https://app.test/version');
+  });
+
+  it('falls back to the last version when the component or its connection is gone', async () => {
+    const repo = await watch('custom-cards/button-card');
+    const { body: connection } = await addConnection();
+    states = [];
+    await recheck();
+    let dto = await repository(repo.id);
+    assert.equal(dto.installedVersion, 'v7.0.0');
+    assert.equal(dto.installedVersionApp, null);
+    assert.match(dto.installedVersionError, /removed from Home Assistant/);
+
+    // Back again: read from Home Assistant once more; removing the connection drops the source with its components.
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v7.0.1', latest_version: 'v7.0.1', release_url: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1' })];
+    await recheck();
+    assert.equal((await repository(repo.id)).installedVersionApp.kind, 'home-assistant');
+    await request('DELETE', `/api/home-assistant/connections/${connection.id}`);
+    dto = await repository(repo.id);
+    assert.equal(dto.installedVersion, 'v7.0.1');
+    assert.equal(dto.installedVersionApp, null);
+  });
+
+  it('drops the source when the entity names another repository', async () => {
+    const repo = await watch('custom-cards/button-card');
+    await addConnection();
+    states = [update('update.button_card_update', { title: 'Button Card', installed_version: 'v8.0.0', latest_version: 'v8.0.0', release_url: 'https://github.com/other/repo/releases/tag/v8.0.0' })];
+    await recheck();
+    const dto = await repository(repo.id);
+    assert.equal(dto.installedVersion, 'v7.0.0');
+    assert.equal(dto.installedVersionApp, null);
+    assert.match(dto.installedVersionError, /no longer names this repository/);
+  });
+
+  it('lists components as installed-version sources and refuses one that names another repository', async () => {
+    const repo = await watch('custom-cards/button-card');
+    const other = await watch('other/repo');
+    await addConnection();
+    const card = await component('Button Card');
+    const groups = (await request('GET', '/api/machine-apps')).body;
+    const group = groups.find((g: { machine: { kind: string } }) => g.machine.kind === 'home-assistant');
+    assert.equal(group.machine.name, 'Home');
+    assert.deepEqual(
+      group.apps.map((a: Record<string, unknown>) => [a['kind'], a['name'], a['repository']]),
+      [
+        ['home-assistant', 'Button Card', 'custom-cards/button-card'],
+        ['home-assistant', 'Home Assistant Core', null],
+        ['home-assistant', 'Some integration', null],
+      ],
+    );
+    const refused = await request('PUT', `/api/repositories/${other.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
+    assert.equal(refused.status, 400);
+
+    // Stopped and chosen again by hand in the repository's settings.
+    await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: null });
+    assert.equal((await repository(repo.id)).installedVersionApp, null);
+    const chosen = await request('PUT', `/api/repositories/${repo.id}`, { includePrereleases: false, isEnabled: true, installedVersionApp: { kind: 'home-assistant', id: card.id } });
+    assert.equal(chosen.status, 200);
+    assert.equal(chosen.body.installedVersionApp.kind, 'home-assistant');
+  });
+
+  it('counts components and updates in the status summary', async () => {
+    await watch('custom-cards/button-card');
+    await addConnection();
+    const status = (await request('GET', '/api/status')).body;
+    // Button Card: newer release of the watched repository and a newer version in Home Assistant – counted once.
+    assert.deepEqual(status.homeAssistant, { total: 3, updatesAvailable: 1 });
+  });
+
+  // --- Installing ---
+
+  const install = async (name: string, payload: Record<string, unknown> = {}) => {
+    const response = await request('POST', `/api/home-assistant/components/${(await component(name)).id}/install`, payload);
+    await app.homeAssistant.idle();
+    return response;
+  };
+
+  it('only installs with installing switched on for the connection', async () => {
+    const { body: connection } = await addConnection();
+    assert.equal(connection.installEnabled, false);
+    assert.match((await component('Button Card')).installBlocker, /switched off for this connection/);
+    const refused = await install('Button Card');
+    assert.equal(refused.status, 409);
+    assert.deepEqual(installs, []);
+  });
+
+  it('installs the update Home Assistant offers and carries the new version over', async () => {
+    const repo = await watch('custom-cards/button-card');
+    await addConnection({ installEnabled: true });
+    const card = await component('Button Card');
+    assert.equal(card.installBlocker, null);
+    // Nothing to install, or only announced: refused.
+    assert.equal((await component('Home Assistant Core')).installBlocker, null);
+    assert.equal((await install('Home Assistant Core')).status, 409);
+
+    const started = await install('Button Card', { backup: true });
+    assert.equal(started.status, 202);
+    assert.equal(started.body.isInstalling, true);
+    // The entity does not offer a backup, so none is asked for.
+    assert.deepEqual(installs, [{ entity_id: 'update.button_card_update' }]);
+    const after = await component('Button Card');
+    assert.equal(after.installedVersion, 'v7.0.1');
+    assert.equal(after.homeAssistantUpdate, false);
+    assert.equal(after.isInstalling, false);
+    assert.equal(after.installError, null);
+    assert.equal((await repository(repo.id)).installedVersion, 'v7.0.1');
+  });
+
+  it('asks for a backup when the entity supports one', async () => {
+    states = [
+      update('update.addon_update', { title: 'Add-on', installed_version: '1.0', latest_version: '1.1', release_url: 'https://github.com/owner/addon/releases/tag/1.1', supported_features: 1 | 8 }, 'on'),
+    ];
+    await addConnection({ installEnabled: true });
+    assert.equal((await component('Add-on')).supportsBackup, true);
+    assert.equal((await install('Add-on', { backup: true })).status, 202);
+    assert.deepEqual(installs, [{ entity_id: 'update.addon_update', backup: true }]);
+  });
+
+  it('keeps the reason when Home Assistant refuses the installation', async () => {
+    await addConnection({ installEnabled: true });
+    installFailure = new Response('Update failed', { status: 500 });
+    assert.equal((await install('Button Card')).status, 202);
+    const card = await component('Button Card');
+    assert.match(card.installError, /answered 500/);
+    assert.equal(card.installedVersion, 'v7.0.0');
+    // The next successful installation clears it.
+    installFailure = null;
+    await install('Button Card');
+    assert.equal((await component('Button Card')).installError, null);
+  });
+
+  it('says that installing needs an administrator when Home Assistant refuses it', async () => {
+    await addConnection({ installEnabled: true });
+    // Reading works for any user; `update.install` is admin-only in Home Assistant.
+    installFailure = new Response('401: Unauthorized', { status: 401 });
+    assert.equal((await install('Button Card')).status, 202);
+    assert.match((await component('Button Card')).installError, /user with administrator rights/);
+  });
+
+  it('waits for Home Assistant Core to come back after its update', async () => {
+    const core = (states as { entity_id: string; state: string; attributes: Record<string, unknown> }[])[2]!;
+    core.state = 'on';
+    core.attributes['latest_version'] = '2026.11.4';
+    await addConnection({ installEnabled: true });
+    unreachable = 3;
+    assert.equal((await install('Home Assistant Core')).status, 202);
+    const after = await component('Home Assistant Core');
+    assert.equal(after.installedVersion, '2026.11.4');
+    assert.equal(after.installError, null);
+    assert.equal(unreachable, 0);
+  });
+
+  it('switches installing on and off in the connection', async () => {
+    const { body: connection } = await addConnection();
+    const on = await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: HA_URL, installEnabled: true });
+    assert.equal(on.body.installEnabled, true);
+    assert.equal((await component('Button Card')).installBlocker, null);
+    // Omitted = kept.
+    const kept = await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: HA_URL });
+    assert.equal(kept.body.installEnabled, true);
+  });
+
+  it('restarts Home Assistant and waits until it answers again', async () => {
+    const { body: connection } = await addConnection();
+    const path = `/api/home-assistant/connections/${connection.id}/restart`;
+    // Only with installing switched on.
+    assert.equal((await request('POST', path)).status, 409);
+    assert.equal(restarts, 0);
+
+    await request('PUT', `/api/home-assistant/connections/${connection.id}`, { name: 'Home', url: HA_URL, installEnabled: true });
+    const started = await request('POST', path);
+    assert.equal(started.status, 202);
+    assert.equal(started.body.isRestarting, true);
+    await app.homeAssistant.idle();
+    assert.equal(restarts, 1);
+    assert.equal(statesDown, 0);
+    const [after] = (await request('GET', '/api/home-assistant/connections')).body;
+    assert.equal(after.isRestarting, false);
+    assert.equal(after.lastError, null);
+
+    // Answering, but still starting: waits for RUNNING before reading, so nothing is lost.
+    haState = 'NOT_RUNNING';
+    setTimeout(() => (haState = 'RUNNING'), 30);
+    await request('POST', path);
+    await app.homeAssistant.idle();
+    const overview = (await request('GET', '/api/home-assistant')).body;
+    assert.equal(overview.components.length, 3);
+    assert.equal(overview.connections[0].lastError, null);
+
+    // A user without administrator rights may not restart.
+    installFailure = new Response('401: Unauthorized', { status: 401 });
+    await request('POST', path);
+    await app.homeAssistant.idle();
+    assert.match((await request('GET', '/api/home-assistant/connections')).body[0].lastError, /refused to restart/);
+  });
+
 });

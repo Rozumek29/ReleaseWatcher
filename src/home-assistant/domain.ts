@@ -19,6 +19,8 @@ export interface HomeAssistantConnection {
   token: string;
   /** Disabled connections are skipped by scheduled checks. */
   isEnabled: boolean;
+  /** Updates may be installed from ReleaseWatcher (`update.install`); off = they are only read. */
+  installEnabled: boolean;
   /** When the update entities were last read; null = not yet. */
   lastCheckedAt: string | null;
   /** Why the last check failed; null = it worked (or none ran yet). */
@@ -44,10 +46,18 @@ export interface HomeAssistantComponent {
   releaseUrl: string | null;
   /** Repository named by the entity as its lower-case `fullName()`. */
   repository: string;
+  /** The entity can make a backup before installing (`backup: true`). */
+  supportsBackup: boolean;
+  /** Why the last installation from ReleaseWatcher failed; null = it worked (or none ran). */
+  installError: string | null;
+  /** When the entity was last read; null = before this was stored. */
+  lastSeenAt: string | null;
+  /** The watched repository with that name – a component is linked to it without any setting; null = not watched. */
+  repositoryId: number | null;
 }
 
 /** A component as read from the states, before it is stored. */
-export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId'>;
+export type ReadComponent = Omit<HomeAssistantComponent, 'id' | 'connectionId' | 'lastSeenAt' | 'repositoryId' | 'installError'>;
 
 /** Longest name accepted for a connection. */
 export const MAX_NAME_LENGTH = 100;
@@ -57,6 +67,10 @@ export const MAX_TOKEN_LENGTH = 1000;
 /** Home Assistant Core links its release notes page instead of a repository. */
 export const CORE_ENTITY_ID = 'update.home_assistant_core_update';
 export const CORE_REPOSITORY = 'home-assistant/core';
+
+/** `UpdateEntityFeature.INSTALL` and `.BACKUP` of Home Assistant (`supported_features` of an update entity). */
+const FEATURE_INSTALL = 1;
+const FEATURE_BACKUP = 8;
 
 const str = (value: unknown): string | null => (typeof value === 'string' && value.trim() ? value.trim() : null);
 
@@ -103,8 +117,9 @@ export function entityRepository(entityId: string, releaseUrl: string | null): s
 }
 
 /**
- * Maps `GET /api/states` to the components: every update entity that names a repository, whether an update is pending
- * or not. Sorted by name.
+ * Maps `GET /api/states` to the components: every update entity Home Assistant can install that names a repository,
+ * whether an update is pending or not – one it only announces is about something running elsewhere (an integration
+ * reporting the version of its server) and left out. Sorted by name.
  */
 export function componentsFromStates(states: unknown): ReadComponent[] {
   if (!Array.isArray(states)) {
@@ -125,7 +140,12 @@ export function componentsFromStates(states: unknown): ReadComponent[] {
     if (!repository) {
       continue;
     }
+    const features = attributes['supported_features'];
+    if (typeof features === 'number' && (features & FEATURE_INSTALL) === 0) {
+      continue;
+    }
     result.push({
+      supportsBackup: typeof features === 'number' && (features & FEATURE_BACKUP) !== 0,
       entityId,
       name: (str(attributes['title']) ?? str(attributes['friendly_name']) ?? entityId).slice(0, 200),
       installedVersion: str(attributes['installed_version'])?.slice(0, 100) ?? null,
@@ -144,3 +164,21 @@ const COMMIT_HASH = /^(?=[0-9a-f]*[a-f])[0-9a-f]{7,40}$/i;
 /** Whether a version can be compared with releases; a commit hash can only be shown. */
 export const isComparableVersion = (version: string | null): boolean =>
   version !== null && !COMMIT_HASH.test(version) && parseVersion(version) !== null;
+
+/**
+ * Why a component's update cannot be installed from ReleaseWatcher; null when it can. Installing is opt-in per
+ * connection, and there must be a version Home Assistant would install (entities it only announces are no components).
+ */
+export function installBlocker(
+  component: Pick<HomeAssistantComponent, 'hasUpdate'>,
+  connection: Pick<HomeAssistantConnection, 'installEnabled'>,
+): string | null {
+  if (!connection.installEnabled) {
+    return 'Installing from ReleaseWatcher is switched off for this connection – install it in Home Assistant.';
+  }
+  // What Home Assistant reports, never a comparison of versions: it would offer a downgrade from a pre-release.
+  if (!component.hasUpdate) {
+    return 'Home Assistant has no update for this component.';
+  }
+  return null;
+}

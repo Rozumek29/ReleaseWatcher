@@ -93,7 +93,7 @@ export type InstalledVersionSource = 'none' | 'url' | 'manual' | 'machine';
 
 /** An app on a machine: an application of a target or a Docker container. */
 export interface MachineAppRef {
-  kind: 'app' | 'docker';
+  kind: 'app' | 'docker' | 'home-assistant';
   id: number;
 }
 
@@ -116,7 +116,7 @@ export interface MachineAppOption extends MachineAppRef {
 
 /** A machine (target) or Docker connection with its apps. */
 export interface MachineAppGroup {
-  machine: { kind: 'target' | 'endpoint'; id: number; name: string };
+  machine: { kind: 'target' | 'endpoint' | 'home-assistant'; id: number; name: string };
   apps: MachineAppOption[];
 }
 
@@ -566,6 +566,11 @@ export interface AppStatus {
   };
   /** Docker / Podman containers shown (not ignored) and those with a newer image or release. */
   docker?: {
+    total: number;
+    updatesAvailable: number;
+  };
+  /** Home Assistant components read and those with a newer release or a newer version known to Home Assistant. */
+  homeAssistant?: {
     total: number;
     updatesAvailable: number;
   };
@@ -1174,10 +1179,14 @@ export interface HomeAssistantConnection {
   /** The access token, masked – it is never returned in full. */
   tokenMasked: string;
   isEnabled: boolean;
+  /** Updates may be installed from ReleaseWatcher; off = they are only read. */
+  installEnabled: boolean;
   lastCheckedAt: string | null;
   lastError: string | null;
   createdAt: string;
   isChecking: boolean;
+  /** Home Assistant is restarting (asked for from here, or while Core updates). */
+  isRestarting: boolean;
 }
 
 /** An update entity of a connection that names a repository (Core, an add-on, an integration, a card …). */
@@ -1193,10 +1202,26 @@ export interface HomeAssistantComponent {
   releaseUrl: string | null;
   /** Repository the entity names, lower-case (`owner/name`, or `host/owner/name` outside GitHub). */
   repositoryName: string;
+  /** When the entity was last read. */
+  lastSeenAt: string | null;
   /** False for a commit hash (a repository without releases). */
   versionComparable: boolean;
   /** Home Assistant knows a version other than the installed one. */
   homeAssistantUpdate: boolean;
+  /** The entity can make a backup before installing. */
+  supportsBackup: boolean;
+  /** Why that update cannot be installed from ReleaseWatcher; null = it can (or there is none). */
+  installBlocker: string | null;
+  /** The update is being installed right now. */
+  isInstalling: boolean;
+  /** Why the last installation from ReleaseWatcher failed. */
+  installError: string | null;
+  /** The watched repository the component names; null = not watched. */
+  repository: { id: number; fullName: string; url: string; latestVersion: string | null; iconUrls: string[] } | null;
+  /** Repository the component names that is not watched yet (offered as "Watch"); null = already watched. */
+  suggestedRepository: string | null;
+  /** The repository has a newer release than the installed version; null = not watched or not comparable. */
+  updateAvailable: boolean | null;
 }
 
 export interface HomeAssistantOverview {
@@ -1212,4 +1237,5 @@ export interface HomeAssistantConnectionRequest {
   url: string;
   token?: string | null;
   isEnabled?: boolean;
+  installEnabled?: boolean;
 }

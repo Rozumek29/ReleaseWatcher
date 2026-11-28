@@ -5,7 +5,7 @@
         <app-icon name="home" [size]="22" />
         <div class="head-text">
           <h2 id="home-assistant-dialog-title">{{ d.connection ? 'Edit ' + d.connection.name : 'Add Home Assistant' }}</h2>
-          <p>ReleaseWatcher only reads the update entities – it changes nothing in Home Assistant.</p>
+          <p>ReleaseWatcher reads the update entities – it changes nothing in Home Assistant unless installing is switched on below.</p>
         </div>
         <button type="button" class="icon-btn" (click)="close()" aria-label="Close" title="Close">
           <app-icon name="close" />
@@ -64,7 +64,8 @@
               }
             }
             Home Assistant → your profile → <em>Security</em> → <em>Long-lived access tokens</em>. Such a token cannot be
-            limited to reading, so create it for a user without administrator rights.
+            limited to reading, so create it for a user without administrator rights – unless updates are to be
+            installed from ReleaseWatcher (below).
           </span>
         </div>
 
@@ -94,6 +95,22 @@
         @if (d.connection) {
           <app-switch [checked]="isEnabled()" label="Check on schedule" [showLabel]="true" (toggled)="isEnabled.set(!isEnabled())" />
         }
+
+        <div class="field">
+          <app-switch
+            [checked]="installEnabled()"
+            label="Install updates from ReleaseWatcher"
+            [showLabel]="true"
+            (toggled)="installEnabled.set(!installEnabled())"
+          />
+          <span class="hint">
+            Off by default: updates are only read. When on, an <strong>Install</strong> button appears next to updates Home
+            Assistant offers – it installs exactly that version, with a backup first where Home Assistant supports one.
+            Home Assistant lets only administrators install updates and restart, so this needs the token of a user
+            <strong>with</strong> administrator rights. Custom integrations need a restart of Home Assistant afterwards –
+            the connection's <strong>Restart</strong> button on the Home Assistant page does it.
+          </span>
+        </div>
       </div>
 
       <footer class="dialog-foot">

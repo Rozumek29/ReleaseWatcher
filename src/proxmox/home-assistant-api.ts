@@ -15,6 +15,8 @@ const REQUEST_TIMEOUT_MS = 30_000;
 /** Thrown for failed API requests; the message is meant for the user (it never contains the token). */
 export class HomeAssistantApiError extends Error {
   override name = 'HomeAssistantApiError';
+  /** True when Home Assistant answered 401/403: the token is wrong, or its user may not do this. */
+  unauthorized = false;
 }
 
 /**
@@ -67,8 +69,17 @@ export class HomeAssistantApi {
   }
 
   /** Calls `update.install` for an entity (Home Assistant may answer before the installation has finished). */
-  async install(entityId: string, timeoutMs: number): Promise<void> {
-    await this.request('POST', '/api/services/update/install', { entity_id: entityId }, timeoutMs);
+  async install(entityId: string, timeoutMs: number, backup = false): Promise<void> {
+    await this.request('POST', '/api/services/update/install', { entity_id: entityId, ...(backup ? { backup: true } : {}) }, timeoutMs);
+  }
+
+  /** Calls `homeassistant.restart`. Home Assistant may cut the connection while it goes down – that is not an error. */
+  async restart(timeoutMs: number): Promise<void> {
+    try {
+      await this.request('POST', '/api/services/homeassistant/restart', {}, timeoutMs);
+    } catch (error) {
+      if (error instanceof HomeAssistantApiError && error.unauthorized) throw error;
+    }
   }
 
   private async request(method: 'GET' | 'POST', path: string, body?: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<unknown> {
@@ -88,7 +99,9 @@ export class HomeAssistantApi {
       throw new HomeAssistantApiError(`Could not reach Home Assistant at ${this.connection.url} – ${reason}.`);
     }
     if (response.status === 401 || response.status === 403) {
-      throw new HomeAssistantApiError('Home Assistant rejected the access token – create a new long-lived access token in your profile.');
+      const error = new HomeAssistantApiError('Home Assistant rejected the access token – create a new long-lived access token in your profile.');
+      error.unauthorized = true;
+      throw error;
     }
     if (!response.ok) {
       const text = (await response.text().catch(() => '')).trim().slice(0, 200);

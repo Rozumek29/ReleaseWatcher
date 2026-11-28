@@ -48,3 +48,33 @@ a.badge {
     text-decoration: underline;
   }
 }
+
+.installing {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.confirm {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.confirm-text {
+  font-size: 0.85rem;
+}
+
+.backup {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.85rem;
+}
+
+.install-error {
+  flex-basis: 100%;
+  margin-top: 2px;
+}
+

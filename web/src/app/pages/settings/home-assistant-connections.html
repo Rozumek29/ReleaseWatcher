@@ -22,6 +22,9 @@
               @if (!c.isEnabled) {
                 <span class="badge">Paused</span>
               }
+              @if (c.installEnabled) {
+                <span class="badge" title="Updates can be installed from the Home Assistant page">Installs updates</span>
+              }
               @if (c.lastError) {
                 <span class="badge badge-danger"><app-icon name="alert" [size]="12" /> Error</span>
               }
@@ -71,8 +74,9 @@
       <div class="skeleton row-skeleton"></div>
     }
     <p class="hint">
-      Only reading is needed and nothing is changed in Home Assistant. A long-lived access token cannot be limited to
-      reading, so create it for a user without administrator rights. What was read is shown on the
+      Nothing is changed in Home Assistant unless you switch on <em>Install updates from ReleaseWatcher</em> for a
+      connection. A long-lived access token cannot be limited to reading, so create it for a user without administrator
+      rights; only installing needs an administrator's token. What was read is shown on the
       <strong>Home Assistant</strong> page.
     </p>
   </div>

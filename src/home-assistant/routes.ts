@@ -5,7 +5,7 @@ import { normalizeHomeAssistantUrl } from '../proxmox/home-assistant.ts';
 import { maskSecret } from '../settings.ts';
 import { body, parseId, readBody, z } from '../validation.ts';
 import { type HomeAssistantConnection, MAX_NAME_LENGTH, MAX_TOKEN_LENGTH } from './domain.ts';
-import { ConnectionBusyError, type HomeAssistantService } from './service.ts';
+import { ConnectionBusyError, type HomeAssistantService, InstallBlockedError } from './service.ts';
 import type { HomeAssistantStore } from './store.ts';
 
 export interface HomeAssistantRoutesDeps {
@@ -23,6 +23,13 @@ const connectionSchema = body({
   /** Omitted or empty when editing = keep the saved token. */
   token: z.string().max(MAX_TOKEN_LENGTH).nullish(),
   isEnabled: z.boolean().optional(),
+  /** Allow installing updates from ReleaseWatcher (off by default). */
+  installEnabled: z.boolean().optional(),
+});
+
+const installSchema = body({
+  /** Ask Home Assistant for a backup first (ignored when the entity does not support it). */
+  backup: z.boolean().optional(),
 });
 
 const testSchema = body({
@@ -58,10 +65,12 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
     url: c.url,
     tokenMasked: maskSecret(c.token, 4),
     isEnabled: c.isEnabled,
+    installEnabled: c.installEnabled,
     lastCheckedAt: c.lastCheckedAt,
     lastError: c.lastError,
     createdAt: c.createdAt,
     isChecking: service.isChecking(c.id),
+    isRestarting: service.isRestarting(c.id),
   });
 
   const overview = () => ({
@@ -94,6 +103,10 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
         const token = body.token?.trim();
         if (!token) return validationProblem('token', TOKEN_HINT);
         const connection = store.addConnection(input.name, input.url, token);
+        if (body.installEnabled) {
+          connection.installEnabled = true;
+          store.saveConnection(connection);
+        }
         service.startCheck(connection);
         return Response.json(connectionDto(connection), {
           status: 201,
@@ -134,7 +147,12 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
           return validationProblem('token', 'Enter the access token again for the new address.');
         }
         const changed = changedUrl || (token !== null && token !== connection.token);
-        Object.assign(connection, { ...input, token: token ?? connection.token, isEnabled: body.isEnabled ?? connection.isEnabled });
+        Object.assign(connection, {
+          ...input,
+          token: token ?? connection.token,
+          isEnabled: body.isEnabled ?? connection.isEnabled,
+          installEnabled: body.installEnabled ?? connection.installEnabled,
+        });
         if (changedUrl) {
           // Another instance: what was read before is not there.
           Object.assign(connection, { lastError: null, lastCheckedAt: null });
@@ -151,6 +169,37 @@ export function homeAssistantRoutes(deps: HomeAssistantRoutesDeps) {
         if (!connection) return problem(404, 'Home Assistant connection not found.');
         store.deleteConnection(connection.id);
         return new Response(null, { status: 204 });
+      },
+    },
+    // Installs the update Home Assistant offers for a component (only with installing switched on for its connection).
+    '/api/home-assistant/components/:id/install': {
+      POST: async (req: Bun.BunRequest<'/api/home-assistant/components/:id/install'>) => {
+        const component = store.getComponent(parseId(req.params.id));
+        const body = await readBody(req, installSchema);
+        const connection = component ? store.getConnection(component.connectionId) : null;
+        if (!component || !connection) return problem(404, 'Home Assistant component not found.');
+        try {
+          service.startInstall(connection, component, body.backup ?? false);
+        } catch (error) {
+          if (error instanceof InstallBlockedError || error instanceof ConnectionBusyError) return problem(409, error.message);
+          throw error;
+        }
+        const [view] = service.describe([component]);
+        return Response.json(view, { status: 202 });
+      },
+    },
+    // Restarts Home Assistant (only with installing switched on for the connection).
+    '/api/home-assistant/connections/:id/restart': {
+      POST: (req: Bun.BunRequest<'/api/home-assistant/connections/:id/restart'>) => {
+        const connection = findConnection(req.params.id);
+        if (!connection) return problem(404, 'Home Assistant connection not found.');
+        try {
+          service.startRestart(connection);
+        } catch (error) {
+          if (error instanceof InstallBlockedError || error instanceof ConnectionBusyError) return problem(409, error.message);
+          throw error;
+        }
+        return Response.json(connectionDto(connection), { status: 202 });
       },
     },
     '/api/home-assistant/connections/:id/check': {

@@ -7,10 +7,12 @@ export const haConnection = (overrides: Partial<HomeAssistantConnection> = {}): 
   url: 'http://homeassistant.local:8123',
   tokenMasked: 'eyJh…k3Xw',
   isEnabled: true,
+  installEnabled: false,
   lastCheckedAt: '2026-01-01T00:00:00Z',
   lastError: null,
   createdAt: '2026-01-01T00:00:00Z',
   isChecking: false,
+  isRestarting: false,
   ...overrides,
 });
 
@@ -23,8 +25,16 @@ export const haComponent = (overrides: Partial<HomeAssistantComponent> = {}): Ho
   latestVersion: 'v7.0.1',
   releaseUrl: 'https://github.com/custom-cards/button-card/releases/tag/v7.0.1',
   repositoryName: 'custom-cards/button-card',
+  lastSeenAt: '2026-01-01T00:00:00Z',
   versionComparable: true,
   homeAssistantUpdate: true,
+  supportsBackup: false,
+  installBlocker: 'Installing from ReleaseWatcher is switched off for this connection – install it in Home Assistant.',
+  isInstalling: false,
+  installError: null,
+  repository: null,
+  suggestedRepository: 'custom-cards/button-card',
+  updateAvailable: null,
   ...overrides,
 });
 
@@ -40,6 +50,7 @@ export const haOverview = (overrides: Partial<HomeAssistantOverview> = {}): Home
       latestVersion: '2026.11.3',
       releaseUrl: 'https://www.home-assistant.io/latest-release-notes/',
       repositoryName: 'home-assistant/core',
+      suggestedRepository: 'home-assistant/core',
       homeAssistantUpdate: false,
     }),
     haComponent({
@@ -50,6 +61,7 @@ export const haOverview = (overrides: Partial<HomeAssistantOverview> = {}): Home
       latestVersion: 'a358575',
       releaseUrl: 'https://github.com/owner/some-integration',
       repositoryName: 'owner/some-integration',
+      suggestedRepository: 'owner/some-integration',
       versionComparable: false,
       homeAssistantUpdate: false,
     }),

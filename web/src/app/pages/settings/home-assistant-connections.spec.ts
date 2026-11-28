@@ -69,7 +69,7 @@ describe('HomeAssistantConnections', () => {
     submit();
     const add = http.expectOne({ method: 'POST', url: '/api/home-assistant/connections' });
     // No name given: the host of the address.
-    expect(add.request.body).toEqual({ name: 'homeassistant.local', url: 'http://homeassistant.local:8123', token: 'secret-token', isEnabled: true });
+    expect(add.request.body).toEqual({ name: 'homeassistant.local', url: 'http://homeassistant.local:8123', token: 'secret-token', isEnabled: true, installEnabled: false });
     add.flush(haConnection({ name: 'homeassistant.local', isChecking: true }));
     await settle(fixture);
     http.expectOne('/api/home-assistant/connections').flush([haConnection({ name: 'homeassistant.local' })]);
@@ -92,7 +92,7 @@ describe('HomeAssistantConnections', () => {
     await settle(fixture);
     submit();
     const put = http.expectOne({ method: 'PUT', url: '/api/home-assistant/connections/1' });
-    expect(put.request.body).toEqual({ name: 'Flat', url: 'http://homeassistant.local:8123', token: null, isEnabled: true });
+    expect(put.request.body).toEqual({ name: 'Flat', url: 'http://homeassistant.local:8123', token: null, isEnabled: true, installEnabled: false });
     put.flush({ status: 400, title: 'One or more validation errors occurred.', errors: { url: ['Enter a full URL.'] } }, { status: 400, statusText: 'Bad Request' });
     await settle(fixture);
     expect(el.querySelector('.error')?.textContent).toContain('Enter a full URL.');
@@ -140,5 +140,22 @@ describe('HomeAssistantConnections', () => {
     await settle(fixture);
     expect(el.textContent).not.toContain('Checking…');
   }, 10_000);
+  it('switches installing on for a connection', async () => {
+    const { http, fixture, el, button, submit } = await setup([haConnection()]);
+    expect(el.textContent).not.toContain('Installs updates');
+    button('Edit').click();
+    await settle(fixture);
+    const toggle = [...el.querySelectorAll<HTMLElement>('app-switch')].find((x) => x.textContent?.includes('Install updates from ReleaseWatcher'))!;
+    toggle.querySelector<HTMLElement>('button, input')!.click();
+    await settle(fixture);
+    submit();
+    const put = http.expectOne({ method: 'PUT', url: '/api/home-assistant/connections/1' });
+    expect(put.request.body.installEnabled).toBe(true);
+    put.flush(haConnection({ installEnabled: true }));
+    await settle(fixture);
+    http.expectOne('/api/home-assistant/connections').flush([haConnection({ installEnabled: true })]);
+    await settle(fixture);
+    expect(el.textContent).toContain('Installs updates');
+  });
 
 });

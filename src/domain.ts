@@ -111,9 +111,12 @@ export interface RepositoryGroup {
   repositoryCount: number;
 }
 
-/** An app on a machine: an application of a target (`target_apps`) or a Docker container (`docker_containers`). */
+/**
+ * An app on a machine: an application of a target (`target_apps`), a Docker container (`docker_containers`) or a
+ * component of a Home Assistant connection (`home_assistant_components`).
+ */
 export interface MachineAppRef {
-  kind: 'app' | 'docker';
+  kind: 'app' | 'docker' | 'home-assistant';
   id: number;
 }
 

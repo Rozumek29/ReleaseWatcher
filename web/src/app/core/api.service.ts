@@ -20,6 +20,7 @@ import {
   DockerEndpoint,
   DockerEndpointRequest,
   DockerOverview,
+  HomeAssistantComponent,
   HomeAssistantConnection,
   HomeAssistantConnectionRequest,
   HomeAssistantOverview,
@@ -343,6 +344,16 @@ export class ApiService {
   /** Reads a Home Assistant without saving anything; `id` = use the saved token of that connection when none is given. */
   testHomeAssistantConnection(request: { url: string; token?: string | null; id?: number | null }): Observable<{ components: number }> {
     return this.http.post<{ components: number }>(`${this.baseUrl}/home-assistant/connections/test`, request);
+  }
+
+  /** Installs the update Home Assistant offers for a component (`backup` = ask for a backup first). */
+  installHomeAssistantComponent(id: number, backup: boolean): Observable<HomeAssistantComponent> {
+    return this.http.post<HomeAssistantComponent>(`${this.baseUrl}/home-assistant/components/${id}/install`, { backup });
+  }
+
+  /** Restarts Home Assistant (only with installing switched on for the connection). */
+  restartHomeAssistant(id: number): Observable<HomeAssistantConnection> {
+    return this.http.post<HomeAssistantConnection>(`${this.baseUrl}/home-assistant/connections/${id}/restart`, {});
   }
 
   checkHomeAssistantConnection(id: number): Observable<HomeAssistantConnection> {

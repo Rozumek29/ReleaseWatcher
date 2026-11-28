@@ -254,7 +254,7 @@
                   <select id="version-machine" class="input" name="machine" [ngModel]="machine" (ngModelChange)="chooseMachine($event)">
                     <option value="" disabled>Choose a machine…</option>
                     @for (g of groups; track machineKey(g.machine)) {
-                      <option [value]="machineKey(g.machine)">{{ g.machine.name }}{{ g.machine.kind === 'endpoint' ? ' (Docker)' : '' }}</option>
+                      <option [value]="machineKey(g.machine)">{{ g.machine.name }}{{ g.machine.kind === 'endpoint' ? ' (Docker)' : g.machine.kind === 'home-assistant' ? ' (Home Assistant)' : '' }}</option>
                     }
                   </select>
                 </div>

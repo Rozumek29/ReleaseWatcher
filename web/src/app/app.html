@@ -84,6 +84,13 @@
                 <span class="count">{{ d.total }}</span>
               }
             }
+            @if (item.id === 'home-assistant' && statusService.status()?.homeAssistant; as h) {
+              @if (h.updatesAvailable > 0) {
+                <span class="count warning" [title]="h.updatesAvailable + ' with a newer version'">{{ h.updatesAvailable }}</span>
+              } @else if (h.total > 0) {
+                <span class="count">{{ h.total }}</span>
+              }
+            }
             @if (item.id === 'machines' && statusService.status()?.targets; as c) {
               @if (c.total > 0) {
                 <span class="count">{{ c.total }}</span>

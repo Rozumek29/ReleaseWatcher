@@ -57,6 +57,11 @@
         </button>
       }
     </div>
+    <div class="search">
+      <app-icon name="search" [size]="16" />
+      <label for="home-assistant-search" class="visually-hidden">Search components</label>
+      <input id="home-assistant-search" class="input" type="search" placeholder="Search" [value]="query()" (input)="query.set($any($event.target).value)" />
+    </div>
   </div>
 
   @for (card of cards(); track card.connection.id; let i = $index) {
@@ -71,7 +76,15 @@
           }
         </div>
         <div class="source-actions">
-          @if (card.connection.isChecking) {
+          @if (card.connection.isRestarting) {
+            <span class="muted small"><app-icon name="refresh" [size]="14" class="spin" /> Home Assistant is restarting…</span>
+          } @else if (confirmingRestart() === card.connection.id) {
+            <span class="confirm">
+              <span class="confirm-text">Restart Home Assistant?</span>
+              <button type="button" class="btn btn-sm" (click)="restart(card.connection)">Yes</button>
+              <button type="button" class="btn btn-sm btn-ghost" (click)="confirmingRestart.set(null)">No</button>
+            </span>
+          } @else if (card.connection.isChecking) {
             <span class="muted small"><app-icon name="refresh" [size]="14" class="spin" /> Checking…</span>
           } @else if (card.connection.lastCheckedAt) {
             <span class="muted small">checked {{ card.connection.lastCheckedAt | relativeTime: now() }}</span>
@@ -86,6 +99,18 @@
           >
             <app-icon name="refresh" [size]="16" />
           </button>
+          @if (card.connection.installEnabled) {
+            <button
+              type="button"
+              class="icon-btn"
+              (click)="confirmingRestart.set(card.connection.id)"
+              [disabled]="card.connection.isChecking || card.connection.isRestarting"
+              [attr.aria-label]="'Restart ' + card.connection.name"
+              title="Restart Home Assistant – e.g. to load an updated custom integration"
+            >
+              <app-icon name="power" [size]="16" />
+            </button>
+          }
           <a
             class="icon-btn"
             routerLink="/settings"
@@ -106,32 +131,65 @@
         @for (c of card.components; track c.id) {
           <div class="row">
             <span class="name" [title]="c.entityId">{{ c.name }}</span>
-            <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
-              {{ c.repositoryName }} <app-icon name="external" [size]="12" />
-            </a>
+            @if (c.repository; as repo) {
+              <a class="repository mono" [href]="repo.url" target="_blank" rel="noopener" title="Watched – releases of this repository are compared with the installed version">
+                <app-icon name="repo" [size]="12" /> {{ repo.fullName }}
+              </a>
+            } @else {
+              <a class="repository mono" [href]="repositoryLink(c.repositoryName)" target="_blank" rel="noopener">
+                {{ c.repositoryName }} <app-icon name="external" [size]="12" />
+              </a>
+            }
             <span class="versions mono">
               @if (c.installedVersion) {
                 {{ c.installedVersion }}
               } @else {
                 <span class="muted">version unknown</span>
               }
-              @if (c.homeAssistantUpdate) {
-                <span class="arrow">→</span> {{ c.latestVersion }}
+              @if (newerVersion(c); as newer) {
+                <span class="arrow">→</span> {{ newer }}
               }
             </span>
-            @if (c.homeAssistantUpdate) {
-              @if (c.releaseUrl) {
+            @if (hasUpdate(c)) {
+              @if (c.updateAvailable !== true && c.releaseUrl) {
                 <a class="badge badge-warning" [href]="c.releaseUrl" target="_blank" rel="noopener" title="Open the release Home Assistant links to">
                   Update available <app-icon name="external" [size]="12" />
                 </a>
               } @else {
-                <span class="badge badge-warning">Update available</span>
+                <span class="badge badge-warning" [title]="c.updateAvailable === true ? 'The watched repository has a newer release' : 'Home Assistant knows a newer version'">Update available</span>
               }
             } @else if (c.installedVersion) {
-              <span class="badge badge-success" title="Home Assistant knows no newer version">Up to date</span>
+              <span class="badge badge-success" [title]="c.repository ? 'No newer release of the watched repository' : 'Home Assistant knows no newer version'">Up to date</span>
             }
             @if (!c.versionComparable && c.installedVersion) {
               <span class="badge" title="A commit, not a release – it cannot be compared with the releases of the repository">Commit</span>
+            }
+            @if (c.suggestedRepository; as suggested) {
+              <button type="button" class="btn btn-sm btn-secondary" (click)="watch(c)" [disabled]="watching().has(c.id)" [title]="'Watch the releases of ' + suggested">
+                <app-icon name="plus" [size]="14" /> Watch
+              </button>
+            }
+            @if (c.isInstalling) {
+              <span class="muted small installing">
+                <app-icon name="refresh" [size]="14" class="spin" />
+                {{ card.connection.isRestarting ? 'Home Assistant is restarting…' : 'Installing ' + c.latestVersion + '…' }}
+              </span>
+            } @else if (confirming() === c.id) {
+              <span class="confirm">
+                <span class="confirm-text">Install {{ c.latestVersion }} in Home Assistant?</span>
+                @if (c.supportsBackup) {
+                  <label class="backup"><input type="checkbox" [checked]="backupFirst()" (change)="backupFirst.set($any($event.target).checked)" /> Backup first</label>
+                }
+                <button type="button" class="btn btn-sm" (click)="install(c)">Yes</button>
+                <button type="button" class="btn btn-sm btn-ghost" (click)="confirming.set(null)">No</button>
+              </span>
+            } @else if (canInstall(c)) {
+              <button type="button" class="btn btn-sm" (click)="askInstall(c)" [title]="'Install ' + c.latestVersion + ' in Home Assistant'">
+                <app-icon name="download" [size]="14" /> Install
+              </button>
+            }
+            @if (c.installError && !c.isInstalling) {
+              <div class="error-line install-error"><app-icon name="alert" [size]="14" /> <span>{{ c.installError }}</span></div>
             }
           </div>
         } @empty {
@@ -144,7 +202,15 @@
   } @empty {
     <div class="card empty">
       <h2>Nothing matches</h2>
-      <p>No component has an update.</p>
+      <p>
+        @if (query().trim()) {
+          No component matches the search.
+        } @else if (filter() === 'updates') {
+          No component has an update.
+        } @else {
+          Every component's repository is watched.
+        }
+      </p>
     </div>
   }
 }

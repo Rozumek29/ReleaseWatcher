@@ -36,6 +36,7 @@ export class HomeAssistantConnectionDialog {
   protected token = '';
   protected readonly showToken = signal(false);
   protected readonly isEnabled = signal(true);
+  protected readonly installEnabled = signal(false);
   protected readonly saving = signal(false);
   protected readonly testing = signal(false);
   /** Result of "Test": what was found, or why it failed. */
@@ -53,7 +54,8 @@ export class HomeAssistantConnectionDialog {
         this.url = data.connection?.url ?? '';
         this.token = '';
         this.isEnabled.set(data.connection?.isEnabled ?? true);
-        // Untracked: reading the switch here would make the effect run again – and reset the form – when it is toggled.
+        this.installEnabled.set(data.connection?.installEnabled ?? false);
+        // Untracked: reading the switches here would make the effect run again – and reset the form – when one is toggled.
         this.savedValues = untracked(() => this.values());
         this.showToken.set(false);
         this.testResult.set(null);
@@ -69,7 +71,7 @@ export class HomeAssistantConnectionDialog {
   }
 
   private values(): unknown {
-    return [this.name, this.url, this.token, this.isEnabled()];
+    return [this.name, this.url, this.token, this.isEnabled(), this.installEnabled()];
   }
 
   protected changed(): boolean {
@@ -114,7 +116,13 @@ export class HomeAssistantConnectionDialog {
     const data = this.data();
     if (!data) return;
     const url = this.url.trim();
-    const request = { name: this.name.trim() || hostOf(url), url, token: this.token.trim() || null, isEnabled: this.isEnabled() };
+    const request = {
+      name: this.name.trim() || hostOf(url),
+      url,
+      token: this.token.trim() || null,
+      isEnabled: this.isEnabled(),
+      installEnabled: this.installEnabled(),
+    };
     this.saving.set(true);
     this.errors.set({});
     this.saveError.set(null);
